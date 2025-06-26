@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Chrome user data directory
+/narada-user-data-dir/

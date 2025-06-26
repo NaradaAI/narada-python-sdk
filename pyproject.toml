@@ -5,8 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Zizheng Tai", email = "zizheng@narada.ai" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["playwright>=1.53.0"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+]
