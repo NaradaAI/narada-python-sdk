@@ -64,9 +64,7 @@ class Narada:
             )
 
             context = browser.contexts[0]
-            page = next(
-                p for p in context.pages if p.url == "https://app.narada.ai/initialize"
-            )
+            page = next(p for p in context.pages if p.url == initial_url)
 
             session_id_elem = page.locator("#narada-session-id")
             await session_id_elem.wait_for(state="attached", timeout=10_000)
