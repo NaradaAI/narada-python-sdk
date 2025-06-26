@@ -64,6 +64,9 @@ class Narada:
             )
 
             context = browser.contexts[0]
+
+            # The Chrome extension side panel also creates a page, so we need to find the right page
+            # in the main window.
             page = next(p for p in context.pages if p.url == initial_url)
 
             session_id_elem = page.locator("#narada-session-id")
