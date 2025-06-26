@@ -8,17 +8,33 @@ from playwright.async_api import async_playwright
 __version__ = "0.1.0"
 
 
-class ExtraArgs(TypedDict, total=False):
+class CreateSubprocessExtraArgs(TypedDict, total=False):
     creationflags: int
     start_new_session: bool
 
 
 class Narada:
     async def launch_browser(self) -> str:
+        # Starting from Chrome 136, the default Chrome data directory can no longer be debugged over
+        # CDP:
+        # - https://developer.chrome.com/blog/remote-debugging-port
+        # - https://github.com/browser-use/browser-use/issues/1520
+        user_data_dir = "./narada-user-data-dir"
         cdp_port = 9222
+        initial_url = "https://app.narada.ai/initialize"
+
+        program = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        args = [
+            f"--user-data-dir={user_data_dir}",
+            f"--remote-debugging-port={cdp_port}",
+            initial_url,
+            # TODO: These are needed if we don't use CDP but let Playwright manage the browser.
+            # "--profile-directory=Profile 1",
+            # "--disable-blink-features=AutomationControlled",
+        ]
 
         # OS-dependent arguments to create the browser process as a detached, independent process.
-        extra_args: ExtraArgs
+        extra_args: CreateSubprocessExtraArgs
         if sys.platform == "win32":
             extra_args = {
                 "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
@@ -29,14 +45,11 @@ class Narada:
                 "start_new_session": True,
             }
 
+        # Launch an independent browser process which will not be killed when the current program
+        # exits.
         browser_process = await asyncio.create_subprocess_exec(
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            f"--remote-debugging-port={cdp_port}",
-            "--user-data-dir=./narada-user-data-dir",
-            "https://app.narada.ai/initialize",
-            # TODO: These are needed if we don't use CDP but let Playwright manage the browser.
-            # "--profile-directory=Profile 1",
-            # "--disable-blink-features=AutomationControlled",
+            program,
+            *args,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
