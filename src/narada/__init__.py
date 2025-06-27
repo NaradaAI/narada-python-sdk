@@ -1,9 +1,10 @@
 import asyncio
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import TypedDict
 
-from playwright.async_api import async_playwright
+from playwright.async_api import ElementHandle, Page, async_playwright
 
 __version__ = "0.1.0"
 
@@ -13,21 +14,29 @@ class CreateSubprocessExtraArgs(TypedDict, total=False):
     start_new_session: bool
 
 
+@dataclass
+class NaradaSession:
+    id: str
+
+
 class Narada:
-    async def launch_browser(self) -> str:
+    _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
+    _SESSION_ID_SELECTOR = "#narada-session-id"
+    _INITIAL_URL = "https://app.narada.ai/initialize"
+
+    async def launch_browser_and_initialize(self) -> NaradaSession | None:
         # Starting from Chrome 136, the default Chrome data directory can no longer be debugged over
         # CDP:
         # - https://developer.chrome.com/blog/remote-debugging-port
         # - https://github.com/browser-use/browser-use/issues/1520
         user_data_dir = "./narada-user-data-dir"
         cdp_port = 9222
-        initial_url = "https://app.narada.ai/initialize"
 
         program = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         args = [
             f"--user-data-dir={user_data_dir}",
             f"--remote-debugging-port={cdp_port}",
-            initial_url,
+            self._INITIAL_URL,
             # TODO: These are needed if we don't use CDP but let Playwright manage the browser.
             # "--profile-directory=Profile 1",
             # "--disable-blink-features=AutomationControlled",
@@ -67,14 +76,57 @@ class Narada:
 
             # The Chrome extension side panel also creates a page, so we need to find the right page
             # in the main window.
-            page = next(p for p in context.pages if p.url == initial_url)
+            page = next(p for p in context.pages if p.url == self._INITIAL_URL)
 
-            session_id_elem = page.locator("#narada-session-id")
-            await session_id_elem.wait_for(state="attached", timeout=10_000)
+            session_id = await self._wait_for_session_id(page)
+            if session_id is None:
+                return None
+            return NaradaSession(id=session_id)
+
+    @staticmethod
+    async def _wait_for_selector_attached(
+        page: Page, selector: str, *, timeout: int
+    ) -> ElementHandle | None:
+        try:
+            return await page.wait_for_selector(
+                selector, state="attached", timeout=timeout
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    async def _wait_for_session_id(page: Page, *, timeout: int = 15_000) -> str | None:
+        session_id_task = asyncio.create_task(
+            Narada._wait_for_selector_attached(
+                page, Narada._SESSION_ID_SELECTOR, timeout=timeout
+            )
+        )
+        extension_missing_indicator_task = asyncio.create_task(
+            Narada._wait_for_selector_attached(
+                page, Narada._EXTENSION_MISSING_INDICATOR_SELECTOR, timeout=timeout
+            )
+        )
+
+        done, _ = await asyncio.wait(
+            [session_id_task, extension_missing_indicator_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        if len(done) == 0:
+            return None
+
+        for task in done:
+            if task == extension_missing_indicator_task:
+                return None
+
+            session_id_elem = task.result()
+            if session_id_elem is None:
+                return None
+
             session_id = await session_id_elem.text_content()
-            assert session_id is not None
-
             return session_id
+
+        return None
 
 
 __all__ = ["Narada"]
