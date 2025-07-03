@@ -14,12 +14,10 @@ async def main() -> None:
     responses = await asyncio.gather(
         run_task("/Operator Search for Kurt Keutzer on Google and extract his h-index"),
         run_task(
-            "/Operator Search for LLM Compiler on Google, open the first arXiv result and open the "
-            "paper's PDF"
+            "/Operator Search for LLM Compiler on Google, open the first arXiv result and open the paper's PDF"
         ),
         run_task(
-            '/Operator Search for "random number" on Google and extract the generated number from '
-            "the search result page"
+            '/Operator Search for "random number" on Google and extract the generated number from the search result page'
         ),
     )
 
