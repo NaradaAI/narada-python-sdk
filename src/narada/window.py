@@ -23,7 +23,7 @@ class BrowserWindow:
         *,
         prompt: str,
         clear_chat: bool | None = None,
-        timeout: int = 60,
+        timeout: int = 120,
     ) -> dict[str, Any]:
         headers = {"x-api-key": self._api_key}
 

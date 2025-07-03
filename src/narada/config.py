@@ -27,4 +27,5 @@ class BrowserConfig:
     executable_path: str = field(default_factory=_default_executable_path)
     user_data_dir: str = field(default_factory=_default_user_data_dir)
     cdp_port: int = 9222
-    initialization_url: str = "https://app.narada.ai/initialize"
+    # initialization_url: str = "https://app.narada.ai/initialize"
+    initialization_url: str = "http://localhost:3000/initialize"
