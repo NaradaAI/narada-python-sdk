@@ -19,7 +19,11 @@ class BrowserWindow:
         return f"BrowserWindow(id={self.id})"
 
     async def dispatch_request(
-        self, *, prompt: str, clear_chat: bool | None = None
+        self,
+        *,
+        prompt: str,
+        clear_chat: bool | None = None,
+        timeout: int = 60,
     ) -> dict[str, Any]:
         headers = {"x-api-key": self._api_key}
 
@@ -39,6 +43,7 @@ class BrowserWindow:
                 "https://api.narada.ai/fast/v2/remote-dispatch",
                 headers=headers,
                 json=body,
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
-                print(resp.status)
+                resp.raise_for_status()
                 return await resp.json()
