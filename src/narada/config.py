@@ -4,8 +4,6 @@ from pathlib import Path
 
 
 def _default_executable_path() -> str:
-    raise NotImplementedError("This is a test")
-
     if sys.platform == "win32":
         return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     elif sys.platform == "darwin":

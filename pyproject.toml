@@ -5,7 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Zizheng Tai", email = "zizheng@narada.ai" }]
 requires-python = ">=3.11"
-dependencies = ["playwright>=1.53.0"]
+dependencies = [
+    "aiohttp>=3.12.13",
+    "playwright>=1.53.0",
+]
 
 [build-system]
 requires = ["hatchling"]

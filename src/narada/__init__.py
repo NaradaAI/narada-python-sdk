@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 from typing import TypedDict
+from uuid import uuid4
 
 from playwright.async_api import ElementHandle, Page, async_playwright
 
@@ -13,8 +15,8 @@ from narada.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada.session import NaradaSession
 from narada.utils import assert_never
+from narada.window import BrowserWindow
 
 __version__ = "0.1.0"
 
@@ -25,20 +27,32 @@ class _CreateSubprocessExtraArgs(TypedDict, total=False):
 
 
 class Narada:
-    _SESSION_ID_SELECTOR = "#narada-session-id"
+    _BROWSER_WINDOW_ID_SELECTOR = "#narada-browser-window-id"
     _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
     _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
-    async def launch_browser_and_initialize(
+    _api_key: str
+
+    def __init__(self, *, api_key: str | None = None) -> None:
+        self._api_key = api_key or os.environ["NARADA_API_KEY"]
+
+    async def open_and_initialize_browser_window(
         self, config: BrowserConfig | None = None
-    ) -> NaradaSession:
+    ) -> BrowserWindow:
         config = config or BrowserConfig()
+
+        # A unique tag is appened to the initialization URL we that we can find the new page that
+        # was opened, since otherwise when more than one initialization page is opened in the same
+        # browser instance, we wouldn't be able to tell them apart.
+        window_tag = uuid4().hex
+        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
 
         browser_args = [
             f"--user-data-dir={config.user_data_dir}",
             f"--remote-debugging-port={config.cdp_port}",
-            config.initialization_url,
+            "--new-window",
+            tagged_initialization_url,
             # TODO: These are needed if we don't use CDP but let Playwright manage the browser.
             # "--profile-directory=Profile 1",
             # "--disable-blink-features=AutomationControlled",
@@ -82,15 +96,15 @@ class Narada:
                     await asyncio.sleep(5)
                     continue
 
-            context = browser.contexts[0]
+            # Grab the browser window ID from the page we just opened.
+            page = next(
+                p
+                for p in browser.contexts[0].pages
+                if p.url == tagged_initialization_url
+            )
+            browser_window_id = await self._wait_for_browser_window_id(page)
 
-            # The Chrome extension side panel also creates a page, so we need to find the right page
-            # in the main window.
-            page = next(p for p in context.pages if p.url == config.initialization_url)
-
-            session_id = await self._wait_for_session_id(page)
-
-            return NaradaSession(id=session_id)
+        return BrowserWindow(api_key=self._api_key, id=browser_window_id)
 
     @staticmethod
     async def _wait_for_selector_attached(
@@ -104,9 +118,9 @@ class Narada:
             return None
 
     @staticmethod
-    async def _wait_for_session_id(page: Page, *, timeout: int = 15_000) -> str:
+    async def _wait_for_browser_window_id(page: Page, *, timeout: int = 15_000) -> str:
         selectors = [
-            Narada._SESSION_ID_SELECTOR,
+            Narada._BROWSER_WINDOW_ID_SELECTOR,
             Narada._UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
             Narada._EXTENSION_MISSING_INDICATOR_SELECTOR,
             Narada._INITIALIZATION_ERROR_INDICATOR_SELECTOR,
@@ -167,7 +181,7 @@ __all__ = [
     "Narada",
     "NaradaExtensionMissingError",
     "NaradaInitializationError",
-    "NaradaSession",
+    "BrowserWindow",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
 ]
