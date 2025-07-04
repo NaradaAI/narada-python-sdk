@@ -1,6 +1,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./static/Narada-logo-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="./static/Narada-logo.png">
+  <img alt="NARADA AI Logo." src="./static/Narada-logo.png" width="300">
 </picture>
 
 <h1 align="center">Computer Use for Agentic Process Automation!</h1>
