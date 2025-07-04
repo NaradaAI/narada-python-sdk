@@ -11,17 +11,11 @@ async def main() -> None:
 
         # Run a task in this browser window.
         response = await window.dispatch_request(
-            prompt='/Operator Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF',
+            prompt='/Operator Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF. Then download the PDF of the paper.',
             # Optionally generate a GIF of the agent's actions.
             generate_gif=True,
         )
-        print(f"Response 1: {response['response']['text']}\n")
-
-        # Run a second task based on the first task's result.
-        response = await window.dispatch_request(
-            prompt="/Operator Download the current page",
-        )
-        print(f"Response 2: {response['response']['text']}\n")
+        print("Response:", response["response"]["text"])
 
 
 if __name__ == "__main__":
