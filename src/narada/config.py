@@ -4,8 +4,6 @@ from pathlib import Path
 
 
 def _default_executable_path() -> str:
-    raise NotImplementedError("This is a test")
-
     if sys.platform == "win32":
         return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     elif sys.platform == "darwin":
@@ -28,5 +26,7 @@ def _default_user_data_dir() -> str:
 class BrowserConfig:
     executable_path: str = field(default_factory=_default_executable_path)
     user_data_dir: str = field(default_factory=_default_user_data_dir)
+    profile_directory: str = "Default"
     cdp_port: int = 9222
     initialization_url: str = "https://app.narada.ai/initialize"
+    extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"

@@ -1,18 +1,16 @@
 [project]
 name = "narada"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python client SDK for Narada"
+license = "Apache-2.0"
 readme = "README.md"
-authors = [{ name = "Zizheng Tai", email = "zizheng@narada.ai" }]
+authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.11"
-dependencies = ["playwright>=1.53.0"]
+dependencies = ["aiohttp>=3.12.13", "playwright>=1.53.0"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.0.0",
-]
+dev = ["pytest>=8.4.1", "pytest-asyncio>=1.0.0"]
