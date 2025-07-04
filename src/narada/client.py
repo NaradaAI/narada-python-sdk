@@ -1,12 +1,23 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import subprocess
 import sys
-from typing import TypedDict
+from typing import Any, TypedDict
 from uuid import uuid4
 
-from playwright.async_api import ElementHandle, Page, async_playwright
+from playwright.async_api import (
+    ElementHandle,
+    Page,
+    Playwright,
+    async_playwright,
+)
+from playwright.async_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
+from playwright.async_api._context_manager import PlaywrightContextManager
 
 from narada.config import BrowserConfig
 from narada.errors import (
@@ -25,19 +36,38 @@ class _CreateSubprocessExtraArgs(TypedDict, total=False):
 
 
 class Narada:
+    _ENTERPRISE_EXTENSION_ID = "ijdopnjleolkjakldkjplfhniiohnccf"
     _BROWSER_WINDOW_ID_SELECTOR = "#narada-browser-window-id"
     _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
     _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
     _api_key: str
+    _playwright_context_manager: PlaywrightContextManager | None = None
+    _playwright: Playwright | None = None
 
     def __init__(self, *, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ["NARADA_API_KEY"]
 
+    async def __aenter__(self) -> Narada:
+        self._playwright_context_manager = async_playwright()
+        self._playwright = await self._playwright_context_manager.__aenter__()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        if self._playwright_context_manager is None:
+            return
+
+        await self._playwright_context_manager.__aexit__(*args)
+        self._playwright_context_manager = None
+        self._playwright = None
+
     async def open_and_initialize_browser_window(
         self, config: BrowserConfig | None = None
     ) -> BrowserWindow:
+        assert self._playwright is not None
+        playwright = self._playwright
+
         config = config or BrowserConfig()
 
         # A unique tag is appened to the initialization URL we that we can find the new page that
@@ -81,28 +111,34 @@ class Narada:
 
         logging.debug("Browser process started with PID: %s", browser_process.pid)
 
-        async with async_playwright() as playwright:
-            max_cdp_connect_attempts = 3
-            for attempt in range(max_cdp_connect_attempts):
-                try:
-                    browser = await playwright.chromium.connect_over_cdp(
-                        f"http://localhost:{config.cdp_port}"
-                    )
-                except Exception:
-                    if attempt == max_cdp_connect_attempts - 1:
-                        raise
-                    await asyncio.sleep(5)
-                    continue
+        # Give the browser some time to start up.
+        await asyncio.sleep(3)
 
-            # Grab the browser window ID from the page we just opened.
-            page = next(
-                p
-                for p in browser.contexts[0].pages
-                if p.url == tagged_initialization_url
-            )
-            browser_window_id = await self._wait_for_browser_window_id(page)
+        max_cdp_connect_attempts = 3
+        for attempt in range(max_cdp_connect_attempts):
+            try:
+                browser = await playwright.chromium.connect_over_cdp(
+                    f"http://localhost:{config.cdp_port}"
+                )
+            except Exception:
+                if attempt == max_cdp_connect_attempts - 1:
+                    raise
+                await asyncio.sleep(3)
+                continue
 
-        return BrowserWindow(api_key=self._api_key, id=browser_window_id)
+        # Grab the browser window ID from the page we just opened.
+        context = browser.contexts[0]
+        initialization_page = next(
+            p for p in context.pages if p.url == tagged_initialization_url
+        )
+        browser_window_id = await self._wait_for_browser_window_id(initialization_page)
+
+        return BrowserWindow(
+            api_key=self._api_key,
+            config=config,
+            context=context,
+            id=browser_window_id,
+        )
 
     @staticmethod
     async def _wait_for_selector_attached(
@@ -112,7 +148,7 @@ class Narada:
             return await page.wait_for_selector(
                 selector, state="attached", timeout=timeout
             )
-        except Exception:
+        except PlaywrightTimeoutError:
             return None
 
     @staticmethod
