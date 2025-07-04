@@ -11,13 +11,15 @@ async def main() -> None:
 
         # Run a task in this browser window.
         response = await window.dispatch_request(
-            prompt='/Operator Search for "random number between 1 and 5" on Google and extract the generated number from the search result page. Output just the number.',
+            prompt='/Operator Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF',
+            # Optionally generate a GIF of the agent's actions.
+            generate_gif=True,
         )
         print(f"Response 1: {response['response']['text']}\n")
 
         # Run a second task based on the first task's result.
         response = await window.dispatch_request(
-            prompt=f"/Operator search for the number {response['response']['text']} tallest building in the world on Google",
+            prompt="/Operator Download the current page",
         )
         print(f"Response 2: {response['response']['text']}\n")
 

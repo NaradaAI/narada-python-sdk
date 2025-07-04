@@ -1,7 +1,6 @@
 import asyncio
 
-from narada import Narada
-from narada.errors import NaradaTimeoutError
+from narada import Narada, NaradaTimeoutError
 
 
 async def main() -> None:

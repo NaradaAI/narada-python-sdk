@@ -27,7 +27,7 @@ from narada.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada.utils import assert_never
-from narada.window import BrowserWindow
+from narada.window import BrowserWindow, create_side_panel_url
 
 
 class _CreateSubprocessExtraArgs(TypedDict, total=False):
@@ -36,7 +36,6 @@ class _CreateSubprocessExtraArgs(TypedDict, total=False):
 
 
 class Narada:
-    _ENTERPRISE_EXTENSION_ID = "ijdopnjleolkjakldkjplfhniiohnccf"
     _BROWSER_WINDOW_ID_SELECTOR = "#narada-browser-window-id"
     _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
     _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
@@ -78,11 +77,11 @@ class Narada:
 
         browser_args = [
             f"--user-data-dir={config.user_data_dir}",
+            f"--profile-directory={config.profile_directory}",
             f"--remote-debugging-port={config.cdp_port}",
             "--new-window",
             tagged_initialization_url,
-            # TODO: These are needed if we don't use CDP but let Playwright manage the browser.
-            # "--profile-directory=Profile 1",
+            # TODO: This is needed if we don't use CDP but let Playwright manage the browser.
             # "--disable-blink-features=AutomationControlled",
         ]
 
@@ -133,6 +132,14 @@ class Narada:
         )
         browser_window_id = await self._wait_for_browser_window_id(initialization_page)
 
+        # Revert the download behavior to the default behavior for the extension, otherwise our
+        # extension cannot download files.
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
+        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
+        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
+        await cdp_session.detach()
+
         return BrowserWindow(
             api_key=self._api_key,
             config=config,
@@ -166,7 +173,7 @@ class Narada:
             for selector in selectors
         ]
         (
-            session_id_task,
+            browser_window_id_task,
             unsupported_browser_indicator_task,
             extension_missing_indicator_task,
             initialization_error_indicator_task,
@@ -180,19 +187,19 @@ class Narada:
             task.cancel()
 
         if len(done) == 0:
-            raise NaradaTimeoutError("Timed out waiting for session ID")
+            raise NaradaTimeoutError("Timed out waiting for browser window ID")
 
         for task in done:
-            if task == session_id_task:
-                session_id_elem = task.result()
-                if session_id_elem is None:
-                    raise NaradaTimeoutError("Timed out waiting for session ID")
+            if task == browser_window_id_task:
+                browser_window_id_elem = task.result()
+                if browser_window_id_elem is None:
+                    raise NaradaTimeoutError("Timed out waiting for browser window ID")
 
-                session_id = await session_id_elem.text_content()
-                if session_id is None:
-                    raise NaradaInitializationError("Session ID is empty")
+                browser_window_id = await browser_window_id_elem.text_content()
+                if browser_window_id is None:
+                    raise NaradaInitializationError("Browser window ID is empty")
 
-                return session_id
+                return browser_window_id
 
             # TODO: Create custom exception types for these cases.
             if task == unsupported_browser_indicator_task and task.result() is not None:
