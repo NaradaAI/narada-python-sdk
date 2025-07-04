@@ -1,14 +1,19 @@
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./static/Narada-logo-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="./static/Narada-logo.png">
   <img alt="NARADA AI Logo." src="./static/Narada-logo.png" width="300">
 </picture>
+</p>
 
 <h1 align="center">Computer Use for Agentic Process Automation!</h1>
-[![Sign Up](https://img.shields.io/badge/Cloud-☁️-blue)](https://narada.ai)
-[![Documentation](https://img.shields.io/badge/Documentation-📖-blue)](https://docs.narada.ai)
-[![Twitter Follow](https://img.shields.io/twitter/follow/Narada_AI?style=social)](https://x.com/intent/user?screen_name=Narada_AI)
-[![LinkedIn Follow](https://img.shields.io/linkedin/follow/Narada_AI?style=social)](https://www.linkedin.com/company/97417492/)
+
+<p align="center">
+  <a href="https://narada.ai"><img src="https://img.shields.io/badge/Sign%20Up-Cloud-blue?logo=cloud" alt="Sign Up"></a>
+  <a href="https://docs.narada.ai"><img src="https://img.shields.io/badge/Documentation-Docs-blue?logo=gitbook" alt="Documentation"></a>
+  <a href="https://x.com/intent/user?screen_name=Narada_AI"><img src="https://img.shields.io/badge/Follow-Twitter-1DA1F2?logo=twitter&logoColor=white" alt="Twitter Follow"></a>
+  <a href="https://www.linkedin.com/company/97417492/"><img src="https://img.shields.io/badge/Follow-LinkedIn-0077B5?logo=linkedin&logoColor=white" alt="LinkedIn Follow"></a>
+</p>
 
 # Narada Python SDK
 
@@ -59,7 +64,11 @@ if __name__ == "__main__":
 
 This would then result in the following trajectory:
 
-[![File Download Example](https://imgur.com/uPMAw6h)](youtube.com)
+<p align="center">
+  <a href="https://youtube.com/watch?v=YOUR_VIDEO_ID_HERE">
+    <img src="https://i.imgur.com/uPMAw6h.gif" alt="File Download Example" width="600">
+  </a>
+</p>
 
 
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
