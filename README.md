@@ -63,8 +63,8 @@ if __name__ == "__main__":
 This would then result in the following trajectory:
 
 <p align="center">
-  <a href="https://youtube.com/watch?v=YOUR_VIDEO_ID_HERE">
-    <img src="https://i.imgur.com/uPMAw6h.gif" alt="File Download Example" width="600">
+  <a href="https://youtu.be/bpy-xnSeboY">
+    <img src="https://imgur.com/TyEuD5d" alt="File Download Example" width="600">
   </a>
 </p>
 
@@ -102,10 +102,10 @@ For questions, issues, or support, please contact: support@narada.ai
 We appreciate it if you could cite Narada if you found it useful for your project.
 
 ```bibtex
-@software{narada_ai2021,
+@software{narada_ai2025,
   author = {Narada AI},
   title = {Narada AI: Agentic Process Automation for Enterprise},
-  year = {2021},
+  year = {2025},
   publisher = {GitHub},
   url = {https://github.com/NaradaAI/narada-python-sdk}
 }

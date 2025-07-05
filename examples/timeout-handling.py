@@ -5,7 +5,7 @@ from narada import Narada, NaradaTimeoutError
 
 async def main() -> None:
     # Initialize the Narada client.
-    async with Narada(api_key="<YOUR_NARADA_API_KEY>") as narada:
+    async with Narada() as narada:
         # Open a new browser window and initialize the Narada UI agent.
         window = await narada.open_and_initialize_browser_window()
 
