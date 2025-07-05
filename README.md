@@ -64,7 +64,7 @@ This would then result in the following trajectory:
 
 <p align="center">
   <a href="https://youtu.be/bpy-xnSeboY">
-    <img src="https://imgur.com/TyEuD5d" alt="File Download Example" width="600">
+    <img src="https://i.imgur.com/TyEuD5d" alt="File Download Example" width="600">
   </a>
 </p>
 
