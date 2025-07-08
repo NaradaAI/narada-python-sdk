@@ -14,5 +14,9 @@ class NaradaExtensionMissingError(NaradaError):
     pass
 
 
+class NaradaExtensionUnauthenticatedError(NaradaError):
+    pass
+
+
 class NaradaInitializationError(NaradaError):
     pass
