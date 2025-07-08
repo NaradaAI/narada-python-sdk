@@ -1,7 +1,9 @@
 from narada.client import Narada
 from narada.config import BrowserConfig
 from narada.errors import (
+    NaradaError,
     NaradaExtensionMissingError,
+    NaradaExtensionUnauthenticatedError,
     NaradaInitializationError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
@@ -13,10 +15,12 @@ __version__ = "0.1.0"
 
 __all__ = [
     "BrowserConfig",
-    "Narada",
-    "NaradaExtensionMissingError",
-    "NaradaInitializationError",
     "BrowserWindow",
+    "Narada",
+    "NaradaError",
+    "NaradaExtensionMissingError",
+    "NaradaExtensionUnauthenticatedError",
+    "NaradaInitializationError",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
 ]
