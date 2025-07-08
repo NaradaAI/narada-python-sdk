@@ -15,3 +15,6 @@ wheels/
 
 # Chrome user data directory
 /narada-user-data-dir/
+
+.DS_Store
+*.*~
