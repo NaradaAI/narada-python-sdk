@@ -22,6 +22,7 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from narada.config import BrowserConfig
 from narada.errors import (
     NaradaExtensionMissingError,
+    NaradaExtensionUnauthenticatedError,
     NaradaInitializationError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
@@ -39,6 +40,7 @@ class Narada:
     _BROWSER_WINDOW_ID_SELECTOR = "#narada-browser-window-id"
     _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
     _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
+    _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
     _api_key: str
@@ -110,16 +112,15 @@ class Narada:
 
         logging.debug("Browser process started with PID: %s", browser_process.pid)
 
-        # Give the browser some time to start up.
-        await asyncio.sleep(3)
-
-        max_cdp_connect_attempts = 3
+        max_cdp_connect_attempts = 10
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(
                     f"http://localhost:{config.cdp_port}"
                 )
             except Exception:
+                # The browser process might not be immediately ready to accept CDP connections.
+                # Retry a few times before giving up.
                 if attempt == max_cdp_connect_attempts - 1:
                     raise
                 await asyncio.sleep(3)
@@ -164,6 +165,7 @@ class Narada:
             Narada._BROWSER_WINDOW_ID_SELECTOR,
             Narada._UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
             Narada._EXTENSION_MISSING_INDICATOR_SELECTOR,
+            Narada._EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
             Narada._INITIALIZATION_ERROR_INDICATOR_SELECTOR,
         ]
         tasks: list[asyncio.Task[ElementHandle | None]] = [
@@ -176,6 +178,7 @@ class Narada:
             browser_window_id_task,
             unsupported_browser_indicator_task,
             extension_missing_indicator_task,
+            extension_unauthenticated_indicator_task,
             initialization_error_indicator_task,
         ) = tasks
 
@@ -207,6 +210,14 @@ class Narada:
 
             if task == extension_missing_indicator_task and task.result() is not None:
                 raise NaradaExtensionMissingError("Narada extension missing")
+
+            if (
+                task == extension_unauthenticated_indicator_task
+                and task.result() is not None
+            ):
+                raise NaradaExtensionUnauthenticatedError(
+                    "Sign in to the Narada extension first"
+                )
 
             if (
                 task == initialization_error_indicator_task
