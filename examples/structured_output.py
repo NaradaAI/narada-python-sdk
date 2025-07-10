@@ -1,5 +1,6 @@
 import asyncio
 
+import rich
 from pydantic import BaseModel, Field
 
 from narada import Narada
@@ -35,7 +36,7 @@ async def main() -> None:
         )
 
         assert response["response"] is not None
-        print("Structured output:", response["response"]["structuredOutput"])
+        rich.print("Response:", response["response"]["structuredOutput"])
 
 
 if __name__ == "__main__":
