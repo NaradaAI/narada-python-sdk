@@ -30,3 +30,4 @@ class BrowserConfig:
     cdp_port: int = 9222
     initialization_url: str = "https://app.narada.ai/initialize"
     extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"
+    interactive: bool = True

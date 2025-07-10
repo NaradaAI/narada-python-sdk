@@ -5,10 +5,13 @@ import logging
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Any, TypedDict
 from uuid import uuid4
 
+from playwright._impl._errors import TargetClosedError
 from playwright.async_api import (
+    Browser,
     ElementHandle,
     Page,
     Playwright,
@@ -18,6 +21,7 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 from playwright.async_api._context_manager import PlaywrightContextManager
+from rich.console import Console
 
 from narada.config import BrowserConfig
 from narada.errors import (
@@ -36,6 +40,24 @@ class _CreateSubprocessExtraArgs(TypedDict, total=False):
     start_new_session: bool
 
 
+@dataclass
+class _LaunchBrowserResult:
+    browser_window_id: str
+    side_panel_page: Page
+
+
+class _ShouldRetryCreateProcess(Exception):
+    browser: Browser
+    browser_process: asyncio.subprocess.Process
+
+    def __init__(
+        self, browser: Browser, browser_process: asyncio.subprocess.Process
+    ) -> None:
+        super().__init__()
+        self.browser = browser
+        self.browser_process = browser_process
+
+
 class Narada:
     _BROWSER_WINDOW_ID_SELECTOR = "#narada-browser-window-id"
     _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
@@ -44,11 +66,13 @@ class Narada:
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
     _api_key: str
+    _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
 
     def __init__(self, *, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ["NARADA_API_KEY"]
+        self._console = Console()
 
     async def __aenter__(self) -> Narada:
         self._playwright_context_manager = async_playwright()
@@ -71,7 +95,42 @@ class Narada:
 
         config = config or BrowserConfig()
 
-        # A unique tag is appened to the initialization URL we that we can find the new page that
+        launch_browser_result = None
+        while launch_browser_result is None:
+            try:
+                launch_browser_result = await self._launch_browser(playwright, config)
+            except _ShouldRetryCreateProcess as e:
+                if config.interactive:
+                    self._console.input(
+                        "\n:wrench: [bold blue]New extension installation detected. Press Enter to "
+                        "relaunch the browser and continue.[/bold blue]"
+                    )
+
+                # Close the CDP connection to the browser.
+                await e.browser.close()
+
+                # Gracefully terminate the browser process.
+                e.browser_process.terminate()
+                await e.browser_process.wait()
+
+        side_panel_page = launch_browser_result.side_panel_page
+        browser_window_id = launch_browser_result.browser_window_id
+
+        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
+        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
+        await cdp_session.detach()
+
+        return BrowserWindow(
+            api_key=self._api_key,
+            config=config,
+            context=side_panel_page.context,
+            id=browser_window_id,
+        )
+
+    async def _launch_browser(
+        self, playwright: Playwright, config: BrowserConfig
+    ) -> _LaunchBrowserResult:
+        # A unique tag is appended to the initialization URL so that we can find the new page that
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
         window_tag = uuid4().hex
@@ -131,21 +190,37 @@ class Narada:
         initialization_page = next(
             p for p in context.pages if p.url == tagged_initialization_url
         )
-        browser_window_id = await self._wait_for_browser_window_id(initialization_page)
+
+        # Wait for the browser window ID to be available, potentially letting the user respond to
+        # recoverable errors interactively.
+        if config.interactive:
+            browser_window_id = await self._wait_for_browser_window_id_interactively(
+                initialization_page
+            )
+        else:
+            browser_window_id = await Narada._wait_for_browser_window_id(
+                initialization_page,
+            )
 
         # Revert the download behavior to the default behavior for the extension, otherwise our
         # extension cannot download files.
         side_panel_url = create_side_panel_url(config, browser_window_id)
-        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
-        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
-        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
-        await cdp_session.detach()
+        side_panel_page = next(
+            (p for p in context.pages if p.url == side_panel_url), None
+        )
+        if side_panel_page is None:
+            raise _ShouldRetryCreateProcess(browser, browser_process)
 
-        return BrowserWindow(
-            api_key=self._api_key,
-            config=config,
-            context=context,
-            id=browser_window_id,
+        if config.interactive:
+            self._console.print(
+                "\n:rocket: Initialization successful. Browser window ID: "
+                f"{browser_window_id}",
+                style="bold green",
+            )
+
+        return _LaunchBrowserResult(
+            browser_window_id=browser_window_id,
+            side_panel_page=side_panel_page,
         )
 
     @staticmethod
@@ -226,3 +301,38 @@ class Narada:
                 raise NaradaInitializationError("Initialization error")
 
         assert_never()
+
+    async def _wait_for_browser_window_id_interactively(
+        self, page: Page, *, per_attempt_timeout: int = 15_000
+    ) -> str:
+        try:
+            while True:
+                try:
+                    return await Narada._wait_for_browser_window_id(
+                        page, timeout=per_attempt_timeout
+                    )
+                except NaradaExtensionMissingError:
+                    self._console.input(
+                        "\n:wrench: [bold blue]The Narada Enterprise extension is not installed. "
+                        "Please follow the instructions in the browser window to install it first, "
+                        "then press Enter to continue.[/bold blue]",
+                    )
+                except NaradaExtensionUnauthenticatedError:
+                    self._console.input(
+                        "\n:lock: [bold blue]Please sign in to the Narada extension first, then "
+                        "press Enter to continue.[/bold blue]",
+                    )
+
+                # Bring the page to the front and wait a little bit before refreshing it, as this
+                # page needs to be the active tab in order to automatically open the side panel.
+                await page.bring_to_front()
+                await asyncio.sleep(0.1)
+                await page.reload()
+
+        except TargetClosedError:
+            self._console.print(
+                "\n:warning: It seems the Narada automation page was closed. Please retry the "
+                "action and keep the Narada web page open.",
+                style="bold red",
+            )
+            sys.exit(1)
