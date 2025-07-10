@@ -1,16 +1,30 @@
 import asyncio
 import time
-from typing import Any
+from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
 import aiohttp
 from playwright.async_api import BrowserContext
+from pydantic import BaseModel
 
 from narada.config import BrowserConfig
 from narada.errors import NaradaTimeoutError
 
+_StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
-def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
-    return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
+_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
+
+
+class RemoteDispatchResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
+    text: str
+    structuredOutput: _MaybeStructuredOutput
+
+
+class RemoteDispatchResponse(TypedDict, Generic[_MaybeStructuredOutput]):
+    requestId: str
+    status: Literal["success", "error"]
+    response: RemoteDispatchResponseContent[_MaybeStructuredOutput] | None
+    createdAt: str
+    completedAt: str | None
 
 
 class BrowserWindow:
@@ -44,14 +58,37 @@ class BrowserWindow:
         # canceled.
         await side_panel_page.reload()
 
+    @overload
     async def dispatch_request(
         self,
         *,
         prompt: str,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
+        output_schema: None = None,
         timeout: int = 120,
-    ) -> dict[str, Any]:
+    ) -> RemoteDispatchResponse[None]: ...
+
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        timeout: int = 120,
+    ) -> RemoteDispatchResponse[_StructuredOutput]: ...
+
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[BaseModel] | None = None,
+        timeout: int = 120,
+    ) -> RemoteDispatchResponse:
         deadline = time.monotonic() + timeout
 
         headers = {"x-api-key": self._api_key}
@@ -64,6 +101,11 @@ class BrowserWindow:
             body["clearChat"] = clear_chat
         if generate_gif is not None:
             body["saveScreenshots"] = generate_gif
+        if output_schema is not None:
+            body["responseFormat"] = {
+                "type": "jsonSchema",
+                "jsonSchema": output_schema.model_json_schema(),
+            }
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -85,7 +127,14 @@ class BrowserWindow:
                         resp.raise_for_status()
                         response = await resp.json()
 
-                    if response.get("status") != "pending":
+                    if response["status"] != "pending":
+                        if output_schema is not None:
+                            response_content = response["response"]
+                            structured_output = output_schema.model_validate_json(
+                                response_content["text"]
+                            )
+                            response_content["structuredOutput"] = structured_output
+
                         return response
 
                     # Poll every 3 seconds.
@@ -95,3 +144,7 @@ class BrowserWindow:
 
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
+
+
+def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
+    return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"

@@ -17,6 +17,9 @@ async def main() -> None:
                     # Force a timeout on the first attempt to demonstrate timeout handling.
                     timeout=3 if attempt == 0 else 120,
                 )
+
+                assert response["response"] is not None
+                print("Response:", response["response"]["text"])
             except NaradaTimeoutError:
                 # Give up after `max_attempts` attempts.
                 if attempt == max_attempts - 1:
@@ -27,8 +30,6 @@ async def main() -> None:
                 # Reinitialize the UI agent to cancel any inflight requests. This keeps the browser
                 # pages untouched so we don't lose any progress.
                 await window.reinitialize()
-
-        print("Response:", response["response"]["text"])
 
 
 if __name__ == "__main__":
