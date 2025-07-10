@@ -128,12 +128,17 @@ class BrowserWindow:
                         response = await resp.json()
 
                     if response["status"] != "pending":
-                        if output_schema is not None:
-                            response_content = response["response"]
-                            structured_output = output_schema.model_validate_json(
-                                response_content["text"]
-                            )
-                            response_content["structuredOutput"] = structured_output
+                        response_content = response["response"]
+                        if response_content is not None:
+                            # Populate the `structuredOutput` field. This is a client-side field
+                            # that's not directly returned by the API.
+                            if output_schema is None:
+                                response_content["structuredOutput"] = None
+                            else:
+                                structured_output = output_schema.model_validate_json(
+                                    response_content["text"]
+                                )
+                                response_content["structuredOutput"] = structured_output
 
                         return response
 
