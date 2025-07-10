@@ -14,15 +14,15 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
-class RemoteDispatchResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
+class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
 
 
-class RemoteDispatchResponse(TypedDict, Generic[_MaybeStructuredOutput]):
+class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
     status: Literal["success", "error"]
-    response: RemoteDispatchResponseContent[_MaybeStructuredOutput] | None
+    response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
 
@@ -67,7 +67,7 @@ class BrowserWindow:
         generate_gif: bool | None = None,
         output_schema: None = None,
         timeout: int = 120,
-    ) -> RemoteDispatchResponse[None]: ...
+    ) -> Response[None]: ...
 
     @overload
     async def dispatch_request(
@@ -78,7 +78,7 @@ class BrowserWindow:
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
         timeout: int = 120,
-    ) -> RemoteDispatchResponse[_StructuredOutput]: ...
+    ) -> Response[_StructuredOutput]: ...
 
     async def dispatch_request(
         self,
@@ -88,7 +88,7 @@ class BrowserWindow:
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
         timeout: int = 120,
-    ) -> RemoteDispatchResponse:
+    ) -> Response:
         deadline = time.monotonic() + timeout
 
         headers = {"x-api-key": self._api_key}
