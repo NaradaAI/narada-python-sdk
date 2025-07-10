@@ -214,7 +214,7 @@ class Narada:
         if config.interactive:
             self._console.print(
                 "\n:rocket: Initialization successful. Browser window ID: "
-                f"{browser_window_id}",
+                f"{browser_window_id}\n",
                 style="bold green",
             )
 

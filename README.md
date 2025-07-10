@@ -27,7 +27,7 @@ pip install narada
 
 **Important**: The first time Narada opens the automated browser, you will need to manually install the [Narada Enterprise extension](https://chromewebstore.google.com/detail/enterprise-narada-ai-assi/bhioaidlggjdkheaajakomifblpjmokn) and log in to your Narada account.
 
-After installation and login, create a Narada API Key (see [this link](https://docs.narada.ai/documentation/authentication#api-key) for instructions) and set the following environemnt variable:
+After installation and login, create a Narada API Key (see [this link](https://docs.narada.ai/documentation/authentication#api-key) for instructions) and set the following environment variable:
 
 ```bash
 export NARADA_API_KEY=<YOUR KEY>
@@ -68,7 +68,6 @@ This would then result in the following trajectory:
   </a>
 </p>
 
-
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
 ## Features
@@ -87,7 +86,6 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 - **File Operations**: Download files and handle web-based documents
 - **Multi-window Management**: Coordinate tasks across multiple browser instances
 
-
 ## License
 
 This project is licensed under the Apache 2.0 License.
@@ -95,7 +93,6 @@ This project is licensed under the Apache 2.0 License.
 ## Support
 
 For questions, issues, or support, please contact: support@narada.ai
-
 
 ## Citation
 

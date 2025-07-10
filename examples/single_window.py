@@ -15,6 +15,8 @@ async def main() -> None:
             # Optionally generate a GIF of the agent's actions.
             generate_gif=True,
         )
+
+        assert response["response"] is not None
         print("Response:", response["response"]["text"])
 
 
