@@ -1,8 +1,8 @@
 <p align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./static/Narada-logo-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="./static/Narada-logo.png">
-  <img alt="NARADA AI Logo." src="./static/Narada-logo.png" width="300">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NaradaAI/narada-python-sdk/main/static/Narada-logo-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/NaradaAI/narada-python-sdk/main/static/Narada-logo.png">
+  <img alt="NARADA AI Logo." src="https://raw.githubusercontent.com/NaradaAI/narada-python-sdk/main/static/Narada-logo.png" width="300">
 </picture>
 </p>
 
