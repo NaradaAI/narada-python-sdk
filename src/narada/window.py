@@ -67,6 +67,13 @@ class BrowserWindow:
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
         timeout: int = 120,
     ) -> Response[None]: ...
 
@@ -78,6 +85,13 @@ class BrowserWindow:
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
         timeout: int = 120,
     ) -> Response[_StructuredOutput]: ...
 
@@ -88,7 +102,6 @@ class BrowserWindow:
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
-        timeout: int = 120,
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
@@ -96,6 +109,7 @@ class BrowserWindow:
         user_resource_credentials: UserResourceCredentials | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
+        timeout: int = 120,
     ) -> Response:
         deadline = time.monotonic() + timeout
 
@@ -119,8 +133,7 @@ class BrowserWindow:
         if previous_request_id is not None:
             body["previousRequestId"] = previous_request_id
         if chat_history is not None:
-            # Converts the Pydantic models to dictionaries (not directly serializable)
-            body["chatHistory"] = [item.model_dump() for item in chat_history]
+            body["chatHistory"] = chat_history
         if additional_context is not None:
             body["additionalContext"] = additional_context
         if user_resource_credentials is not None:
@@ -128,7 +141,7 @@ class BrowserWindow:
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
-            body["callbackSecret"] = callback_secret        
+            body["callbackSecret"] = callback_secret
 
         try:
             async with aiohttp.ClientSession() as session:

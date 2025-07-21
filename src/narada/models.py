@@ -1,10 +1,11 @@
-from pydantic import BaseModel
-from typing import Literal, TypeAlias
+from typing import Literal, TypedDict
 
 
-UserResourceCredentials: TypeAlias = dict[Literal["salesforce", "jira"], dict[str, str]]
+class UserResourceCredentials(TypedDict, total=False):
+    salesforce: dict[str, str]
+    jira: dict[str, str]
 
 
-class RemoteDispatchChatHistoryItem(BaseModel):
+class RemoteDispatchChatHistoryItem(TypedDict):
     role: Literal["user", "assistant"]
     content: str
