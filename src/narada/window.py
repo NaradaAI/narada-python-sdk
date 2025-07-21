@@ -119,6 +119,7 @@ class BrowserWindow:
         if previous_request_id is not None:
             body["previousRequestId"] = previous_request_id
         if chat_history is not None:
+            # Converts the Pydantic models to dictionaries (not directly serializable)
             body["chatHistory"] = [item.model_dump() for item in chat_history]
         if additional_context is not None:
             body["additionalContext"] = additional_context
