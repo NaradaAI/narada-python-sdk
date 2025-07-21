@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from narada.config import BrowserConfig
 from narada.errors import NaradaTimeoutError
+from narada.models import RemoteDispatchChatHistoryItem, UserResourceCredentials
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -88,6 +89,13 @@ class BrowserWindow:
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
         timeout: int = 120,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
     ) -> Response:
         deadline = time.monotonic() + timeout
 
@@ -96,6 +104,7 @@ class BrowserWindow:
         body: dict[str, Any] = {
             "prompt": prompt,
             "browserWindowId": self.id,
+            "timeZone": time_zone,
         }
         if clear_chat is not None:
             body["clearChat"] = clear_chat
@@ -106,6 +115,19 @@ class BrowserWindow:
                 "type": "jsonSchema",
                 "jsonSchema": output_schema.model_json_schema(),
             }
+
+        if previous_request_id is not None:
+            body["previousRequestId"] = previous_request_id
+        if chat_history is not None:
+            body["chatHistory"] = [item.model_dump() for item in chat_history]
+        if additional_context is not None:
+            body["additionalContext"] = additional_context
+        if user_resource_credentials is not None:
+            body["userResourceCredentials"] = user_resource_credentials
+        if callback_url is not None:
+            body["callbackUrl"] = callback_url
+        if callback_secret is not None:
+            body["callbackSecret"] = callback_secret        
 
         try:
             async with aiohttp.ClientSession() as session:
