@@ -122,7 +122,7 @@ class Narada:
 
         return LocalBrowserWindow(
             api_key=self._api_key,
-            id=browser_window_id,
+            browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
         )

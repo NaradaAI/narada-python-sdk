@@ -32,15 +32,15 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
 
 class BaseBrowserWindow(abc.ABC):
     api_key: str
-    _id: str
+    _browser_window_id: str
 
-    def __init__(self, *, api_key: str, id: str) -> None:
+    def __init__(self, *, api_key: str, browser_window_id: str) -> None:
         self.api_key = api_key
-        self._id = id
+        self._browser_window_id = browser_window_id
 
     @property
-    def id(self) -> str:
-        return self._id
+    def browser_window_id(self) -> str:
+        return self._browser_window_id
 
     @overload
     async def dispatch_request(
@@ -100,7 +100,7 @@ class BaseBrowserWindow(abc.ABC):
 
         body: dict[str, Any] = {
             "prompt": prompt,
-            "browserWindowId": self.id,
+            "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
         if clear_chat is not None:
@@ -178,19 +178,19 @@ class LocalBrowserWindow(BaseBrowserWindow):
         self,
         *,
         api_key: str,
-        id: str,
+        browser_window_id: str,
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
-        super().__init__(api_key=api_key, id=id)
+        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
         self._config = config
         self._context = context
 
     def __str__(self) -> str:
-        return f"LocalBrowserWindow(id={self.id})"
+        return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
 
     async def reinitialize(self) -> None:
-        side_panel_url = create_side_panel_url(self._config, self._id)
+        side_panel_url = create_side_panel_url(self._config, self._browser_window_id)
         side_panel_page = next(
             p for p in self._context.pages if p.url == side_panel_url
         )
@@ -201,12 +201,12 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
-    def __init__(self, *, id: str, api_key: str | None = None) -> None:
+    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         api_key = api_key or os.environ["NARADA_API_KEY"]
-        super().__init__(api_key=api_key, id=id)
+        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
 
     def __str__(self) -> str:
-        return f"RemoteBrowserWindow(id={self.id})"
+        return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:

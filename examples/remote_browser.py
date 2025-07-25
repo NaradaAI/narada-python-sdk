@@ -9,7 +9,7 @@ async def main() -> None:
     # https://app.narada.ai/initialize.
     browser_window_id = "REPLACE_WITH_BROWSER_WINDOW_ID"
 
-    window = RemoteBrowserWindow(id=browser_window_id)
+    window = RemoteBrowserWindow(browser_window_id=browser_window_id)
 
     # Run a task on another machine.
     response = await window.dispatch_request(
