@@ -1,4 +1,6 @@
+import abc
 import asyncio
+import os
 import time
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
@@ -28,36 +30,17 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     completedAt: str | None
 
 
-class BrowserWindow:
-    _api_key: str
-    _config: BrowserConfig
-    _context: BrowserContext
+class BaseBrowserWindow(abc.ABC):
+    api_key: str
     _id: str
 
-    def __init__(
-        self, *, api_key: str, config: BrowserConfig, context: BrowserContext, id: str
-    ) -> None:
-        self._api_key = api_key
-        self._config = config
-        self._context = context
+    def __init__(self, *, api_key: str, id: str) -> None:
+        self.api_key = api_key
         self._id = id
 
     @property
     def id(self) -> str:
         return self._id
-
-    def __str__(self) -> str:
-        return f"BrowserWindow(id={self.id})"
-
-    async def reinitialize(self) -> None:
-        side_panel_url = create_side_panel_url(self._config, self._id)
-        side_panel_page = next(
-            p for p in self._context.pages if p.url == side_panel_url
-        )
-
-        # Refresh the extension side panel, which ensures any inflight Narada operations are
-        # canceled.
-        await side_panel_page.reload()
 
     @overload
     async def dispatch_request(
@@ -113,7 +96,7 @@ class BrowserWindow:
     ) -> Response:
         deadline = time.monotonic() + timeout
 
-        headers = {"x-api-key": self._api_key}
+        headers = {"x-api-key": self.api_key}
 
         body: dict[str, Any] = {
             "prompt": prompt,
@@ -185,6 +168,45 @@ class BrowserWindow:
 
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
+
+
+class LocalBrowserWindow(BaseBrowserWindow):
+    _config: BrowserConfig
+    _context: BrowserContext
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        id: str,
+        config: BrowserConfig,
+        context: BrowserContext,
+    ) -> None:
+        super().__init__(api_key=api_key, id=id)
+        self._config = config
+        self._context = context
+
+    def __str__(self) -> str:
+        return f"LocalBrowserWindow(id={self.id})"
+
+    async def reinitialize(self) -> None:
+        side_panel_url = create_side_panel_url(self._config, self._id)
+        side_panel_page = next(
+            p for p in self._context.pages if p.url == side_panel_url
+        )
+
+        # Refresh the extension side panel, which ensures any inflight Narada operations are
+        # canceled.
+        await side_panel_page.reload()
+
+
+class RemoteBrowserWindow(BaseBrowserWindow):
+    def __init__(self, *, id: str, api_key: str | None = None) -> None:
+        api_key = api_key or os.environ["NARADA_API_KEY"]
+        super().__init__(api_key=api_key, id=id)
+
+    def __str__(self) -> str:
+        return f"RemoteBrowserWindow(id={self.id})"
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:

@@ -32,7 +32,7 @@ from narada.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada.utils import assert_never
-from narada.window import BrowserWindow, create_side_panel_url
+from narada.window import LocalBrowserWindow, create_side_panel_url
 
 
 class _CreateSubprocessExtraArgs(TypedDict, total=False):
@@ -89,7 +89,7 @@ class Narada:
 
     async def open_and_initialize_browser_window(
         self, config: BrowserConfig | None = None
-    ) -> BrowserWindow:
+    ) -> LocalBrowserWindow:
         assert self._playwright is not None
         playwright = self._playwright
 
@@ -120,11 +120,11 @@ class Narada:
         await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
         await cdp_session.detach()
 
-        return BrowserWindow(
+        return LocalBrowserWindow(
             api_key=self._api_key,
+            id=browser_window_id,
             config=config,
             context=side_panel_page.context,
-            id=browser_window_id,
         )
 
     async def _launch_browser(

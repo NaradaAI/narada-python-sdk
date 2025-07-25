@@ -9,17 +9,18 @@ from narada.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada.window import (
-    BrowserWindow,
+    LocalBrowserWindow,
+    RemoteBrowserWindow,
     Response,
     ResponseContent,
 )
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 
 __all__ = [
     "BrowserConfig",
-    "BrowserWindow",
+    "LocalBrowserWindow",
     "Narada",
     "NaradaError",
     "NaradaExtensionMissingError",
@@ -27,6 +28,7 @@ __all__ = [
     "NaradaInitializationError",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
+    "RemoteBrowserWindow",
     "Response",
     "ResponseContent",
 ]
