@@ -13,7 +13,7 @@ async def main() -> None:
         for attempt in range(max_attempts):
             try:
                 response = await window.dispatch_request(
-                    prompt='/Operator Search for "random number between 1 and 5" on Google and extract the generated number from the search result page. Output just the number.',
+                    prompt='Search for "random number between 1 and 5" on Google and extract the generated number from the search result page. Output just the number.',
                     # Force a timeout on the first attempt to demonstrate timeout handling.
                     timeout=3 if attempt == 0 else 120,
                 )

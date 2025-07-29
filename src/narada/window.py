@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from narada.config import BrowserConfig
 from narada.errors import NaradaTimeoutError
-from narada.models import RemoteDispatchChatHistoryItem, UserResourceCredentials
+from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -47,6 +47,7 @@ class BaseBrowserWindow(abc.ABC):
         self,
         *,
         prompt: str,
+        agent: Agent = Agent.OPERATOR,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -65,6 +66,7 @@ class BaseBrowserWindow(abc.ABC):
         self,
         *,
         prompt: str,
+        agent: Agent = Agent.OPERATOR,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -82,6 +84,7 @@ class BaseBrowserWindow(abc.ABC):
         self,
         *,
         prompt: str,
+        agent: Agent = Agent.OPERATOR,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -99,7 +102,7 @@ class BaseBrowserWindow(abc.ABC):
         headers = {"x-api-key": self.api_key}
 
         body: dict[str, Any] = {
-            "prompt": prompt,
+            "prompt": agent.prompt_prefix() + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
