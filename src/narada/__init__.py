@@ -8,6 +8,7 @@ from narada.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
+from narada.models import Agent
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,
@@ -15,10 +16,11 @@ from narada.window import (
     ResponseContent,
 )
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 
 __all__ = [
+    "Agent",
     "BrowserConfig",
     "LocalBrowserWindow",
     "Narada",

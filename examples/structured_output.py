@@ -28,9 +28,8 @@ async def main() -> None:
         # Run a task in this browser window.
         response = await window.dispatch_request(
             prompt=(
-                '/Operator Search for "LLM Compiler" on Google and open the first arXiv paper on '
-                "the results page. Then extract the paper info from the arXiv page in the given "
-                "format."
+                'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
+                "page. Then extract the paper info from the arXiv page in the given format."
             ),
             output_schema=PaperInfo,
         )

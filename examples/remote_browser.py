@@ -14,8 +14,8 @@ async def main() -> None:
     # Run a task on another machine.
     response = await window.dispatch_request(
         prompt=(
-            '/Operator Search for "LLM Compiler" on Google and open the first arXiv paper on the '
-            "results page, then tell me who the authors are."
+            'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
+            "page, then tell me who the authors are."
         )
     )
 

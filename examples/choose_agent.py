@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, Narada
 
 
 async def main() -> None:
@@ -9,11 +9,9 @@ async def main() -> None:
         # Open a new browser window and initialize the Narada UI agent.
         window = await narada.open_and_initialize_browser_window()
 
-        # Run a task in this browser window.
+        # Choose a specific agent to handle the task. By default, the Operator agent is used.
         response = await window.dispatch_request(
-            prompt='Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF. Then download the PDF of the paper.',
-            # Optionally generate a GIF of the agent's actions.
-            generate_gif=True,
+            prompt="Tell me a joke.", agent=Agent.GENERALIST
         )
 
         assert response["response"] is not None
