@@ -19,7 +19,14 @@ from narada.models import (
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
+_MaybeStructuredOutput = TypeVar(
+    "_MaybeStructuredOutput", bound=BaseModel | None)
+
+
+class User(BaseModel):
+    uid: str
+    token: str
+    env: Literal['prod', 'dev']
 
 
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
@@ -36,11 +43,13 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
 
 
 class BaseBrowserWindow(abc.ABC):
-    api_key: str
+    api_key: str | None
+    user: User | None
     _browser_window_id: str
 
-    def __init__(self, *, api_key: str, browser_window_id: str) -> None:
+    def __init__(self, *, api_key: str | None, user: User | None, browser_window_id: str) -> None:
         self.api_key = api_key
+        self.user = user
         self._browser_window_id = browser_window_id
 
     @property
@@ -104,7 +113,18 @@ class BaseBrowserWindow(abc.ABC):
     ) -> Response:
         deadline = time.monotonic() + timeout
 
-        headers = {"Content-Type": "application/json", "x-api-key": self.api_key}
+        headers = {"Content-Type": "application/json"}
+        base_url = "http://localhost:8000/fast/v2" if self.user.get(
+            "env") == "dev" else "https://api.narada.ai/fast/v2"
+
+        if self.user is not None:
+            headers["Authorization"] = f"Bearer {self.user.get('token')}"
+            headers["X-Narada-User-ID"] = self.user.get("uid")
+            headers['X-Narada-Env'] = self.user.get('env')
+        elif self.api_key is not None:
+            headers["x-api-key"] = self.api_key
+        else:
+            raise ValueError("Either api_key or user must be provided")
 
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
@@ -143,7 +163,7 @@ class BaseBrowserWindow(abc.ABC):
 
             setTimeout(create_once_callable(controller.abort), timeout * 1000)
             fetch_response = await pyfetch(
-                "https://api.narada.ai/fast/v2/remote-dispatch",
+                f"{base_url}/remote-dispatch",
                 method="POST",
                 headers=headers,
                 body=json.dumps(body),
@@ -166,7 +186,7 @@ class BaseBrowserWindow(abc.ABC):
                     (deadline - now) * 1000,
                 )
                 fetch_response = await pyfetch(
-                    f"https://api.narada.ai/fast/v2/remote-dispatch/responses/{request_id}",
+                    f"{base_url}/remote-dispatch/responses/{request_id}",
                     headers=headers,
                     signal=signal,
                 )
@@ -203,9 +223,9 @@ class BaseBrowserWindow(abc.ABC):
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
-    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
-        api_key = api_key or os.environ["NARADA_API_KEY"]
-        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
+    def __init__(self, *, browser_window_id: str, api_key: str | None = None, user: User | None = None) -> None:
+        api_key = api_key or os.environ.get("NARADA_API_KEY")
+        super().__init__(api_key=api_key, user=user, browser_window_id=browser_window_id)
 
     def __str__(self) -> str:
-        return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+        return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id}, user={self.user})"
