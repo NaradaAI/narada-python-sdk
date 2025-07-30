@@ -19,8 +19,7 @@ from narada.models import (
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
-_MaybeStructuredOutput = TypeVar(
-    "_MaybeStructuredOutput", bound=BaseModel | None)
+_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
 class User(BaseModel):
