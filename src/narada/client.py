@@ -102,7 +102,7 @@ class Narada:
             except _ShouldRetryCreateProcess as e:
                 if config.interactive:
                     self._console.input(
-                        "\n:wrench: [bold blue]New extension installation detected. Press Enter to "
+                        "\n> [bold blue]New extension installation detected. Press Enter to "
                         "relaunch the browser and continue.[/bold blue]"
                     )
 
@@ -213,7 +213,7 @@ class Narada:
 
         if config.interactive:
             self._console.print(
-                "\n:rocket: Initialization successful. Browser window ID: "
+                "\n> Initialization successful. Browser window ID: "
                 f"{browser_window_id}\n",
                 style="bold green",
             )
@@ -313,13 +313,13 @@ class Narada:
                     )
                 except NaradaExtensionMissingError:
                     self._console.input(
-                        "\n:wrench: [bold blue]The Narada Enterprise extension is not installed. "
+                        "\n> [bold blue]The Narada Enterprise extension is not installed. "
                         "Please follow the instructions in the browser window to install it first, "
                         "then press Enter to continue.[/bold blue]",
                     )
                 except NaradaExtensionUnauthenticatedError:
                     self._console.input(
-                        "\n:lock: [bold blue]Please sign in to the Narada extension first, then "
+                        "\n> [bold blue]Please sign in to the Narada extension first, then "
                         "press Enter to continue.[/bold blue]",
                     )
 
@@ -331,7 +331,7 @@ class Narada:
 
         except TargetClosedError:
             self._console.print(
-                "\n:warning: It seems the Narada automation page was closed. Please retry the "
+                "\n> It seems the Narada automation page was closed. Please retry the "
                 "action and keep the Narada web page open.",
                 style="bold red",
             )
