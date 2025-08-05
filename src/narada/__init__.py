@@ -16,7 +16,7 @@ from narada.window import (
     ResponseContent,
 )
 
-__version__ = "0.1.10"
+__version__ = "0.1.11"
 
 
 __all__ = [
