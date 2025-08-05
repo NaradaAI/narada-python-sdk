@@ -6,10 +6,10 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any
 from uuid import uuid4
 
-from playwright._impl._errors import TargetClosedError
+from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
     Browser,
     ElementHandle,
@@ -35,11 +35,6 @@ from narada.utils import assert_never
 from narada.window import LocalBrowserWindow, create_side_panel_url
 
 
-class _CreateSubprocessExtraArgs(TypedDict, total=False):
-    creationflags: int
-    start_new_session: bool
-
-
 @dataclass
 class _LaunchBrowserResult:
     browser_window_id: str
@@ -48,10 +43,12 @@ class _LaunchBrowserResult:
 
 class _ShouldRetryCreateProcess(Exception):
     browser: Browser
-    browser_process: asyncio.subprocess.Process
+    browser_process: asyncio.subprocess.Process | subprocess.Popen[bytes]
 
     def __init__(
-        self, browser: Browser, browser_process: asyncio.subprocess.Process
+        self,
+        browser: Browser,
+        browser_process: asyncio.subprocess.Process | subprocess.Popen[bytes],
     ) -> None:
         super().__init__()
         self.browser = browser
@@ -111,7 +108,12 @@ class Narada:
 
                 # Gracefully terminate the browser process.
                 e.browser_process.terminate()
-                await e.browser_process.wait()
+                if isinstance(e.browser_process, asyncio.subprocess.Process):
+                    await e.browser_process.wait()
+                else:
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, e.browser_process.wait
+                    )
 
         side_panel_page = launch_browser_result.side_panel_page
         browser_window_id = launch_browser_result.browser_window_id
@@ -146,28 +148,26 @@ class Narada:
             # "--disable-blink-features=AutomationControlled",
         ]
 
-        # OS-dependent arguments to create the browser process as a detached, independent process.
-        extra_args: _CreateSubprocessExtraArgs
-        if sys.platform == "win32":
-            extra_args = {
-                "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.DETACHED_PROCESS
-            }
-        else:
-            extra_args = {
-                "start_new_session": True,
-            }
-
         # Launch an independent browser process which will not be killed when the current program
         # exits.
-        browser_process = await asyncio.create_subprocess_exec(
-            config.executable_path,
-            *browser_args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            **extra_args,
-        )
+        if sys.platform == "win32":
+            browser_process = subprocess.Popen(
+                [config.executable_path, *browser_args],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.DETACHED_PROCESS,
+            )
+        else:
+            browser_process = await asyncio.create_subprocess_exec(
+                config.executable_path,
+                *browser_args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
 
         logging.debug("Browser process started with PID: %s", browser_process.pid)
 
@@ -213,9 +213,8 @@ class Narada:
 
         if config.interactive:
             self._console.print(
-                "\n> Initialization successful. Browser window ID: "
-                f"{browser_window_id}\n",
-                style="bold green",
+                "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
+                f"{browser_window_id}[/bold green]\n",
             )
 
         return _LaunchBrowserResult(
@@ -313,14 +312,14 @@ class Narada:
                     )
                 except NaradaExtensionMissingError:
                     self._console.input(
-                        "\n> [bold blue]The Narada Enterprise extension is not installed. "
-                        "Please follow the instructions in the browser window to install it first, "
-                        "then press Enter to continue.[/bold blue]",
+                        "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
+                        "installed. Please follow the instructions in the browser window to "
+                        "install it first, then press Enter to continue.[/bold blue]\n",
                     )
                 except NaradaExtensionUnauthenticatedError:
                     self._console.input(
-                        "\n> [bold blue]Please sign in to the Narada extension first, then "
-                        "press Enter to continue.[/bold blue]",
+                        "\n[bold]>[/bold] [bold blue]Please sign in to the Narada extension first, "
+                        "then press Enter to continue.[/bold blue]",
                     )
 
                 # Bring the page to the front and wait a little bit before refreshing it, as this
@@ -329,10 +328,9 @@ class Narada:
                 await asyncio.sleep(0.1)
                 await page.reload()
 
-        except TargetClosedError:
+        except PlaywrightError:
             self._console.print(
-                "\n> It seems the Narada automation page was closed. Please retry the "
-                "action and keep the Narada web page open.",
-                style="bold red",
+                "\n[bold]>[/bold] [bold red]It seems the Narada automation page was closed. Please "
+                "retry the action and keep the Narada web page open.[/bold red]",
             )
             sys.exit(1)
