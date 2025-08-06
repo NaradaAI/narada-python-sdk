@@ -306,7 +306,7 @@ class BaseBrowserWindow(abc.ABC):
             "https://api.narada.ai/fast/v2/extension-actions",
             method="POST",
             headers=headers,
-            json=json.dumps(body),
+            body=json.dumps(body),
             # Don't specify `timeout` here as the (soft) timeout is handled by the server.
         )
 
