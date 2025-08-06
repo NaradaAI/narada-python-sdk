@@ -304,6 +304,7 @@ class BaseBrowserWindow(abc.ABC):
 
         fetch_response = await pyfetch(
             "https://api.narada.ai/fast/v2/extension-actions",
+            method="POST",
             headers=headers,
             json=json.dumps(body),
             # Don't specify `timeout` here as the (soft) timeout is handled by the server.

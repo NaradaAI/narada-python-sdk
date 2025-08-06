@@ -5,7 +5,7 @@ description = "Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.12.13",
     "playwright>=1.53.0",
