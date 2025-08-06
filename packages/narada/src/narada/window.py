@@ -43,11 +43,11 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
 class BaseBrowserWindow(abc.ABC):
-    api_key: str
+    _api_key: str
     _browser_window_id: str
 
     def __init__(self, *, api_key: str, browser_window_id: str) -> None:
-        self.api_key = api_key
+        self._api_key = api_key
         self._browser_window_id = browser_window_id
 
     @property
@@ -115,7 +115,7 @@ class BaseBrowserWindow(abc.ABC):
         """
         deadline = time.monotonic() + timeout
 
-        headers = {"x-api-key": self.api_key}
+        headers = {"x-api-key": self._api_key}
 
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
@@ -271,7 +271,7 @@ class BaseBrowserWindow(abc.ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel:
-        headers = {"x-api-key": self.api_key}
+        headers = {"x-api-key": self._api_key}
 
         body = {
             "action": request.model_dump(),
