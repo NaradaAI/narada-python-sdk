@@ -134,7 +134,6 @@ class BaseBrowserWindow(abc.ABC):
                 "type": "jsonSchema",
                 "jsonSchema": output_schema.model_json_schema(),
             }
-
         if previous_request_id is not None:
             body["previousRequestId"] = previous_request_id
         if chat_history is not None:
