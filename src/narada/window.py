@@ -2,12 +2,21 @@ import abc
 import asyncio
 import os
 import time
+from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
 import aiohttp
 from playwright.async_api import BrowserContext
 from pydantic import BaseModel
 
+from narada.actions.models import (
+    AgentResponse,
+    ExtensionActionRequest,
+    GoToUrlRequest,
+    GoToUrlResponse,
+    PrintMessageRequest,
+    PrintMessageResponse,
+)
 from narada.config import BrowserConfig
 from narada.errors import NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
@@ -28,6 +37,9 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
+
+
+_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
 class BaseBrowserWindow(abc.ABC):
@@ -97,6 +109,10 @@ class BaseBrowserWindow(abc.ABC):
         callback_secret: str | None = None,
         timeout: int = 120,
     ) -> Response:
+        """Low-level API for invoking an agent in the Narada extension side panel chat.
+
+        The higher-level `agent` method should be preferred for most use cases.
+        """
         deadline = time.monotonic() + timeout
 
         headers = {"x-api-key": self.api_key}
@@ -174,6 +190,109 @@ class BaseBrowserWindow(abc.ABC):
 
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
+
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Agent | str = Agent.OPERATOR,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        time_zone: str = "America/Los_Angeles",
+        timeout: int = 120,
+    ) -> AgentResponse[None]: ...
+
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Agent | str = Agent.OPERATOR,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        time_zone: str = "America/Los_Angeles",
+        timeout: int = 120,
+    ) -> AgentResponse[_StructuredOutput]: ...
+
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Agent | str = Agent.OPERATOR,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[BaseModel] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        timeout: int = 120,
+    ) -> AgentResponse:
+        """Invokes an agent in the Narada extension side panel chat."""
+        remote_dispatch_response = await self.dispatch_request(
+            prompt=prompt,
+            agent=agent,
+            clear_chat=clear_chat,
+            generate_gif=generate_gif,
+            output_schema=output_schema,
+            time_zone=time_zone,
+            timeout=timeout,
+        )
+        response_content = remote_dispatch_response["response"]
+        assert response_content is not None
+
+        return AgentResponse(
+            status=remote_dispatch_response["status"],
+            text=response_content["text"],
+            structured_output=response_content.get("structuredOutput"),
+        )
+
+    async def go_to_url(
+        self, *, url: str, timeout: int | None = None
+    ) -> GoToUrlResponse:
+        """Navigates the active page in this window to the given URL."""
+        return await self._run_extension_action(
+            GoToUrlRequest(url=url), GoToUrlResponse, timeout=timeout
+        )
+
+    async def print_message(
+        self, *, message: str, timeout: int | None = None
+    ) -> PrintMessageResponse:
+        """Prints a message in the Narada extension side panel chat."""
+        return await self._run_extension_action(
+            PrintMessageRequest(message=message),
+            PrintMessageResponse,
+            timeout=timeout,
+        )
+
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: type[_ResponseModel],
+        *,
+        timeout: int | None = None,
+    ) -> _ResponseModel:
+        headers = {"x-api-key": self.api_key}
+
+        body = {
+            "action": request.model_dump(),
+            "browserWindowId": self.browser_window_id,
+        }
+        if timeout is not None:
+            body["timeout"] = timeout
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.narada.ai/fast/v2/extension-actions",
+                headers=headers,
+                json=body,
+                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+            ) as resp:
+                if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
+                    raise NaradaTimeoutError
+                resp.raise_for_status()
+
+                return response_model.model_validate(await resp.json())
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
