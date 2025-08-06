@@ -361,7 +361,7 @@ class BaseBrowserWindow(abc.ABC):
         return response_model.model_validate(await fetch_response.json())
 
 
-class RemoteBrowserWindow(BaseBrowserWindow):
+class LocalBrowserWindow(BaseBrowserWindow):
     def __init__(self) -> None:
         env = os.environ.get("NARADA_ENV")
         if env is not None and env not in ("prod", "dev"):
@@ -373,6 +373,21 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             user_id_token=os.environ.get("NARADA_USER_ID_TOKEN"),
             env=env,
             browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
+        )
+
+    def __str__(self) -> str:
+        return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
+
+
+class RemoteBrowserWindow(BaseBrowserWindow):
+    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+        api_key = api_key or os.environ["NARADA_API_KEY"]
+        super().__init__(
+            api_key=api_key,
+            user_id=None,
+            user_id_token=None,
+            env=None,
+            browser_window_id=browser_window_id,
         )
 
     def __str__(self) -> str:

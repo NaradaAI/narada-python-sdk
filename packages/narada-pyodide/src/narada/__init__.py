@@ -5,6 +5,7 @@ from narada.errors import (
 )
 from narada.models import Agent
 from narada.window import (
+    LocalBrowserWindow,
     RemoteBrowserWindow,
     Response,
     ResponseContent,
@@ -12,6 +13,7 @@ from narada.window import (
 
 __all__ = [
     "Agent",
+    "LocalBrowserWindow",
     "Narada",
     "NaradaError",
     "NaradaTimeoutError",
