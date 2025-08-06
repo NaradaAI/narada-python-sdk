@@ -109,6 +109,10 @@ class BaseBrowserWindow(abc.ABC):
         callback_secret: str | None = None,
         timeout: int = 120,
     ) -> Response:
+        """Low-level API for invoking an agent in the Narada extension side panel chat.
+
+        The higher-level `agent` method should be preferred for most use cases.
+        """
         deadline = time.monotonic() + timeout
 
         headers = {"x-api-key": self.api_key}
@@ -224,6 +228,7 @@ class BaseBrowserWindow(abc.ABC):
         time_zone: str = "America/Los_Angeles",
         timeout: int = 120,
     ) -> AgentResponse:
+        """Invokes an agent in the Narada extension side panel chat."""
         remote_dispatch_response = await self.dispatch_request(
             prompt=prompt,
             agent=agent,
@@ -245,6 +250,7 @@ class BaseBrowserWindow(abc.ABC):
     async def go_to_url(
         self, *, url: str, timeout: int | None = None
     ) -> GoToUrlResponse:
+        """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
             GoToUrlRequest(url=url), GoToUrlResponse, timeout=timeout
         )
@@ -252,6 +258,7 @@ class BaseBrowserWindow(abc.ABC):
     async def print_message(
         self, *, message: str, timeout: int | None = None
     ) -> PrintMessageResponse:
+        """Prints a message in the Narada extension side panel chat."""
         return await self._run_extension_action(
             PrintMessageRequest(message=message),
             PrintMessageResponse,
