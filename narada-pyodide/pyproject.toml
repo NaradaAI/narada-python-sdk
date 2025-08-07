@@ -1,0 +1,28 @@
+
+[project]
+name = "narada-pyodide"
+version = "0.0.11"
+description = "Pyodide-compatible Python client SDK for Narada"
+license = "Apache-2.0"
+readme = "README.md"
+authors = [{ name = "Narada", email = "support@narada.ai" }]
+requires-python = ">=3.12"
+dependencies = [
+    # Must use a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
+    "pydantic==2.10.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/NaradaAI/narada-python-sdk/packages/narada-pyodide"
+Repository = "https://github.com/NaradaAI/narada-python-sdk"
+Issues = "https://github.com/NaradaAI/narada-python-sdk/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pyodide-py>=0.27.7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/narada"]

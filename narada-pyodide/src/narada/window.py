@@ -1,13 +1,15 @@
 import abc
 import asyncio
+import json
 import os
 import time
 from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
-import aiohttp
-from playwright.async_api import BrowserContext
+from js import AbortController, setTimeout  # type: ignore
 from pydantic import BaseModel
+from pyodide.ffi import create_once_callable
+from pyodide.http import pyfetch
 
 from narada.actions.models import (
     AgentResponse,
@@ -17,8 +19,7 @@ from narada.actions.models import (
     PrintMessageRequest,
     PrintMessageResponse,
 )
-from narada.config import BrowserConfig
-from narada.errors import NaradaTimeoutError
+from narada.errors import NaradaError, NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
@@ -43,11 +44,32 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
 class BaseBrowserWindow(abc.ABC):
-    api_key: str
+    _api_key: str | None
+    _user_id: str | None
+    _user_id_token: str | None
+    _env: Literal["prod", "dev", None]
     _browser_window_id: str
 
-    def __init__(self, *, api_key: str, browser_window_id: str) -> None:
-        self.api_key = api_key
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        user_id: str | None,
+        user_id_token: str | None,
+        env: Literal["prod", "dev", None] = "prod",
+        browser_window_id: str,
+    ) -> None:
+        if api_key is None and (
+            user_id is None or user_id_token is None or env is None
+        ):
+            raise ValueError(
+                "Either `api_key` or all of `user_id`, `user_id_token`, and `env` must be provided"
+            )
+
+        self._api_key = api_key
+        self._user_id = user_id
+        self._user_id_token = user_id_token
+        self._env = env
         self._browser_window_id = browser_window_id
 
     @property
@@ -115,7 +137,17 @@ class BaseBrowserWindow(abc.ABC):
         """
         deadline = time.monotonic() + timeout
 
-        headers = {"x-api-key": self.api_key}
+        headers = {"Content-Type": "application/json"}
+        if self._api_key is not None:
+            headers["x-api-key"] = self._api_key
+        else:
+            assert self._user_id is not None
+            assert self._user_id_token is not None
+            assert self._env is not None
+
+            headers["Authorization"] = f"Bearer {self._user_id_token}"
+            headers["X-Narada-User-ID"] = self._user_id
+            headers["X-Narada-Env"] = self._env
 
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
@@ -134,7 +166,6 @@ class BaseBrowserWindow(abc.ABC):
                 "type": "jsonSchema",
                 "jsonSchema": output_schema.model_json_schema(),
             }
-
         if previous_request_id is not None:
             body["previousRequestId"] = previous_request_id
         if chat_history is not None:
@@ -149,44 +180,65 @@ class BaseBrowserWindow(abc.ABC):
             body["callbackSecret"] = callback_secret
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.narada.ai/fast/v2/remote-dispatch",
+            controller = AbortController.new()
+            signal = controller.signal
+
+            setTimeout(create_once_callable(controller.abort), timeout * 1000)
+            fetch_response = await pyfetch(
+                "https://api.narada.ai/fast/v2/remote-dispatch",
+                method="POST",
+                headers=headers,
+                body=json.dumps(body),
+                signal=signal,
+            )
+
+            if not fetch_response.ok:
+                status = fetch_response.status
+                text = await fetch_response.text()
+                raise NaradaError(f"Failed to dispatch request: {status} {text}")
+
+            request_id = (await fetch_response.json())["requestId"]
+
+            while (now := time.monotonic()) < deadline:
+                abort_controller = AbortController.new()
+                signal = abort_controller.signal
+
+                setTimeout(
+                    create_once_callable(abort_controller.abort),
+                    (deadline - now) * 1000,
+                )
+                fetch_response = await pyfetch(
+                    f"https://api.narada.ai/fast/v2/remote-dispatch/responses/{request_id}",
                     headers=headers,
-                    json=body,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as resp:
-                    resp.raise_for_status()
-                    request_id = (await resp.json())["requestId"]
+                    signal=signal,
+                )
 
-                while (now := time.monotonic()) < deadline:
-                    async with session.get(
-                        f"https://api.narada.ai/fast/v2/remote-dispatch/responses/{request_id}",
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=deadline - now),
-                    ) as resp:
-                        resp.raise_for_status()
-                        response = await resp.json()
+                if not fetch_response.ok:
+                    status = fetch_response.status
+                    text = await fetch_response.text()
+                    raise NaradaError(f"Failed to poll for response: {status} {text}")
 
-                    if response["status"] != "pending":
-                        response_content = response["response"]
-                        if response_content is not None:
-                            # Populate the `structuredOutput` field. This is a client-side field
-                            # that's not directly returned by the API.
-                            if output_schema is None:
-                                response_content["structuredOutput"] = None
-                            else:
-                                structured_output = output_schema.model_validate_json(
-                                    response_content["text"]
-                                )
-                                response_content["structuredOutput"] = structured_output
+                response = await fetch_response.json()
 
-                        return response
+                if response["status"] != "pending":
+                    response_content = response["response"]
+                    if response_content is not None:
+                        # Populate the `structuredOutput` field. This is a client-side field
+                        # that's not directly returned by the API.
+                        if output_schema is None:
+                            response_content["structuredOutput"] = None
+                        else:
+                            structured_output = output_schema.model_validate_json(
+                                response_content["text"]
+                            )
+                            response_content["structuredOutput"] = structured_output
 
-                    # Poll every 3 seconds.
-                    await asyncio.sleep(3)
-                else:
-                    raise NaradaTimeoutError
+                    return response
+
+                # Poll every 3 seconds.
+                await asyncio.sleep(3)
+            else:
+                raise NaradaTimeoutError
 
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
@@ -248,11 +300,11 @@ class BaseBrowserWindow(abc.ABC):
         )
 
     async def go_to_url(
-        self, *, url: str, timeout: int | None = None
+        self, *, url: str, new_tab: bool = False, timeout: int | None = None
     ) -> GoToUrlResponse:
         """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
-            GoToUrlRequest(url=url), GoToUrlResponse, timeout=timeout
+            GoToUrlRequest(url=url, new_tab=new_tab), GoToUrlResponse, timeout=timeout
         )
 
     async def print_message(
@@ -272,7 +324,17 @@ class BaseBrowserWindow(abc.ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel:
-        headers = {"x-api-key": self.api_key}
+        headers = {"Content-Type": "application/json"}
+        if self._api_key is not None:
+            headers["x-api-key"] = self._api_key
+        else:
+            assert self._user_id is not None
+            assert self._user_id_token is not None
+            assert self._env is not None
+
+            headers["Authorization"] = f"Bearer {self._user_id_token}"
+            headers["X-Narada-User-ID"] = self._user_id
+            headers["X-Narada-Env"] = self._env
 
         body = {
             "action": request.model_dump(),
@@ -281,58 +343,52 @@ class BaseBrowserWindow(abc.ABC):
         if timeout is not None:
             body["timeout"] = timeout
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.narada.ai/fast/v2/extension-actions",
-                headers=headers,
-                json=body,
-                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
-            ) as resp:
-                if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
-                    raise NaradaTimeoutError
-                resp.raise_for_status()
+        fetch_response = await pyfetch(
+            "https://api.narada.ai/fast/v2/extension-actions",
+            method="POST",
+            headers=headers,
+            body=json.dumps(body),
+            # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+        )
 
-                return response_model.model_validate(await resp.json())
+        if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
+            raise NaradaTimeoutError
+        elif not fetch_response.ok:
+            status = fetch_response.status
+            text = await fetch_response.text()
+            raise NaradaError(f"Failed to run extension action: {status} {text}")
+
+        return response_model.model_validate(await fetch_response.json())
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
-    _config: BrowserConfig
-    _context: BrowserContext
+    def __init__(self) -> None:
+        env = os.environ.get("NARADA_ENV")
+        if env is not None and env not in ("prod", "dev"):
+            raise ValueError(f"Invalid environment: {env!r}")
 
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        browser_window_id: str,
-        config: BrowserConfig,
-        context: BrowserContext,
-    ) -> None:
-        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
-        self._config = config
-        self._context = context
+        super().__init__(
+            api_key=os.environ.get("NARADA_API_KEY"),
+            user_id=os.environ.get("NARADA_USER_ID"),
+            user_id_token=os.environ.get("NARADA_USER_ID_TOKEN"),
+            env=env,
+            browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
+        )
 
     def __str__(self) -> str:
         return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
-
-    async def reinitialize(self) -> None:
-        side_panel_url = create_side_panel_url(self._config, self._browser_window_id)
-        side_panel_page = next(
-            p for p in self._context.pages if p.url == side_panel_url
-        )
-
-        # Refresh the extension side panel, which ensures any inflight Narada operations are
-        # canceled.
-        await side_panel_page.reload()
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         api_key = api_key or os.environ["NARADA_API_KEY"]
-        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
+        super().__init__(
+            api_key=api_key,
+            user_id=None,
+            user_id_token=None,
+            env=None,
+            browser_window_id=browser_window_id,
+        )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
-
-
-def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
-    return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
