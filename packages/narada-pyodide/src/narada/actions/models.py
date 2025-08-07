@@ -23,18 +23,10 @@ class AgentResponse(BaseExtensionActionResponse, Generic[_MaybeStructuredOutput]
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str
+    new_tab: bool
 
 
 class GoToUrlResponse(BaseExtensionActionResponse):
-    pass
-
-
-class NewPageRequest(BaseModel):
-    name: Literal["new_page"] = "new_page"
-    url: str
-
-
-class NewPageResponse(BaseExtensionActionResponse):
     pass
 
 
@@ -47,4 +39,4 @@ class PrintMessageResponse(BaseExtensionActionResponse):
     pass
 
 
-type ExtensionActionRequest = GoToUrlRequest | NewPageRequest | PrintMessageRequest
+type ExtensionActionRequest = GoToUrlRequest | PrintMessageRequest
