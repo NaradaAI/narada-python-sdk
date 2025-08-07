@@ -1,1 +1,1 @@
-packages/narada/README.md
+narada/README.md
