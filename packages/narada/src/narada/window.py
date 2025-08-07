@@ -14,6 +14,8 @@ from narada.actions.models import (
     ExtensionActionRequest,
     GoToUrlRequest,
     GoToUrlResponse,
+    NewPageRequest,
+    NewPageResponse,
     PrintMessageRequest,
     PrintMessageResponse,
 )
@@ -252,6 +254,14 @@ class BaseBrowserWindow(abc.ABC):
         """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
             GoToUrlRequest(url=url), GoToUrlResponse, timeout=timeout
+        )
+
+    async def new_page(
+        self, *, url: str, timeout: int | None = None
+    ) -> NewPageResponse:
+        """Opens a new page in this window with the given initial URL."""
+        return await self._run_extension_action(
+            NewPageRequest(url=url), NewPageResponse, timeout=timeout
         )
 
     async def print_message(

@@ -29,6 +29,15 @@ class GoToUrlResponse(BaseExtensionActionResponse):
     pass
 
 
+class NewPageRequest(BaseModel):
+    name: Literal["new_page"] = "new_page"
+    url: str
+
+
+class NewPageResponse(BaseExtensionActionResponse):
+    pass
+
+
 class PrintMessageRequest(BaseModel):
     name: Literal["print_message"] = "print_message"
     message: str
@@ -38,4 +47,4 @@ class PrintMessageResponse(BaseExtensionActionResponse):
     pass
 
 
-ExtensionActionRequest = GoToUrlRequest | PrintMessageRequest
+type ExtensionActionRequest = GoToUrlRequest | NewPageRequest | PrintMessageRequest
