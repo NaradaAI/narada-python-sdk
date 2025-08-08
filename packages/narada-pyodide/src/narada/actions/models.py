@@ -1,13 +1,6 @@
-from abc import ABC
 from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel
-
-
-class BaseExtensionActionResponse(ABC, BaseModel):
-    status: Literal["success", "error"]
-    error: str | None = None
-
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -15,7 +8,8 @@ class BaseExtensionActionResponse(ABC, BaseModel):
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
-class AgentResponse(BaseExtensionActionResponse, Generic[_MaybeStructuredOutput]):
+class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
+    status: Literal["success", "error", "input-required"]
     text: str
     structured_output: _MaybeStructuredOutput | None
 
@@ -26,17 +20,9 @@ class GoToUrlRequest(BaseModel):
     new_tab: bool
 
 
-class GoToUrlResponse(BaseExtensionActionResponse):
-    pass
-
-
 class PrintMessageRequest(BaseModel):
     name: Literal["print_message"] = "print_message"
     message: str
-
-
-class PrintMessageResponse(BaseExtensionActionResponse):
-    pass
 
 
 class ReadGoogleSheetRequest(BaseModel):
@@ -45,7 +31,7 @@ class ReadGoogleSheetRequest(BaseModel):
     range: str
 
 
-class ReadGoogleSheetResponse(BaseExtensionActionResponse):
+class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
 
 
@@ -56,13 +42,15 @@ class WriteGoogleSheetRequest(BaseModel):
     values: list[list[str]]
 
 
-class WriteGoogleSheetResponse(BaseExtensionActionResponse):
-    pass
-
-
 type ExtensionActionRequest = (
     GoToUrlRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
     | WriteGoogleSheetRequest
 )
+
+
+class ExtensionActionResponse(BaseModel):
+    status: Literal["success", "error"]
+    error: str | None = None
+    data: str | None = None

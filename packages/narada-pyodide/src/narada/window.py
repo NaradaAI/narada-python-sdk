@@ -1,8 +1,8 @@
-import abc
 import asyncio
 import json
 import os
 import time
+from abc import ABC
 from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
@@ -14,14 +14,12 @@ from pyodide.http import pyfetch
 from narada.actions.models import (
     AgentResponse,
     ExtensionActionRequest,
+    ExtensionActionResponse,
     GoToUrlRequest,
-    GoToUrlResponse,
     PrintMessageRequest,
-    PrintMessageResponse,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
-    WriteGoogleSheetResponse,
 )
 from narada.errors import NaradaError, NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
@@ -47,8 +45,9 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class BaseBrowserWindow(abc.ABC):
+class BaseBrowserWindow(ABC):
     _api_key: str | None
+    _base_url: str
     _user_id: str | None
     _user_id_token: str | None
     _env: Literal["prod", "dev", None]
@@ -58,6 +57,7 @@ class BaseBrowserWindow(abc.ABC):
         self,
         *,
         api_key: str | None,
+        base_url: str,
         user_id: str | None,
         user_id_token: str | None,
         env: Literal["prod", "dev", None] = "prod",
@@ -71,6 +71,7 @@ class BaseBrowserWindow(abc.ABC):
             )
 
         self._api_key = api_key
+        self._base_url = base_url
         self._user_id = user_id
         self._user_id_token = user_id_token
         self._env = env
@@ -189,7 +190,7 @@ class BaseBrowserWindow(abc.ABC):
 
             setTimeout(create_once_callable(controller.abort), timeout * 1000)
             fetch_response = await pyfetch(
-                "https://api.narada.ai/fast/v2/remote-dispatch",
+                f"{self._base_url}/remote-dispatch",
                 method="POST",
                 headers=headers,
                 body=json.dumps(body),
@@ -212,7 +213,7 @@ class BaseBrowserWindow(abc.ABC):
                     (deadline - now) * 1000,
                 )
                 fetch_response = await pyfetch(
-                    f"https://api.narada.ai/fast/v2/remote-dispatch/responses/{request_id}",
+                    f"{self._base_url}/remote-dispatch/responses/{request_id}",
                     headers=headers,
                     signal=signal,
                 )
@@ -305,20 +306,16 @@ class BaseBrowserWindow(abc.ABC):
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None
-    ) -> GoToUrlResponse:
+    ) -> None:
         """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
-            GoToUrlRequest(url=url, new_tab=new_tab), GoToUrlResponse, timeout=timeout
+            GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
-    async def print_message(
-        self, *, message: str, timeout: int | None = None
-    ) -> PrintMessageResponse:
+    async def print_message(self, *, message: str, timeout: int | None = None) -> None:
         """Prints a message in the Narada extension side panel chat."""
         return await self._run_extension_action(
-            PrintMessageRequest(message=message),
-            PrintMessageResponse,
-            timeout=timeout,
+            PrintMessageRequest(message=message), timeout=timeout
         )
 
     async def read_google_sheet(
@@ -342,23 +339,40 @@ class BaseBrowserWindow(abc.ABC):
         range: str,
         values: list[list[str]],
         timeout: int | None = None,
-    ) -> WriteGoogleSheetResponse:
+    ) -> None:
         """Writes a range of cells to a Google Sheet."""
         return await self._run_extension_action(
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
             ),
-            WriteGoogleSheetResponse,
             timeout=timeout,
         )
 
+    @overload
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: None = None,
+        *,
+        timeout: int | None = None,
+    ) -> None: ...
+
+    @overload
     async def _run_extension_action(
         self,
         request: ExtensionActionRequest,
         response_model: type[_ResponseModel],
         *,
         timeout: int | None = None,
-    ) -> _ResponseModel:
+    ) -> _ResponseModel: ...
+
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: type[_ResponseModel] | None = None,
+        *,
+        timeout: int | None = None,
+    ) -> _ResponseModel | None:
         headers = {"Content-Type": "application/json"}
         if self._api_key is not None:
             headers["x-api-key"] = self._api_key
@@ -393,7 +407,17 @@ class BaseBrowserWindow(abc.ABC):
             text = await fetch_response.text()
             raise NaradaError(f"Failed to run extension action: {status} {text}")
 
-        return response_model.model_validate(await fetch_response.json())
+        resp_json = await fetch_response.json()
+
+        response = ExtensionActionResponse.model_validate(resp_json)
+        if response.status == "error":
+            raise NaradaError(response.error)
+
+        if response_model is None:
+            return None
+
+        assert response.data is not None
+        return response_model.model_validate_json(response.data)
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
@@ -404,6 +428,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
         super().__init__(
             api_key=os.environ.get("NARADA_API_KEY"),
+            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=os.environ.get("NARADA_USER_ID"),
             user_id_token=os.environ.get("NARADA_USER_ID_TOKEN"),
             env=env,
@@ -416,9 +441,9 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
-        api_key = api_key or os.environ["NARADA_API_KEY"]
         super().__init__(
-            api_key=api_key,
+            api_key=api_key or os.environ["NARADA_API_KEY"],
+            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=None,
             user_id_token=None,
             env=None,
