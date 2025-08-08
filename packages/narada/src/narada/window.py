@@ -1,7 +1,7 @@
-import abc
 import asyncio
 import os
 import time
+from abc import ABC
 from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
@@ -44,7 +44,7 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class BaseBrowserWindow(abc.ABC):
+class BaseBrowserWindow(ABC):
     _api_key: str
     _base_url: str
     _browser_window_id: str
@@ -369,10 +369,10 @@ class LocalBrowserWindow(BaseBrowserWindow):
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
-        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
-
         super().__init__(
-            api_key=api_key, base_url=base_url, browser_window_id=browser_window_id
+            api_key=api_key,
+            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            browser_window_id=browser_window_id,
         )
         self._config = config
         self._context = context
@@ -393,11 +393,10 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
-        api_key = api_key or os.environ["NARADA_API_KEY"]
-        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
-
         super().__init__(
-            api_key=api_key, base_url=base_url, browser_window_id=browser_window_id
+            api_key=api_key or os.environ["NARADA_API_KEY"],
+            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            browser_window_id=browser_window_id,
         )
 
     def __str__(self) -> str:
