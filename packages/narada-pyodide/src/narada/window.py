@@ -18,6 +18,10 @@ from narada.actions.models import (
     GoToUrlResponse,
     PrintMessageRequest,
     PrintMessageResponse,
+    ReadGoogleSheetRequest,
+    ReadGoogleSheetResponse,
+    WriteGoogleSheetRequest,
+    WriteGoogleSheetResponse,
 )
 from narada.errors import NaradaError, NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
@@ -314,6 +318,37 @@ class BaseBrowserWindow(abc.ABC):
         return await self._run_extension_action(
             PrintMessageRequest(message=message),
             PrintMessageResponse,
+            timeout=timeout,
+        )
+
+    async def read_google_sheet(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        timeout: int | None = None,
+    ) -> ReadGoogleSheetResponse:
+        """Reads a range of cells from a Google Sheet."""
+        return await self._run_extension_action(
+            ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
+            ReadGoogleSheetResponse,
+            timeout=timeout,
+        )
+
+    async def write_google_sheet(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> WriteGoogleSheetResponse:
+        """Writes a range of cells to a Google Sheet."""
+        return await self._run_extension_action(
+            WriteGoogleSheetRequest(
+                spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            WriteGoogleSheetResponse,
             timeout=timeout,
         )
 

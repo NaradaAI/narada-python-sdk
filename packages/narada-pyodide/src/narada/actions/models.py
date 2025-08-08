@@ -39,4 +39,30 @@ class PrintMessageResponse(BaseExtensionActionResponse):
     pass
 
 
-type ExtensionActionRequest = GoToUrlRequest | PrintMessageRequest
+class ReadGoogleSheetRequest(BaseModel):
+    name: Literal["read_google_sheet"] = "read_google_sheet"
+    spreadsheet_id: str
+    range: str
+
+
+class ReadGoogleSheetResponse(BaseExtensionActionResponse):
+    values: list[list[str]]
+
+
+class WriteGoogleSheetRequest(BaseModel):
+    name: Literal["write_google_sheet"] = "write_google_sheet"
+    spreadsheet_id: str
+    range: str
+    values: list[list[str]]
+
+
+class WriteGoogleSheetResponse(BaseExtensionActionResponse):
+    pass
+
+
+type ExtensionActionRequest = (
+    GoToUrlRequest
+    | PrintMessageRequest
+    | ReadGoogleSheetRequest
+    | WriteGoogleSheetRequest
+)

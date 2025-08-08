@@ -12,13 +12,15 @@ from pydantic import BaseModel
 from narada.actions.models import (
     AgentResponse,
     ExtensionActionRequest,
+    ExtensionActionResponse,
     GoToUrlRequest,
-    GoToUrlResponse,
     PrintMessageRequest,
-    PrintMessageResponse,
+    ReadGoogleSheetRequest,
+    ReadGoogleSheetResponse,
+    WriteGoogleSheetRequest,
 )
 from narada.config import BrowserConfig
-from narada.errors import NaradaTimeoutError
+from narada.errors import NaradaError, NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
@@ -33,7 +35,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
 
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
-    status: Literal["success", "error"]
+    status: Literal["success", "error", "input-required"]
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
@@ -44,10 +46,18 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 class BaseBrowserWindow(abc.ABC):
     _api_key: str
+    _base_url: str
     _browser_window_id: str
 
-    def __init__(self, *, api_key: str, browser_window_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        browser_window_id: str,
+    ) -> None:
         self._api_key = api_key
+        self._base_url = base_url
         self._browser_window_id = browser_window_id
 
     @property
@@ -150,7 +160,7 @@ class BaseBrowserWindow(abc.ABC):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://api.narada.ai/fast/v2/remote-dispatch",
+                    f"{self._base_url}/remote-dispatch",
                     headers=headers,
                     json=body,
                     timeout=aiohttp.ClientTimeout(total=timeout),
@@ -160,7 +170,7 @@ class BaseBrowserWindow(abc.ABC):
 
                 while (now := time.monotonic()) < deadline:
                     async with session.get(
-                        f"https://api.narada.ai/fast/v2/remote-dispatch/responses/{request_id}",
+                        f"{self._base_url}/remote-dispatch/responses/{request_id}",
                         headers=headers,
                         timeout=aiohttp.ClientTimeout(total=deadline - now),
                     ) as resp:
@@ -248,29 +258,73 @@ class BaseBrowserWindow(abc.ABC):
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None
-    ) -> GoToUrlResponse:
+    ) -> None:
         """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
-            GoToUrlRequest(url=url, new_tab=new_tab), GoToUrlResponse, timeout=timeout
+            GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
-    async def print_message(
-        self, *, message: str, timeout: int | None = None
-    ) -> PrintMessageResponse:
+    async def print_message(self, *, message: str, timeout: int | None = None) -> None:
         """Prints a message in the Narada extension side panel chat."""
         return await self._run_extension_action(
-            PrintMessageRequest(message=message),
-            PrintMessageResponse,
+            PrintMessageRequest(message=message), timeout=timeout
+        )
+
+    async def read_google_sheet(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        timeout: int | None = None,
+    ) -> ReadGoogleSheetResponse:
+        """Reads a range of cells from a Google Sheet."""
+        return await self._run_extension_action(
+            ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
+            ReadGoogleSheetResponse,
             timeout=timeout,
         )
 
+    async def write_google_sheet(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> None:
+        """Writes a range of cells to a Google Sheet."""
+        return await self._run_extension_action(
+            WriteGoogleSheetRequest(
+                spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            timeout=timeout,
+        )
+
+    @overload
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: None = None,
+        *,
+        timeout: int | None = None,
+    ) -> None: ...
+
+    @overload
     async def _run_extension_action(
         self,
         request: ExtensionActionRequest,
         response_model: type[_ResponseModel],
         *,
         timeout: int | None = None,
-    ) -> _ResponseModel:
+    ) -> _ResponseModel: ...
+
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: type[_ResponseModel] | None = None,
+        *,
+        timeout: int | None = None,
+    ) -> _ResponseModel | None:
         headers = {"x-api-key": self._api_key}
 
         body = {
@@ -282,7 +336,7 @@ class BaseBrowserWindow(abc.ABC):
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://api.narada.ai/fast/v2/extension-actions",
+                f"{self._base_url}/extension-actions",
                 headers=headers,
                 json=body,
                 # Don't specify `timeout` here as the (soft) timeout is handled by the server.
@@ -290,8 +344,17 @@ class BaseBrowserWindow(abc.ABC):
                 if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
                     raise NaradaTimeoutError
                 resp.raise_for_status()
+                resp_json = await resp.json()
 
-                return response_model.model_validate(await resp.json())
+        response = ExtensionActionResponse.model_validate(resp_json)
+        if response.status == "error":
+            raise NaradaError(response.error)
+
+        if response_model is None:
+            return None
+
+        assert response.data is not None
+        return response_model.model_validate_json(response.data)
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
@@ -306,7 +369,11 @@ class LocalBrowserWindow(BaseBrowserWindow):
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
-        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+
+        super().__init__(
+            api_key=api_key, base_url=base_url, browser_window_id=browser_window_id
+        )
         self._config = config
         self._context = context
 
@@ -327,7 +394,11 @@ class LocalBrowserWindow(BaseBrowserWindow):
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         api_key = api_key or os.environ["NARADA_API_KEY"]
-        super().__init__(api_key=api_key, browser_window_id=browser_window_id)
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+
+        super().__init__(
+            api_key=api_key, base_url=base_url, browser_window_id=browser_window_id
+        )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
