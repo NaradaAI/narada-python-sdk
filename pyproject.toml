@@ -3,4 +3,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.workspace]
-members = ["narada", "narada-pyodide"]
+members = ["packages/*"]
