@@ -15,13 +15,12 @@ async def main() -> None:
         # https://app.narada.ai/agent-builder/agents/demo%2540narada.ai%3Agreeter-agent
         custom_agent = "/demo@narada.ai/greeter-agent"
         user_query = "John Doe"
-        response = await window.dispatch_request(
+        response = await window.agent(
             prompt=user_query,
             agent=custom_agent,
         )
 
-        assert response["response"] is not None
-        print("Response:", response["response"]["text"])
+        print("Response:", response.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
