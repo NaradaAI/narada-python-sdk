@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from narada.actions.models import (
     AgentResponse,
+    AgentUsage,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GoToUrlRequest,
@@ -33,12 +34,18 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     structuredOutput: _MaybeStructuredOutput
 
 
+class Usage(TypedDict):
+    actions: int
+    credits: int
+
+
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
     status: Literal["success", "error", "input-required"]
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
+    usage: Usage
 
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
@@ -254,6 +261,7 @@ class BaseBrowserWindow(ABC):
             status=remote_dispatch_response["status"],
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),
+            usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
         )
 
     async def go_to_url(
