@@ -8,10 +8,16 @@ from pydantic import BaseModel
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
+class AgentUsage(BaseModel):
+    actions: int
+    credits: int
+
+
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     status: Literal["success", "error", "input-required"]
     text: str
     structured_output: _MaybeStructuredOutput | None
+    usage: AgentUsage
 
 
 class GoToUrlRequest(BaseModel):

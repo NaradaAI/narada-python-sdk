@@ -1,9 +1,8 @@
 import asyncio
 
 import rich
-from pydantic import BaseModel, Field
-
 from narada import Narada
+from pydantic import BaseModel, Field
 
 
 class PaperInfo(BaseModel):
@@ -26,7 +25,7 @@ async def main() -> None:
         window = await narada.open_and_initialize_browser_window()
 
         # Run a task in this browser window.
-        response = await window.dispatch_request(
+        response = await window.agent(
             prompt=(
                 'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
                 "page. Then extract the paper info from the arXiv page in the given format."
@@ -34,8 +33,7 @@ async def main() -> None:
             output_schema=PaperInfo,
         )
 
-        assert response["response"] is not None
-        rich.print("Response:", response["response"]["structuredOutput"])
+        rich.print("Response:", response.structured_output)
 
 
 if __name__ == "__main__":

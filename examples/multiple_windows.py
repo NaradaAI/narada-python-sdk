@@ -1,15 +1,16 @@
 import asyncio
 
-from narada import Narada, Response
+from narada import Narada
+from narada.actions.models import AgentResponse
 
 
 async def main() -> None:
     # Initialize the Narada client.
     async with Narada() as narada:
         # Helper function to run a task in a new browser window.
-        async def run_task(prompt: str) -> Response:
+        async def run_task(prompt: str) -> AgentResponse:
             window = await narada.open_and_initialize_browser_window()
-            return await window.dispatch_request(prompt=prompt)
+            return await window.agent(prompt=prompt)
 
         # Run multiple tasks in parallel.
         responses = await asyncio.gather(
@@ -25,8 +26,7 @@ async def main() -> None:
         )
 
         for i, response in enumerate(responses):
-            assert response["response"] is not None
-            print(f"Response {i + 1}: {response['response']['text']}\n")
+            print(f"Response #{i + 1}: {response.model_dump_json(indent=2)}\n")
 
 
 if __name__ == "__main__":

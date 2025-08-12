@@ -12,15 +12,14 @@ async def main() -> None:
     window = RemoteBrowserWindow(browser_window_id=browser_window_id)
 
     # Run a task on another machine.
-    response = await window.dispatch_request(
+    response = await window.agent(
         prompt=(
             'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
             "page, then tell me who the authors are."
         )
     )
 
-    assert response["response"] is not None
-    print("Response:", response["response"]["text"])
+    print("Response:", response.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

@@ -10,12 +10,9 @@ async def main() -> None:
         window = await narada.open_and_initialize_browser_window()
 
         # Choose a specific agent to handle the task. By default, the Operator agent is used.
-        response = await window.dispatch_request(
-            prompt="Tell me a joke.", agent=Agent.GENERALIST
-        )
+        response = await window.agent(prompt="Tell me a joke.", agent=Agent.GENERALIST)
 
-        assert response["response"] is not None
-        print("Response:", response["response"]["text"])
+        print("Response:", response.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

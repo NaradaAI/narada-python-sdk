@@ -12,14 +12,13 @@ async def main() -> None:
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                response = await window.dispatch_request(
+                response = await window.agent(
                     prompt='Search for "random number between 1 and 5" on Google and extract the generated number from the search result page. Output just the number.',
                     # Force a timeout on the first attempt to demonstrate timeout handling.
                     timeout=3 if attempt == 0 else 120,
                 )
 
-                assert response["response"] is not None
-                print("Response:", response["response"]["text"])
+                print("Response:", response.model_dump_json(indent=2))
             except NaradaTimeoutError:
                 # Give up after `max_attempts` attempts.
                 if attempt == max_attempts - 1:
