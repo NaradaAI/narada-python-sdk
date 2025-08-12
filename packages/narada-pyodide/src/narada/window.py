@@ -26,7 +26,7 @@ from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCred
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
-    async def __get_id_token() -> str: ...
+    async def _narada_get_id_token() -> str: ...
 
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
@@ -149,7 +149,7 @@ class BaseBrowserWindow(ABC):
             assert self._user_id is not None
             assert self._env is not None
 
-            headers["Authorization"] = f"Bearer {await __get_id_token()}"
+            headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
             headers["X-Narada-User-ID"] = self._user_id
             headers["X-Narada-Env"] = self._env
 
@@ -379,7 +379,7 @@ class BaseBrowserWindow(ABC):
             assert self._user_id is not None
             assert self._env is not None
 
-            headers["Authorization"] = f"Bearer {await __get_id_token()}"
+            headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
             headers["X-Narada-User-ID"] = self._user_id
             headers["X-Narada-Env"] = self._env
 
