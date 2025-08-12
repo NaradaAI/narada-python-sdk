@@ -4,7 +4,7 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
 from pydantic import BaseModel
@@ -23,6 +23,11 @@ from narada.actions.models import (
 )
 from narada.errors import NaradaError, NaradaTimeoutError
 from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
+
+if TYPE_CHECKING:
+    # Magic function injected by the JavaScript harness to get the current user's ID token.
+    async def __get_id_token() -> str: ...
+
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -49,7 +54,6 @@ class BaseBrowserWindow(ABC):
     _api_key: str | None
     _base_url: str
     _user_id: str | None
-    _user_id_token: str | None
     _env: Literal["prod", "dev", None]
     _browser_window_id: str
 
@@ -59,13 +63,10 @@ class BaseBrowserWindow(ABC):
         api_key: str | None,
         base_url: str,
         user_id: str | None,
-        user_id_token: str | None,
         env: Literal["prod", "dev", None] = "prod",
         browser_window_id: str,
     ) -> None:
-        if api_key is None and (
-            user_id is None or user_id_token is None or env is None
-        ):
+        if api_key is None and (user_id is None or env is None):
             raise ValueError(
                 "Either `api_key` or all of `user_id`, `user_id_token`, and `env` must be provided"
             )
@@ -73,7 +74,6 @@ class BaseBrowserWindow(ABC):
         self._api_key = api_key
         self._base_url = base_url
         self._user_id = user_id
-        self._user_id_token = user_id_token
         self._env = env
         self._browser_window_id = browser_window_id
 
@@ -147,10 +147,9 @@ class BaseBrowserWindow(ABC):
             headers["x-api-key"] = self._api_key
         else:
             assert self._user_id is not None
-            assert self._user_id_token is not None
             assert self._env is not None
 
-            headers["Authorization"] = f"Bearer {self._user_id_token}"
+            headers["Authorization"] = f"Bearer {await __get_id_token()}"
             headers["X-Narada-User-ID"] = self._user_id
             headers["X-Narada-Env"] = self._env
 
@@ -378,10 +377,9 @@ class BaseBrowserWindow(ABC):
             headers["x-api-key"] = self._api_key
         else:
             assert self._user_id is not None
-            assert self._user_id_token is not None
             assert self._env is not None
 
-            headers["Authorization"] = f"Bearer {self._user_id_token}"
+            headers["Authorization"] = f"Bearer {await __get_id_token()}"
             headers["X-Narada-User-ID"] = self._user_id
             headers["X-Narada-Env"] = self._env
 
@@ -430,7 +428,6 @@ class LocalBrowserWindow(BaseBrowserWindow):
             api_key=os.environ.get("NARADA_API_KEY"),
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=os.environ.get("NARADA_USER_ID"),
-            user_id_token=os.environ.get("NARADA_USER_ID_TOKEN"),
             env=env,
             browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
         )
@@ -445,7 +442,6 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             api_key=api_key or os.environ["NARADA_API_KEY"],
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=None,
-            user_id_token=None,
             env=None,
             browser_window_id=browser_window_id,
         )
