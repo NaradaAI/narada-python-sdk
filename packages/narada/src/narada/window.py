@@ -10,6 +10,9 @@ from playwright.async_api import BrowserContext
 from pydantic import BaseModel
 
 from narada.actions.models import (
+    AgenticSelectorAction,
+    AgenticSelectorRequest,
+    AgenticSelectors,
     AgentResponse,
     AgentUsage,
     ExtensionActionRequest,
@@ -262,6 +265,27 @@ class BaseBrowserWindow(ABC):
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
+        )
+
+    async def agentic_selector(
+        self,
+        *,
+        action: AgenticSelectorAction,
+        selectors: AgenticSelectors,
+        fallback_operator_query: str,
+        # Larger default timeout because Operator can take a bit to run.
+        timeout: int | None = 60,
+    ) -> None:
+        """Performs an action on an element specified by the given selectors, falling back to using
+        the Operator agent if the selectors fail to match a unique element.
+        """
+        return await self._run_extension_action(
+            AgenticSelectorRequest(
+                action=action,
+                selectors=selectors,
+                fallback_operator_query=fallback_operator_query,
+            ),
+            timeout=timeout,
         )
 
     async def go_to_url(

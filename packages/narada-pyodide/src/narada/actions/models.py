@@ -1,4 +1,4 @@
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypedDict, TypeVar, cast, override
 
 from pydantic import BaseModel
 
@@ -18,6 +18,94 @@ class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     text: str
     structured_output: _MaybeStructuredOutput | None
     usage: AgentUsage
+
+
+class AgenticSelectorClickAction(TypedDict):
+    type: Literal["click"]
+
+
+class AgenticSelectorFillAction(TypedDict):
+    type: Literal["fill"]
+    value: str
+
+
+class AgenticSelectorSelectOptionByIndexAction(TypedDict):
+    type: Literal["select_option_by_index"]
+    index: int
+
+
+type AgenticSelectorAction = (
+    AgenticSelectorClickAction
+    | AgenticSelectorFillAction
+    | AgenticSelectorSelectOptionByIndexAction
+)
+
+
+def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, Any]:
+    match action["type"]:
+        case "click":
+            return cast(dict[str, Any], action)
+        case "fill":
+            return cast(dict[str, Any], action)
+        case "select_option_by_index":
+            return {"type": "selectOptionByIndex", "value": action["index"]}
+
+
+class AgenticSelectors(TypedDict, total=False):
+    id: str
+    data_testid: str
+    name: str
+    aria_label: str
+    role: str
+    type: str
+    text_content: str
+    tag_name: str
+    class_name: str
+    dom_path: str
+    xpath: str
+
+
+def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if id := selectors.get("id"):
+        result["id"] = {"value": id}
+    if data_testid := selectors.get("data_testid"):
+        result["dataTestId"] = {"value": data_testid}
+    if name := selectors.get("name"):
+        result["name"] = {"value": name}
+    if aria_label := selectors.get("aria_label"):
+        result["ariaLabel"] = {"value": aria_label}
+    if role := selectors.get("role"):
+        result["role"] = {"value": role}
+    if type := selectors.get("type"):
+        result["type"] = {"value": type}
+    if text_content := selectors.get("text_content"):
+        result["textContent"] = {"value": text_content}
+    if tag_name := selectors.get("tag_name"):
+        result["tagName"] = {"value": tag_name}
+    if class_name := selectors.get("class_name"):
+        result["className"] = {"value": class_name}
+    if dom_path := selectors.get("dom_path"):
+        result["domPath"] = {"value": dom_path}
+    if xpath := selectors.get("xpath"):
+        result["xpath"] = {"value": xpath}
+    return result
+
+
+class AgenticSelectorRequest(BaseModel):
+    name: Literal["agentic_selector"] = "agentic_selector"
+    action: AgenticSelectorAction
+    selectors: AgenticSelectors
+    fallback_operator_query: str
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "action": _dump_agentic_selector_action(self.action),
+            "selectors": _dump_agentic_selectors(self.selectors),
+            "fallback_operator_query": self.fallback_operator_query,
+        }
 
 
 class GoToUrlRequest(BaseModel):
@@ -49,7 +137,8 @@ class WriteGoogleSheetRequest(BaseModel):
 
 
 type ExtensionActionRequest = (
-    GoToUrlRequest
+    AgenticSelectorRequest
+    | GoToUrlRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
     | WriteGoogleSheetRequest
