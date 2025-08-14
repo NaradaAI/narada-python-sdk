@@ -1,8 +1,7 @@
 import asyncio
 
-from narada.actions.models import AgentResponse
-
 from narada import Narada
+from narada.actions.models import AgentResponse
 
 
 async def main() -> None:
