@@ -27,3 +27,6 @@ dev = ["pyodide-py>=0.27.7"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/narada"]
+
+[tool.uv.sources]
+narada-core = { workspace = true }

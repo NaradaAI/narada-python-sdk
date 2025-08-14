@@ -28,3 +28,6 @@ dev = ["pytest>=8.4.1", "pytest-asyncio>=1.0.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/narada"]
+
+[tool.uv.sources]
+narada-core = { workspace = true }
