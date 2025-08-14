@@ -9,6 +9,7 @@ authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
     # Must use a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
+    "narada-core",
     "pydantic==2.10.6",
 ]
 

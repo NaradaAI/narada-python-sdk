@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from pyodide.ffi import create_once_callable
 from pyodide.http import pyfetch
 
-from narada.actions.models import (
+from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectors,
@@ -25,47 +25,32 @@ from narada.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
-from narada.errors import NaradaError, NaradaTimeoutError
-from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
+from narada_core.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
+from narada_core.errors import NaradaError, NaradaTimeoutError
+from narada_core.responses import (
+    Response,
+    ResponseContent,
+    Usage,
+    _StructuredOutput,
+    _MaybeStructuredOutput,
+    _ResponseModel,
+)
+from narada_core.window import BaseBrowserWindow
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
 
-
-_StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
-
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
+# Note: Core types now imported from narada_core above
 
 
-class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
-    text: str
-    structuredOutput: _MaybeStructuredOutput
-
-
-class Usage(TypedDict):
-    actions: int
-    credits: int
-
-
-class Response(TypedDict, Generic[_MaybeStructuredOutput]):
-    requestId: str
-    status: Literal["success", "error"]
-    response: ResponseContent[_MaybeStructuredOutput] | None
-    createdAt: str
-    completedAt: str | None
-    usage: Usage
-
-
-_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
-
-
-class BaseBrowserWindow(ABC):
+class PyodideBrowserWindow(BaseBrowserWindow):
+    """Browser window implementation for the narada-pyodide package using pyodide fetch."""
+    
     _api_key: str | None
     _base_url: str
     _user_id: str | None
     _env: Literal["prod", "dev", None]
-    _browser_window_id: str
 
     def __init__(
         self,
@@ -81,15 +66,11 @@ class BaseBrowserWindow(ABC):
                 "Either `api_key` or all of `user_id`, `user_id_token`, and `env` must be provided"
             )
 
+        super().__init__(browser_window_id=browser_window_id)
         self._api_key = api_key
         self._base_url = base_url
         self._user_id = user_id
         self._env = env
-        self._browser_window_id = browser_window_id
-
-    @property
-    def browser_window_id(self) -> str:
-        return self._browser_window_id
 
     @overload
     async def dispatch_request(
@@ -450,7 +431,7 @@ class BaseBrowserWindow(ABC):
         return response_model.model_validate_json(response.data)
 
 
-class LocalBrowserWindow(BaseBrowserWindow):
+class LocalBrowserWindow(PyodideBrowserWindow):
     def __init__(self) -> None:
         env = os.environ.get("NARADA_ENV")
         if env is not None and env not in ("prod", "dev"):
@@ -468,7 +449,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
         return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
 
 
-class RemoteBrowserWindow(BaseBrowserWindow):
+class RemoteBrowserWindow(PyodideBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],

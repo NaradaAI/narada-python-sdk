@@ -24,7 +24,7 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
 
 from narada.config import BrowserConfig
-from narada.errors import (
+from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
     NaradaInitializationError,
