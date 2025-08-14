@@ -6,38 +6,28 @@ from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
 import aiohttp
-from narada.config import BrowserConfig
-from narada_core.actions.models import (
-    AgenticSelectorAction,
-    AgenticSelectorRequest,
-    AgenticSelectors,
-    AgentResponse,
-    AgentUsage,
+
+from narada import (
+    BrowserConfig,
+    NaradaError,
+    NaradaTimeoutError,
+    Agent,
+)
+
+from narada.actions.models import (
     ExtensionActionRequest,
     ExtensionActionResponse,
-    GoToUrlRequest,
-    PrintMessageRequest,
-    ReadGoogleSheetRequest,
-    ReadGoogleSheetResponse,
-    WriteGoogleSheetRequest,
 )
-from narada_core.errors import NaradaError, NaradaTimeoutError
+
 from narada_core.models import (
-    Agent,
     RemoteDispatchChatHistoryItem,
     Response,
-    ResponseContent,
-    Usage,
     UserResourceCredentials,
-    _MaybeStructuredOutput,
     _ResponseModel,
-    _StructuredOutput,
 )
 from narada_core.window import BaseBrowserWindow
 from playwright.async_api import BrowserContext
 from pydantic import BaseModel
-
-# Note: Core types now imported from narada_core above
 
 
 class NaradaBrowserWindow(BaseBrowserWindow):

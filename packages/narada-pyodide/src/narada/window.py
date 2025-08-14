@@ -26,12 +26,8 @@ from narada_core.models import (
     Agent,
     RemoteDispatchChatHistoryItem,
     Response,
-    ResponseContent,
-    Usage,
     UserResourceCredentials,
-    _MaybeStructuredOutput,
     _ResponseModel,
-    _StructuredOutput,
 )
 from narada_core.window import BaseBrowserWindow
 from pydantic import BaseModel
@@ -41,9 +37,6 @@ from pyodide.http import pyfetch
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
-
-
-# Note: Core types now imported from narada_core above
 
 
 class PyodideBrowserWindow(BaseBrowserWindow):

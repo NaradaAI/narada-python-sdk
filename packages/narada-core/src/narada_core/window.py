@@ -1,9 +1,7 @@
 """Base browser window class with common functionality."""
 
-import asyncio
-import time
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Literal, TypeVar, overload
+from typing import overload
 
 from narada_core.actions.models import (
     AgenticSelectorAction,
@@ -12,7 +10,6 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     ExtensionActionRequest,
-    ExtensionActionResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
@@ -25,7 +22,6 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
-    _MaybeStructuredOutput,
     _ResponseModel,
     _StructuredOutput,
 )
