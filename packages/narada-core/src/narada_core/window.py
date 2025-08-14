@@ -5,8 +5,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Generic, Literal, TypeVar, overload
 
-from pydantic import BaseModel
-
 from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
@@ -22,13 +20,21 @@ from narada_core.actions.models import (
     WriteGoogleSheetRequest,
 )
 from narada_core.errors import NaradaError, NaradaTimeoutError
-from narada_core.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
-from narada_core.responses import Response, _StructuredOutput, _MaybeStructuredOutput, _ResponseModel
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    Response,
+    UserResourceCredentials,
+    _MaybeStructuredOutput,
+    _ResponseModel,
+    _StructuredOutput,
+)
+from pydantic import BaseModel
 
 
 class BaseBrowserWindow(ABC):
     """Abstract base class for browser window implementations."""
-    
+
     _browser_window_id: str
 
     def __init__(self, *, browser_window_id: str) -> None:
@@ -36,10 +42,48 @@ class BaseBrowserWindow(ABC):
 
     @property
     def browser_window_id(self) -> str:
-        """Get the browser window ID."""
+        """The current browser window's globally unique ID."""
         return self._browser_window_id
 
     # Abstract methods that must be implemented by subclasses
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Agent | str = Agent.OPERATOR,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        timeout: int = 120,
+    ) -> Response[None]: ...
+
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Agent | str = Agent.OPERATOR,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        timeout: int = 120,
+    ) -> Response[_StructuredOutput]: ...
+
     @abstractmethod
     async def dispatch_request(
         self,
@@ -60,6 +104,24 @@ class BaseBrowserWindow(ABC):
     ) -> Response:
         """Low-level API for invoking an agent. Must be implemented by subclasses."""
         pass
+
+    @overload
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: None = None,
+        *,
+        timeout: int | None = None,
+    ) -> None: ...
+
+    @overload
+    async def _run_extension_action(
+        self,
+        request: ExtensionActionRequest,
+        response_model: type[_ResponseModel],
+        *,
+        timeout: int | None = None,
+    ) -> _ResponseModel: ...
 
     @abstractmethod
     async def _run_extension_action(

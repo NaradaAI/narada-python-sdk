@@ -1,6 +1,9 @@
 from narada.client import Narada
 from narada.config import BrowserConfig
-from narada_core.models import Agent
+from narada.window import (
+    LocalBrowserWindow,
+    RemoteBrowserWindow,
+)
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -9,11 +12,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada_core.responses import Response, ResponseContent
-from narada.window import (
-    LocalBrowserWindow,
-    RemoteBrowserWindow,
-)
+from narada_core.models import Agent, Response, ResponseContent
 
 __all__ = [
     "Agent",

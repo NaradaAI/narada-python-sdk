@@ -1,6 +1,6 @@
 [project]
 name = "narada-core"
-version = "0.1.0"
+version = "0.0.1"
 description = "Core models and actions for Narada"
 license = "Apache-2.0"
 readme = "README.md"

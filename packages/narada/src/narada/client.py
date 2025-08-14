@@ -9,21 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from playwright._impl._errors import Error as PlaywrightError
-from playwright.async_api import (
-    Browser,
-    ElementHandle,
-    Page,
-    Playwright,
-    async_playwright,
-)
-from playwright.async_api import (
-    TimeoutError as PlaywrightTimeoutError,
-)
-from playwright.async_api._context_manager import PlaywrightContextManager
-from rich.console import Console
-
 from narada.config import BrowserConfig
+from narada.utils import assert_never
+from narada.window import LocalBrowserWindow, create_side_panel_url
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -31,8 +19,19 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada.utils import assert_never
-from narada.window import LocalBrowserWindow, create_side_panel_url
+from playwright._impl._errors import Error as PlaywrightError
+from playwright.async_api import (
+    Browser,
+    ElementHandle,
+    Page,
+    Playwright,
+)
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import (
+    async_playwright,
+)
+from playwright.async_api._context_manager import PlaywrightContextManager
+from rich.console import Console
 
 
 @dataclass

@@ -7,10 +7,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
-from pydantic import BaseModel
-from pyodide.ffi import create_once_callable
-from pyodide.http import pyfetch
-
 from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
@@ -25,28 +21,34 @@ from narada_core.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
-from narada_core.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
 from narada_core.errors import NaradaError, NaradaTimeoutError
-from narada_core.responses import (
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
     Response,
     ResponseContent,
     Usage,
-    _StructuredOutput,
+    UserResourceCredentials,
     _MaybeStructuredOutput,
     _ResponseModel,
+    _StructuredOutput,
 )
 from narada_core.window import BaseBrowserWindow
+from pydantic import BaseModel
+from pyodide.ffi import create_once_callable
+from pyodide.http import pyfetch
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
+
 
 # Note: Core types now imported from narada_core above
 
 
 class PyodideBrowserWindow(BaseBrowserWindow):
     """Browser window implementation for the narada-pyodide package using pyodide fetch."""
-    
+
     _api_key: str | None
     _base_url: str
     _user_id: str | None
@@ -71,44 +73,6 @@ class PyodideBrowserWindow(BaseBrowserWindow):
         self._base_url = base_url
         self._user_id = user_id
         self._env = env
-
-    @overload
-    async def dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        timeout: int = 120,
-    ) -> Response[None]: ...
-
-    @overload
-    async def dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        timeout: int = 120,
-    ) -> Response[_StructuredOutput]: ...
 
     async def dispatch_request(
         self,
@@ -238,32 +202,6 @@ class PyodideBrowserWindow(BaseBrowserWindow):
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
 
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        time_zone: str = "America/Los_Angeles",
-        timeout: int = 120,
-    ) -> AgentResponse[None]: ...
-
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        time_zone: str = "America/Los_Angeles",
-        timeout: int = 120,
-    ) -> AgentResponse[_StructuredOutput]: ...
-
     async def agent(
         self,
         *,
@@ -359,24 +297,6 @@ class PyodideBrowserWindow(BaseBrowserWindow):
             ),
             timeout=timeout,
         )
-
-    @overload
-    async def _run_extension_action(
-        self,
-        request: ExtensionActionRequest,
-        response_model: None = None,
-        *,
-        timeout: int | None = None,
-    ) -> None: ...
-
-    @overload
-    async def _run_extension_action(
-        self,
-        request: ExtensionActionRequest,
-        response_model: type[_ResponseModel],
-        *,
-        timeout: int | None = None,
-    ) -> _ResponseModel: ...
 
     async def _run_extension_action(
         self,
