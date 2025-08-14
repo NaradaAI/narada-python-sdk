@@ -6,19 +6,10 @@ from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
 import aiohttp
-
-from narada import (
-    BrowserConfig,
-    NaradaError,
-    NaradaTimeoutError,
-    Agent,
-)
-
 from narada.actions.models import (
     ExtensionActionRequest,
     ExtensionActionResponse,
 )
-
 from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
@@ -28,6 +19,13 @@ from narada_core.models import (
 from narada_core.window import BaseBrowserWindow
 from playwright.async_api import BrowserContext
 from pydantic import BaseModel
+
+from narada import (
+    Agent,
+    BrowserConfig,
+    NaradaError,
+    NaradaTimeoutError,
+)
 
 
 class NaradaBrowserWindow(BaseBrowserWindow):

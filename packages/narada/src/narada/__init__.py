@@ -1,4 +1,3 @@
-from narada import actions
 from narada.client import Narada
 from narada.config import BrowserConfig
 from narada.window import (
@@ -14,6 +13,8 @@ from narada_core.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada_core.models import Agent, Response, ResponseContent
+
+from narada import actions
 
 __all__ = [
     "actions",
