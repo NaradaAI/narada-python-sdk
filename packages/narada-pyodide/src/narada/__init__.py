@@ -1,15 +1,10 @@
 from narada.client import Narada
-from narada.errors import (
-    NaradaError,
-    NaradaTimeoutError,
-)
-from narada.models import Agent
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,
-    Response,
-    ResponseContent,
 )
+from narada_core.errors import NaradaError, NaradaTimeoutError
+from narada_core.models import Agent, Response, ResponseContent
 
 __all__ = [
     "Agent",

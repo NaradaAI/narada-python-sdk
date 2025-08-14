@@ -1,8 +1,8 @@
 import asyncio
 
-from narada import Narada
-from narada.models import Agent
 from pydantic import BaseModel
+
+from narada import Agent, Narada
 
 
 class PaperInfo(BaseModel):

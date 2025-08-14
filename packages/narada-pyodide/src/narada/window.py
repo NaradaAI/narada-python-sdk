@@ -2,16 +2,11 @@ import asyncio
 import json
 import os
 import time
-from abc import ABC
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal
 
 from js import AbortController, setTimeout  # type: ignore
-from pydantic import BaseModel
-from pyodide.ffi import create_once_callable
-from pyodide.http import pyfetch
-
-from narada.actions.models import (
+from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectors,
@@ -25,47 +20,31 @@ from narada.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
-from narada.errors import NaradaError, NaradaTimeoutError
-from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
+from narada_core.errors import NaradaError, NaradaTimeoutError
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    Response,
+    UserResourceCredentials,
+    _ResponseModel,
+)
+from narada_core.window import BaseBrowserWindow
+from pydantic import BaseModel
+from pyodide.ffi import create_once_callable
+from pyodide.http import pyfetch
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
 
 
-_StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
+class PyodideBrowserWindow(BaseBrowserWindow):
+    """Browser window implementation for the narada-pyodide package using pyodide fetch."""
 
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
-
-
-class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
-    text: str
-    structuredOutput: _MaybeStructuredOutput
-
-
-class Usage(TypedDict):
-    actions: int
-    credits: int
-
-
-class Response(TypedDict, Generic[_MaybeStructuredOutput]):
-    requestId: str
-    status: Literal["success", "error"]
-    response: ResponseContent[_MaybeStructuredOutput] | None
-    createdAt: str
-    completedAt: str | None
-    usage: Usage
-
-
-_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
-
-
-class BaseBrowserWindow(ABC):
     _api_key: str | None
     _base_url: str
     _user_id: str | None
     _env: Literal["prod", "dev", None]
-    _browser_window_id: str
 
     def __init__(
         self,
@@ -81,53 +60,11 @@ class BaseBrowserWindow(ABC):
                 "Either `api_key` or all of `user_id`, `user_id_token`, and `env` must be provided"
             )
 
+        super().__init__(browser_window_id=browser_window_id)
         self._api_key = api_key
         self._base_url = base_url
         self._user_id = user_id
         self._env = env
-        self._browser_window_id = browser_window_id
-
-    @property
-    def browser_window_id(self) -> str:
-        return self._browser_window_id
-
-    @overload
-    async def dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        timeout: int = 120,
-    ) -> Response[None]: ...
-
-    @overload
-    async def dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        timeout: int = 120,
-    ) -> Response[_StructuredOutput]: ...
 
     async def dispatch_request(
         self,
@@ -257,32 +194,6 @@ class BaseBrowserWindow(ABC):
         except asyncio.TimeoutError:
             raise NaradaTimeoutError
 
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        time_zone: str = "America/Los_Angeles",
-        timeout: int = 120,
-    ) -> AgentResponse[None]: ...
-
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        time_zone: str = "America/Los_Angeles",
-        timeout: int = 120,
-    ) -> AgentResponse[_StructuredOutput]: ...
-
     async def agent(
         self,
         *,
@@ -379,24 +290,6 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
-    @overload
-    async def _run_extension_action(
-        self,
-        request: ExtensionActionRequest,
-        response_model: None = None,
-        *,
-        timeout: int | None = None,
-    ) -> None: ...
-
-    @overload
-    async def _run_extension_action(
-        self,
-        request: ExtensionActionRequest,
-        response_model: type[_ResponseModel],
-        *,
-        timeout: int | None = None,
-    ) -> _ResponseModel: ...
-
     async def _run_extension_action(
         self,
         request: ExtensionActionRequest,
@@ -450,7 +343,7 @@ class BaseBrowserWindow(ABC):
         return response_model.model_validate_json(response.data)
 
 
-class LocalBrowserWindow(BaseBrowserWindow):
+class LocalBrowserWindow(PyodideBrowserWindow):
     def __init__(self) -> None:
         env = os.environ.get("NARADA_ENV")
         if env is not None and env not in ("prod", "dev"):
@@ -468,7 +361,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
         return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
 
 
-class RemoteBrowserWindow(BaseBrowserWindow):
+class RemoteBrowserWindow(PyodideBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],

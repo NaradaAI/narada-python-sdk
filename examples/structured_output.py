@@ -1,8 +1,9 @@
 import asyncio
 
 import rich
-from narada import Narada
 from pydantic import BaseModel, Field
+
+from narada import Narada
 
 
 class PaperInfo(BaseModel):
