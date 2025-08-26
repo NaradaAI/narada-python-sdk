@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "narada",
+    "narada-core",
     "narada-pyodide",
 ]
 
@@ -308,12 +309,12 @@ wheels = [
 
 [[package]]
 name = "narada"
-version = "0.1.15"
+version = "0.1.16"
 source = { editable = "packages/narada" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "narada-core" },
     { name = "playwright" },
-    { name = "pydantic" },
     { name = "rich" },
 ]
 
@@ -326,8 +327,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.13" },
+    { name = "narada-core", editable = "packages/narada-core" },
     { name = "playwright", specifier = ">=1.53.0" },
-    { name = "pydantic", specifier = ">=2.10.6" },
     { name = "rich", specifier = ">=14.0.0" },
 ]
 
@@ -338,11 +339,22 @@ dev = [
 ]
 
 [[package]]
-name = "narada-pyodide"
-version = "0.0.17"
-source = { editable = "packages/narada-pyodide" }
+name = "narada-core"
+version = "0.0.1"
+source = { editable = "packages/narada-core" }
 dependencies = [
     { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = "==2.10.6" }]
+
+[[package]]
+name = "narada-pyodide"
+version = "0.0.18"
+source = { editable = "packages/narada-pyodide" }
+dependencies = [
+    { name = "narada-core" },
 ]
 
 [package.dev-dependencies]
@@ -352,7 +364,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = "==2.10.6" }]
+requires-dist = [{ name = "narada-core", editable = "packages/narada-core" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pyodide-py", specifier = ">=0.27.7" }]

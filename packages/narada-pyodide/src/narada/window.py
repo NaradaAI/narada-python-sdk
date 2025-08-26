@@ -4,14 +4,10 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
-from pydantic import BaseModel
-from pyodide.ffi import create_once_callable
-from pyodide.http import pyfetch
-
-from narada.actions.models import (
+from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectors,
@@ -25,8 +21,16 @@ from narada.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
-from narada.errors import NaradaError, NaradaTimeoutError
-from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
+from narada_core.errors import NaradaError, NaradaTimeoutError
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    Response,
+    UserResourceCredentials,
+)
+from pydantic import BaseModel
+from pyodide.ffi import create_once_callable
+from pyodide.http import pyfetch
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
@@ -34,28 +38,6 @@ if TYPE_CHECKING:
 
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
-
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
-
-
-class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
-    text: str
-    structuredOutput: _MaybeStructuredOutput
-
-
-class Usage(TypedDict):
-    actions: int
-    credits: int
-
-
-class Response(TypedDict, Generic[_MaybeStructuredOutput]):
-    requestId: str
-    status: Literal["success", "error"]
-    response: ResponseContent[_MaybeStructuredOutput] | None
-    createdAt: str
-    completedAt: str | None
-    usage: Usage
-
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
