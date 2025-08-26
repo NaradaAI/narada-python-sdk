@@ -7,16 +7,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
-from narada_core.models import (
-    Agent,
-    RemoteDispatchChatHistoryItem,
-    UserResourceCredentials,
-)
-from pydantic import BaseModel
-from pyodide.ffi import create_once_callable
-from pyodide.http import pyfetch
-
-from narada.actions.models import (
+from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectors,
@@ -30,6 +21,15 @@ from narada.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    UserResourceCredentials,
+)
+from pydantic import BaseModel
+from pyodide.ffi import create_once_callable
+from pyodide.http import pyfetch
+
 from narada.errors import NaradaError, NaradaTimeoutError
 
 if TYPE_CHECKING:

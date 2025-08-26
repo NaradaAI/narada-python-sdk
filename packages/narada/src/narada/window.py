@@ -6,15 +6,7 @@ from http import HTTPStatus
 from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
 
 import aiohttp
-from narada_core.models import (
-    Agent,
-    RemoteDispatchChatHistoryItem,
-    UserResourceCredentials,
-)
-from playwright.async_api import BrowserContext
-from pydantic import BaseModel
-
-from narada.actions.models import (
+from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectors,
@@ -28,6 +20,14 @@ from narada.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    UserResourceCredentials,
+)
+from playwright.async_api import BrowserContext
+from pydantic import BaseModel
+
 from narada.config import BrowserConfig
 from narada.errors import NaradaError, NaradaTimeoutError
 
