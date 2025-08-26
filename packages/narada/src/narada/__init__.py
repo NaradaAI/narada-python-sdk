@@ -1,3 +1,5 @@
+from narada_core.models import Agent
+
 from narada.client import Narada
 from narada.config import BrowserConfig
 from narada.errors import (
@@ -8,7 +10,6 @@ from narada.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada.models import Agent
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,

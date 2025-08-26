@@ -7,6 +7,11 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
+from narada_core.models import (
+    Agent,
+    RemoteDispatchChatHistoryItem,
+    UserResourceCredentials,
+)
 from pydantic import BaseModel
 from pyodide.ffi import create_once_callable
 from pyodide.http import pyfetch
@@ -26,7 +31,6 @@ from narada.actions.models import (
     WriteGoogleSheetRequest,
 )
 from narada.errors import NaradaError, NaradaTimeoutError
-from narada.models import Agent, RemoteDispatchChatHistoryItem, UserResourceCredentials
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.

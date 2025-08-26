@@ -1,7 +1,6 @@
 import asyncio
 
-from narada import Narada
-from narada.models import Agent
+from narada import Agent, Narada
 from pydantic import BaseModel
 
 

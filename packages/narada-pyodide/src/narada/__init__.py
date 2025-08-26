@@ -1,9 +1,10 @@
+from narada_core.models import Agent
+
 from narada.client import Narada
 from narada.errors import (
     NaradaError,
     NaradaTimeoutError,
 )
-from narada.models import Agent
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,

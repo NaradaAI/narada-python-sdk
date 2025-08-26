@@ -7,10 +7,7 @@ license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
-dependencies = [
-    # Must use a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
-    "pydantic==2.10.6",
-]
+dependencies = ["narada-core"]
 
 [project.urls]
 Homepage = "https://github.com/NaradaAI/narada-python-sdk/packages/narada-pyodide"
@@ -26,3 +23,6 @@ dev = ["pyodide-py>=0.27.7"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/narada"]
+
+[tool.uv.sources]
+narada-core = { workspace = true }
