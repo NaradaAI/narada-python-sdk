@@ -3,7 +3,7 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import Any, Generic, Literal, TypedDict, TypeVar, overload
+from typing import Any, TypeVar, overload
 
 import aiohttp
 from narada_core.actions.models import (
@@ -23,6 +23,7 @@ from narada_core.actions.models import (
 from narada_core.models import (
     Agent,
     RemoteDispatchChatHistoryItem,
+    Response,
     UserResourceCredentials,
 )
 from playwright.async_api import BrowserContext
@@ -32,27 +33,6 @@ from narada.config import BrowserConfig
 from narada.errors import NaradaError, NaradaTimeoutError
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
-
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
-
-
-class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
-    text: str
-    structuredOutput: _MaybeStructuredOutput
-
-
-class Usage(TypedDict):
-    actions: int
-    credits: int
-
-
-class Response(TypedDict, Generic[_MaybeStructuredOutput]):
-    requestId: str
-    status: Literal["success", "error", "input-required"]
-    response: ResponseContent[_MaybeStructuredOutput] | None
-    createdAt: str
-    completedAt: str | None
-    usage: Usage
 
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)

@@ -1,4 +1,4 @@
-from narada_core.models import Agent
+from narada_core.models import Agent, Response, ResponseContent
 
 from narada.client import Narada
 from narada.config import BrowserConfig
@@ -13,8 +13,6 @@ from narada.errors import (
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,
-    Response,
-    ResponseContent,
 )
 
 __all__ = [
