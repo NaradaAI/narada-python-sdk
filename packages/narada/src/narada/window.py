@@ -3,7 +3,8 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import Any, TypeVar, overload
+from pathlib import Path
+from typing import IO, Any, TypeVar, overload
 
 import aiohttp
 from narada_core.actions.models import (
@@ -23,6 +24,7 @@ from narada_core.actions.models import (
 from narada_core.errors import NaradaError, NaradaTimeoutError
 from narada_core.models import (
     Agent,
+    File,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
@@ -36,6 +38,11 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+
+class _PresignedPost(BaseModel):
+    url: str
+    fields: dict[str, Any]
 
 
 class BaseBrowserWindow(ABC):
@@ -58,6 +65,39 @@ class BaseBrowserWindow(ABC):
     def browser_window_id(self) -> str:
         return self._browser_window_id
 
+    async def upload_file(self, *, file: IO) -> File:
+        """Uploads a file that can be used as an attachment in a subsequent `agent` request.
+
+        The file is temporarily saved on the Narada server and expires after 1 day. It can only be
+        accessed by the user who uploaded it.
+        """
+        # Get the base filename without directories.
+        filename = Path(file.name).name
+
+        async with aiohttp.ClientSession() as session:
+            # First generate a presigned POST for uploading the file.
+            async with session.post(
+                f"{self._base_url}/remote-dispatch/generate-file-upload-presigned-post",
+                headers={"x-api-key": self._api_key},
+                json={"filename": filename},
+            ) as resp:
+                resp.raise_for_status()
+                resp_json = await resp.json()
+
+            presigned_post = _PresignedPost.model_validate(resp_json)
+            object_key: str = presigned_post.fields["key"]
+
+            # Upload the file with a POST request where:
+            # - The URL is the presigned POST URL.
+            # - The form fields are the presigned POST fields.
+            # - The form data has an addition 'file' field that contains the file contents.
+            form_data = aiohttp.FormData(presigned_post.fields)
+            form_data.add_field("file", file)
+            async with session.post(presigned_post.url, data=form_data) as resp:
+                resp.raise_for_status()
+
+        return File(key=object_key)
+
     @overload
     async def dispatch_request(
         self,
@@ -70,6 +110,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         callback_url: str | None = None,
@@ -89,6 +130,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         callback_url: str | None = None,
@@ -107,6 +149,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         callback_url: str | None = None,
@@ -144,6 +187,8 @@ class BaseBrowserWindow(ABC):
             body["chatHistory"] = chat_history
         if additional_context is not None:
             body["additionalContext"] = additional_context
+        if attachment is not None:
+            body["attachment"] = attachment
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
         if callback_url is not None:
@@ -203,6 +248,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         timeout: int = 120,
     ) -> AgentResponse[None]: ...
@@ -216,6 +262,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         timeout: int = 120,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -228,6 +275,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
+        attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         timeout: int = 120,
     ) -> AgentResponse:
@@ -238,6 +286,7 @@ class BaseBrowserWindow(ABC):
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
+            attachment=attachment,
             time_zone=time_zone,
             timeout=timeout,
         )

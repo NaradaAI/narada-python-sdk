@@ -309,7 +309,7 @@ wheels = [
 
 [[package]]
 name = "narada"
-version = "0.1.16"
+version = "0.1.17"
 source = { editable = "packages/narada" }
 dependencies = [
     { name = "aiohttp" },
@@ -340,7 +340,7 @@ dev = [
 
 [[package]]
 name = "narada-core"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "packages/narada-core" }
 dependencies = [
     { name = "pydantic" },
@@ -351,7 +351,7 @@ requires-dist = [{ name = "pydantic", specifier = "==2.10.6" }]
 
 [[package]]
 name = "narada-pyodide"
-version = "0.0.18"
+version = "0.0.19"
 source = { editable = "packages/narada-pyodide" }
 dependencies = [
     { name = "narada-core" },
