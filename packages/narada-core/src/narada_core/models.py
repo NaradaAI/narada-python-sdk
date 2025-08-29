@@ -46,3 +46,7 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     createdAt: str
     completedAt: str | None
     usage: Usage
+
+
+class File(TypedDict):
+    key: str

@@ -4,7 +4,7 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
@@ -24,6 +24,7 @@ from narada_core.actions.models import (
 from narada_core.errors import NaradaError, NaradaTimeoutError
 from narada_core.models import (
     Agent,
+    File,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
@@ -72,6 +73,16 @@ class BaseBrowserWindow(ABC):
     @property
     def browser_window_id(self) -> str:
         return self._browser_window_id
+
+    async def upload_file(self, *, file: IO) -> File:
+        """Uploads a file that can be used as an attachment in a subsequent `agent` request.
+
+        The file is temporarily saved in Narada cloud and expires after 1 day. It can only be
+        accessed by the user who uploaded it.
+        """
+        raise NotImplementedError(
+            "Uploading files is not supported in the browser environment"
+        )
 
     @overload
     async def dispatch_request(
