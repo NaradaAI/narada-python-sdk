@@ -68,7 +68,7 @@ class BaseBrowserWindow(ABC):
     async def upload_file(self, *, file: IO) -> File:
         """Uploads a file that can be used as an attachment in a subsequent `agent` request.
 
-        The file is temporarily saved on the Narada server and expires after 1 day. It can only be
+        The file is temporarily saved in Narada cloud and expires after 1 day. It can only be
         accessed by the user who uploaded it.
         """
         # Get the base filename without directories.
