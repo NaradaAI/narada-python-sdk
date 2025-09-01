@@ -142,6 +142,8 @@ class Narada:
             f"--user-data-dir={config.user_data_dir}",
             f"--profile-directory={config.profile_directory}",
             f"--remote-debugging-port={config.cdp_port}",
+            "--no-default-browser-check",
+            "--no-first-run",
             "--new-window",
             tagged_initialization_url,
             # TODO: This is needed if we don't use CDP but let Playwright manage the browser.
