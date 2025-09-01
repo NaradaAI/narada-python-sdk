@@ -1,3 +1,5 @@
+import importlib.metadata
+
 from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
@@ -10,7 +12,15 @@ from narada.window import (
     RemoteBrowserWindow,
 )
 
+# Get version from package metadata
+try:
+    __version__ = importlib.metadata.version("narada")
+except Exception:
+    # Fallback version if package metadata is not available
+    __version__ = "unknown"
+
 __all__ = [
+    "__version__",
     "Agent",
     "File",
     "LocalBrowserWindow",
