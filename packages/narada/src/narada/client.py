@@ -173,11 +173,23 @@ class Narada:
 
         logging.debug("Browser process started with PID: %s", browser_process.pid)
 
+        # We need to wait a bit before connecting to the browser over CDP for the initial page to
+        # open. Otherwise Playwright just sees an empty context with no pages.
+        await asyncio.sleep(1)
+
+        context = None
+        initialization_page = None
         max_cdp_connect_attempts = 10
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(
                     f"http://localhost:{config.cdp_port}"
+                )
+
+                # Grab the browser window ID from the page we just opened.
+                context = browser.contexts[0]
+                initialization_page = next(
+                    p for p in context.pages if p.url == tagged_initialization_url
                 )
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
@@ -187,11 +199,9 @@ class Narada:
                 await asyncio.sleep(3)
                 continue
 
-        # Grab the browser window ID from the page we just opened.
-        context = browser.contexts[0]
-        initialization_page = next(
-            p for p in context.pages if p.url == tagged_initialization_url
-        )
+        # These are impossible as we would've raised an exception above otherwise.
+        assert context is not None
+        assert initialization_page is not None
 
         # Wait for the browser window ID to be available, potentially letting the user respond to
         # recoverable errors interactively.
