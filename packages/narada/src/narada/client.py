@@ -185,12 +185,6 @@ class Narada:
                 browser = await playwright.chromium.connect_over_cdp(
                     f"http://localhost:{config.cdp_port}"
                 )
-
-                # Grab the browser window ID from the page we just opened.
-                context = browser.contexts[0]
-                initialization_page = next(
-                    p for p in context.pages if p.url == tagged_initialization_url
-                )
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
@@ -198,6 +192,21 @@ class Narada:
                     raise
                 await asyncio.sleep(3)
                 continue
+
+            # Grab the browser window ID from the page we just opened.
+            context = browser.contexts[0]
+            initialization_page = next(
+                (p for p in context.pages if p.url == tagged_initialization_url), None
+            )
+            if initialization_page is not None:
+                break
+
+            if attempt == max_cdp_connect_attempts - 1:
+                raise NaradaTimeoutError("Timed out waiting for initialization page")
+
+            # Close the current CDP connection and try again.
+            await browser.close()
+            await asyncio.sleep(3)
 
         # These are impossible as we would've raised an exception above otherwise.
         assert context is not None
