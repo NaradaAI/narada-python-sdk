@@ -173,8 +173,8 @@ class Narada:
 
         logging.debug("Browser process started with PID: %s", browser_process.pid)
 
-        # We need to wait a bit before connecting to the browser over CDP for the initial page to
-        # open. Otherwise Playwright just sees an empty context with no pages.
+        # We need to wait a bit for the initial page to open before connecting to the browser over
+        # CDP, otherwise Playwright can see an empty context with no pages.
         await asyncio.sleep(1)
 
         context = None
