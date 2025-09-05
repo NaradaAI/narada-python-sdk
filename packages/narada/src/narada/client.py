@@ -29,16 +29,24 @@ from playwright.async_api import (
 )
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
+import httpx
+from urllib.parse import quote
 
 from narada.config import BrowserConfig
 from narada.utils import assert_never
 from narada.window import LocalBrowserWindow, create_side_panel_url
+
+from pydantic import BaseModel
 
 
 @dataclass
 class _LaunchBrowserResult:
     browser_window_id: str
     side_panel_page: Page
+
+
+class CustomTokenResponse(BaseModel):
+    token: str
 
 
 class _ShouldRetryCreateProcess(Exception):
@@ -83,6 +91,43 @@ class Narada:
         await self._playwright_context_manager.__aexit__(*args)
         self._playwright_context_manager = None
         self._playwright = None
+
+    @staticmethod
+    async def _get_custom_token(
+        *, base_url: str, api_key: str, timeout: int = 30
+    ) -> str:
+        """Fetch a custom token from the backend `/custom-token` endpoint.
+
+        The `base_url` may be provided (for example `config.backend_api_base_url`);
+        otherwise the `NARADA_API_BASE_URL` env var is used with a sensible default.
+        Raises `NaradaTimeoutError` on timeouts and maps 504 to `NaradaTimeoutError`.
+        HTTP errors are raised as `httpx` exceptions.
+        """
+        url = f"{base_url.rstrip('/')}/auth/custom-token"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    url,
+                    headers={"x-api-key": api_key},
+                    timeout=timeout,
+                )
+
+            # Map gateway timeout to our timeout error type for consistency.
+            if resp.status_code == 504:
+                raise NaradaTimeoutError
+
+            if resp.status_code == 401:
+                raise NaradaExtensionUnauthenticatedError("Invalid API key")
+
+            resp.raise_for_status()
+            resp_json = resp.json()
+
+            token_resp = CustomTokenResponse.model_validate(resp_json)
+            return token_resp.token
+
+        except httpx.TimeoutException:
+            raise NaradaTimeoutError
 
     async def open_and_initialize_browser_window(
         self, config: BrowserConfig | None = None
@@ -136,7 +181,25 @@ class Narada:
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+
+        # Include a customToken query param up front so the extension can read it on first load.
+        # If fetching the token fails, proceed without it (the fallback in
+        # _wait_for_browser_window_id will still attempt interactive recovery).
+        initialization_url_with_token = config.initialization_url
+        try:
+            custom_token = await Narada._get_custom_token(
+                base_url=config.backend_api_base_url, api_key=self._api_key, timeout=10
+            )
+            sep = "&" if "?" in initialization_url_with_token else "?"
+            initialization_url_with_token = f"{initialization_url_with_token}{sep}customToken={quote(custom_token, safe='')}"
+        except Exception:
+            # Swallow errors here; we will fall back to the existing flow if needed.
+            pass
+
+        sep_t = "&" if "?" in initialization_url_with_token else "?"
+        tagged_initialization_url = (
+            f"{initialization_url_with_token}{sep_t}t={window_tag}"
+        )
 
         browser_args = [
             f"--user-data-dir={config.user_data_dir}",
@@ -216,11 +279,11 @@ class Narada:
         # recoverable errors interactively.
         if config.interactive:
             browser_window_id = await self._wait_for_browser_window_id_interactively(
-                initialization_page
+                page=initialization_page,
             )
         else:
             browser_window_id = await Narada._wait_for_browser_window_id(
-                initialization_page,
+                page=initialization_page,
             )
 
         # Revert the download behavior to the default behavior for the extension, otherwise our
@@ -311,7 +374,7 @@ class Narada:
                 and task.result() is not None
             ):
                 raise NaradaExtensionUnauthenticatedError(
-                    "Sign in to the Narada extension first"
+                    "Narada extension unauthenticated"
                 )
 
             if (
@@ -320,7 +383,8 @@ class Narada:
             ):
                 raise NaradaInitializationError("Initialization error")
 
-        assert_never()
+        # If we got here, something unexpected happened and we didn't obtain the window ID.
+        raise NaradaInitializationError("Failed to obtain browser window ID")
 
     async def _wait_for_browser_window_id_interactively(
         self, page: Page, *, per_attempt_timeout: int = 15_000

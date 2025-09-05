@@ -29,5 +29,6 @@ class BrowserConfig:
     profile_directory: str = "Default"
     cdp_port: int = 9222
     initialization_url: str = "https://app.narada.ai/initialize"
+    backend_api_base_url: str = "https://app.narada.ai/fast/v2"
     extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"
     interactive: bool = True
