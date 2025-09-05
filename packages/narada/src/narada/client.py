@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
+from http import HTTPStatus
 
 from narada_core.errors import (
     NaradaExtensionMissingError,
@@ -29,7 +30,7 @@ from playwright.async_api import (
 )
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
-import httpx
+import aiohttp
 from urllib.parse import quote
 
 from narada.config import BrowserConfig
@@ -98,35 +99,32 @@ class Narada:
     ) -> str:
         """Fetch a custom token from the backend `/custom-token` endpoint.
 
-        The `base_url` may be provided (for example `config.backend_api_base_url`);
-        otherwise the `NARADA_API_BASE_URL` env var is used with a sensible default.
         Raises `NaradaTimeoutError` on timeouts and maps 504 to `NaradaTimeoutError`.
-        HTTP errors are raised as `httpx` exceptions.
+        HTTP errors are raised via `resp.raise_for_status()`.
         """
         url = f"{base_url.rstrip('/')}/auth/custom-token"
 
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
                     url,
                     headers={"x-api-key": api_key},
-                    timeout=timeout,
-                )
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                ) as resp:
+                    # Map gateway timeout to our timeout error type for consistency.
+                    if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
+                        raise NaradaTimeoutError
 
-            # Map gateway timeout to our timeout error type for consistency.
-            if resp.status_code == 504:
-                raise NaradaTimeoutError
+                    if resp.status == HTTPStatus.UNAUTHORIZED:
+                        raise NaradaExtensionUnauthenticatedError("Invalid API key")
 
-            if resp.status_code == 401:
-                raise NaradaExtensionUnauthenticatedError("Invalid API key")
-
-            resp.raise_for_status()
-            resp_json = resp.json()
+                    resp.raise_for_status()
+                    resp_json = await resp.json()
 
             token_resp = CustomTokenResponse.model_validate(resp_json)
             return token_resp.token
 
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             raise NaradaTimeoutError
 
     async def open_and_initialize_browser_window(
@@ -187,8 +185,9 @@ class Narada:
         # _wait_for_browser_window_id will still attempt interactive recovery).
         initialization_url_with_token = config.initialization_url
         try:
+            base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
             custom_token = await Narada._get_custom_token(
-                base_url=config.backend_api_base_url, api_key=self._api_key, timeout=10
+                base_url=base_url, api_key=self._api_key, timeout=10
             )
             sep = "&" if "?" in initialization_url_with_token else "?"
             initialization_url_with_token = f"{initialization_url_with_token}{sep}customToken={quote(custom_token, safe='')}"
