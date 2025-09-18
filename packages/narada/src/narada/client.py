@@ -118,6 +118,8 @@ class Narada:
         side_panel_page = launch_browser_result.side_panel_page
         browser_window_id = launch_browser_result.browser_window_id
 
+        # Revert the download behavior to the default behavior for the extension, otherwise our
+        # extension cannot download files.
         cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
         await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
         await cdp_session.detach()
@@ -127,6 +129,72 @@ class Narada:
             browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
+        )
+
+    async def initialize_in_existing_browser_window(
+        self, config: BrowserConfig | None = None
+    ) -> LocalBrowserWindow:
+        """Initializes the Narada extension in an existing browser window.
+
+        This method connects to an existing browser process via CDP and performs the same
+        initialization logic as `open_and_initialize_browser_window`, but without launching a new
+        browser process.
+        """
+        assert self._playwright is not None
+        playwright = self._playwright
+
+        config = config or BrowserConfig()
+
+        browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+
+        # Generate a unique tag for the initialization URL
+        window_tag = uuid4().hex
+        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+
+        # Open the initialization page in a new tab in the default context.
+        context = browser.contexts[0]
+        initialization_page = await context.new_page()
+        await initialization_page.goto(tagged_initialization_url)
+
+        # Wait for the browser window ID to be available, potentially letting the user respond to
+        # recoverable errors interactively.
+        if config.interactive:
+            browser_window_id = await self._wait_for_browser_window_id_interactively(
+                initialization_page
+            )
+        else:
+            browser_window_id = await Narada._wait_for_browser_window_id(
+                initialization_page,
+            )
+
+        # Playwright seems unable to pick up the side panel page that is automatically opened by the
+        # initialization page when attaching to an existing browser window. We need to establish a
+        # new CDP connection to the browser *after* the side panel page is opened for Playwright to
+        # see it.
+        await browser.close()
+        browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+        context = browser.contexts[0]
+
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
+
+        # Revert the download behavior to the default behavior for the extension, otherwise our
+        # extension cannot download files.
+        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
+        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
+        await cdp_session.detach()
+
+        if config.interactive:
+            self._console.print(
+                "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
+                f"{browser_window_id}[/bold green]\n",
+            )
+
+        return LocalBrowserWindow(
+            api_key=self._api_key,
+            browser_window_id=browser_window_id,
+            config=config,
+            context=context,
         )
 
     async def _launch_browser(
@@ -182,9 +250,7 @@ class Narada:
         max_cdp_connect_attempts = 10
         for attempt in range(max_cdp_connect_attempts):
             try:
-                browser = await playwright.chromium.connect_over_cdp(
-                    f"http://localhost:{config.cdp_port}"
-                )
+                browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
@@ -223,8 +289,6 @@ class Narada:
                 initialization_page,
             )
 
-        # Revert the download behavior to the default behavior for the extension, otherwise our
-        # extension cannot download files.
         side_panel_url = create_side_panel_url(config, browser_window_id)
         side_panel_page = next(
             (p for p in context.pages if p.url == side_panel_url), None
