@@ -18,7 +18,6 @@ from narada_core.errors import (
 )
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
-    Browser,
     ElementHandle,
     Page,
     Playwright,
@@ -39,20 +38,6 @@ from narada.window import LocalBrowserWindow, create_side_panel_url
 class _LaunchBrowserResult:
     browser_window_id: str
     side_panel_page: Page
-
-
-class _ShouldRetryCreateProcess(Exception):
-    browser: Browser
-    browser_process: asyncio.subprocess.Process | subprocess.Popen[bytes]
-
-    def __init__(
-        self,
-        browser: Browser,
-        browser_process: asyncio.subprocess.Process | subprocess.Popen[bytes],
-    ) -> None:
-        super().__init__()
-        self.browser = browser
-        self.browser_process = browser_process
 
 
 class Narada:
@@ -92,41 +77,68 @@ class Narada:
 
         config = config or BrowserConfig()
 
-        launch_browser_result = None
-        while launch_browser_result is None:
-            try:
-                launch_browser_result = await self._launch_browser(playwright, config)
-            except _ShouldRetryCreateProcess as e:
-                if config.interactive:
-                    self._console.input(
-                        "\n> [bold blue]New extension installation detected. Press Enter to "
-                        "relaunch the browser and continue.[/bold blue]"
-                    )
-
-                # Close the CDP connection to the browser.
-                await e.browser.close()
-
-                # Gracefully terminate the browser process.
-                e.browser_process.terminate()
-                if isinstance(e.browser_process, asyncio.subprocess.Process):
-                    await e.browser_process.wait()
-                else:
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, e.browser_process.wait
-                    )
-
+        launch_browser_result = await self._launch_browser(playwright, config)
         side_panel_page = launch_browser_result.side_panel_page
         browser_window_id = launch_browser_result.browser_window_id
 
-        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
-        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
-        await cdp_session.detach()
+        await self._fix_download_behavior(side_panel_page)
 
         return LocalBrowserWindow(
             api_key=self._api_key,
             browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
+        )
+
+    async def initialize_in_existing_browser_window(
+        self, config: BrowserConfig | None = None
+    ) -> LocalBrowserWindow:
+        """Initializes the Narada extension in an existing browser window.
+
+        This method connects to an existing browser process via CDP and performs the same
+        initialization logic as `open_and_initialize_browser_window`, but without launching a new
+        browser process.
+        """
+        assert self._playwright is not None
+        playwright = self._playwright
+
+        config = config or BrowserConfig()
+
+        browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+
+        # Generate a unique tag for the initialization URL
+        window_tag = uuid4().hex
+        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+
+        # Open the initialization page in a new tab in the default context.
+        context = browser.contexts[0]
+        initialization_page = await context.new_page()
+        await initialization_page.goto(tagged_initialization_url)
+
+        browser_window_id = await self._wait_for_browser_window_id(
+            initialization_page, config
+        )
+
+        # Playwright seems unable to pick up the side panel page that is automatically opened by the
+        # initialization page. We need to establish a new CDP connection to the browser *after* the
+        # side panel page is opened for Playwright to see it.
+        await browser.close()
+        browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+        context = browser.contexts[0]
+
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
+
+        await self._fix_download_behavior(side_panel_page)
+
+        if config.interactive:
+            self._print_success_message(browser_window_id)
+
+        return LocalBrowserWindow(
+            api_key=self._api_key,
+            browser_window_id=browser_window_id,
+            config=config,
+            context=context,
         )
 
     async def _launch_browser(
@@ -175,22 +187,20 @@ class Narada:
 
         # We need to wait a bit for the initial page to open before connecting to the browser over
         # CDP, otherwise Playwright can see an empty context with no pages.
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
-        context = None
-        initialization_page = None
+        browser_window_id = None
+        side_panel_page = None
         max_cdp_connect_attempts = 10
         for attempt in range(max_cdp_connect_attempts):
             try:
-                browser = await playwright.chromium.connect_over_cdp(
-                    f"http://localhost:{config.cdp_port}"
-                )
+                browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
                 if attempt == max_cdp_connect_attempts - 1:
                     raise
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
                 continue
 
             # Grab the browser window ID from the page we just opened.
@@ -199,7 +209,16 @@ class Narada:
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
             if initialization_page is not None:
-                break
+                browser_window_id = await self._wait_for_browser_window_id(
+                    initialization_page, config
+                )
+
+                side_panel_url = create_side_panel_url(config, browser_window_id)
+                side_panel_page = next(
+                    (p for p in context.pages if p.url == side_panel_url), None
+                )
+                if side_panel_page is not None:
+                    break
 
             if attempt == max_cdp_connect_attempts - 1:
                 raise NaradaTimeoutError("Timed out waiting for initialization page")
@@ -209,34 +228,11 @@ class Narada:
             await asyncio.sleep(3)
 
         # These are impossible as we would've raised an exception above otherwise.
-        assert context is not None
-        assert initialization_page is not None
-
-        # Wait for the browser window ID to be available, potentially letting the user respond to
-        # recoverable errors interactively.
-        if config.interactive:
-            browser_window_id = await self._wait_for_browser_window_id_interactively(
-                initialization_page
-            )
-        else:
-            browser_window_id = await Narada._wait_for_browser_window_id(
-                initialization_page,
-            )
-
-        # Revert the download behavior to the default behavior for the extension, otherwise our
-        # extension cannot download files.
-        side_panel_url = create_side_panel_url(config, browser_window_id)
-        side_panel_page = next(
-            (p for p in context.pages if p.url == side_panel_url), None
-        )
-        if side_panel_page is None:
-            raise _ShouldRetryCreateProcess(browser, browser_process)
+        assert browser_window_id is not None
+        assert side_panel_page is not None
 
         if config.interactive:
-            self._console.print(
-                "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
-                f"{browser_window_id}[/bold green]\n",
-            )
+            self._print_success_message(browser_window_id)
 
         return _LaunchBrowserResult(
             browser_window_id=browser_window_id,
@@ -255,7 +251,9 @@ class Narada:
             return None
 
     @staticmethod
-    async def _wait_for_browser_window_id(page: Page, *, timeout: int = 15_000) -> str:
+    async def _wait_for_browser_window_id_silently(
+        page: Page, *, timeout: int = 15_000
+    ) -> str:
         selectors = [
             Narada._BROWSER_WINDOW_ID_SELECTOR,
             Narada._UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
@@ -328,7 +326,7 @@ class Narada:
         try:
             while True:
                 try:
-                    return await Narada._wait_for_browser_window_id(
+                    return await Narada._wait_for_browser_window_id_silently(
                         page, timeout=per_attempt_timeout
                     )
                 except NaradaExtensionMissingError:
@@ -355,3 +353,34 @@ class Narada:
                 "retry the action and keep the Narada web page open.[/bold red]",
             )
             sys.exit(1)
+
+    async def _wait_for_browser_window_id(
+        self,
+        initialization_page: Page,
+        config: BrowserConfig,
+    ) -> str:
+        """Waits for the browser window ID to be available, potentially letting the user respond to
+        recoverable errors interactively.
+        """
+        if config.interactive:
+            return await self._wait_for_browser_window_id_interactively(
+                initialization_page
+            )
+        else:
+            return await Narada._wait_for_browser_window_id_silently(
+                initialization_page
+            )
+
+    async def _fix_download_behavior(self, side_panel_page: Page) -> None:
+        """Reverts the download behavior to the default behavior for the extension, otherwise our
+        extension cannot download files.
+        """
+        cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
+        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
+        await cdp_session.detach()
+
+    def _print_success_message(self, browser_window_id: str) -> None:
+        self._console.print(
+            "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
+            f"{browser_window_id}[/bold green]\n",
+        )
