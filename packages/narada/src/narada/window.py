@@ -423,6 +423,7 @@ class BaseBrowserWindow(ABC):
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
+    _browser_process_id: int | None
     _config: BrowserConfig
     _context: BrowserContext
 
@@ -430,6 +431,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
         self,
         *,
         api_key: str,
+        browser_process_id: int | None,
         browser_window_id: str,
         config: BrowserConfig,
         context: BrowserContext,
@@ -439,11 +441,17 @@ class LocalBrowserWindow(BaseBrowserWindow):
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             browser_window_id=browser_window_id,
         )
+        self._browser_process_id = browser_process_id
         self._config = config
         self._context = context
 
     def __str__(self) -> str:
-        return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
+        return (
+            "LocalBrowserWindow("
+            f"browser_process_id={self._browser_process_id}, "
+            f"browser_window_id={self.browser_window_id}"
+            ")"
+        )
 
     async def reinitialize(self) -> None:
         side_panel_url = create_side_panel_url(self._config, self._browser_window_id)
