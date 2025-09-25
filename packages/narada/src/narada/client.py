@@ -36,6 +36,7 @@ from narada.window import LocalBrowserWindow, create_side_panel_url
 
 @dataclass
 class _LaunchBrowserResult:
+    browser_process_id: int
     browser_window_id: str
     side_panel_page: Page
 
@@ -85,6 +86,7 @@ class Narada:
 
         return LocalBrowserWindow(
             api_key=self._api_key,
+            browser_process_id=launch_browser_result.browser_process_id,
             browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
@@ -136,6 +138,7 @@ class Narada:
 
         return LocalBrowserWindow(
             api_key=self._api_key,
+            browser_process_id=None,
             browser_window_id=browser_window_id,
             config=config,
             context=context,
@@ -235,6 +238,7 @@ class Narada:
             self._print_success_message(browser_window_id)
 
         return _LaunchBrowserResult(
+            browser_process_id=browser_process.pid,
             browser_window_id=browser_window_id,
             side_panel_page=side_panel_page,
         )

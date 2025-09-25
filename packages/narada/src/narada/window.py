@@ -113,6 +113,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -133,6 +134,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -152,6 +154,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -191,6 +194,8 @@ class BaseBrowserWindow(ABC):
             body["attachment"] = attachment
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
+        if variables is not None:
+            body["variables"] = variables
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
@@ -250,6 +255,7 @@ class BaseBrowserWindow(ABC):
         output_schema: None = None,
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse[None]: ...
 
@@ -264,6 +270,7 @@ class BaseBrowserWindow(ABC):
         output_schema: type[_StructuredOutput],
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -277,6 +284,7 @@ class BaseBrowserWindow(ABC):
         output_schema: type[BaseModel] | None = None,
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -288,6 +296,7 @@ class BaseBrowserWindow(ABC):
             output_schema=output_schema,
             attachment=attachment,
             time_zone=time_zone,
+            variables=variables,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -423,6 +432,7 @@ class BaseBrowserWindow(ABC):
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
+    _browser_process_id: int | None
     _config: BrowserConfig
     _context: BrowserContext
 
@@ -430,6 +440,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
         self,
         *,
         api_key: str,
+        browser_process_id: int | None,
         browser_window_id: str,
         config: BrowserConfig,
         context: BrowserContext,
@@ -439,11 +450,21 @@ class LocalBrowserWindow(BaseBrowserWindow):
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             browser_window_id=browser_window_id,
         )
+        self._browser_process_id = browser_process_id
         self._config = config
         self._context = context
 
+    @property
+    def browser_process_id(self) -> int | None:
+        return self._browser_process_id
+
     def __str__(self) -> str:
-        return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
+        return (
+            "LocalBrowserWindow("
+            f"browser_process_id={self._browser_process_id}, "
+            f"browser_window_id={self.browser_window_id}"
+            ")"
+        )
 
     async def reinitialize(self) -> None:
         side_panel_url = create_side_panel_url(self._config, self._browser_window_id)
