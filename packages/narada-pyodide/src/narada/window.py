@@ -98,6 +98,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -117,6 +118,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -135,6 +137,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         timeout: int = 120,
@@ -181,6 +184,8 @@ class BaseBrowserWindow(ABC):
             body["additionalContext"] = additional_context
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
+        if variables is not None:
+            body["variables"] = variables
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
@@ -260,6 +265,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: None = None,
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse[None]: ...
 
@@ -273,6 +279,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -285,6 +292,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
         time_zone: str = "America/Los_Angeles",
+        variables: dict[str, str] | None = None,
         timeout: int = 120,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -295,6 +303,7 @@ class BaseBrowserWindow(ABC):
             generate_gif=generate_gif,
             output_schema=output_schema,
             time_zone=time_zone,
+            variables=variables,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
