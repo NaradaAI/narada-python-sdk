@@ -35,6 +35,7 @@ from pyodide.http import pyfetch
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
+# TODO: `.get()` won't be necessary once frontend is fully migrated.
 _narada_parent_run_ids: list[str] = globals().get("_narada_parent_run_ids", [])
 
 if TYPE_CHECKING:

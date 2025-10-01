@@ -351,7 +351,7 @@ requires-dist = [{ name = "pydantic", specifier = "==2.10.6" }]
 
 [[package]]
 name = "narada-pyodide"
-version = "0.0.21"
+version = "0.0.22"
 source = { editable = "packages/narada-pyodide" }
 dependencies = [
     { name = "narada-core" },
