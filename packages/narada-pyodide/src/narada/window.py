@@ -4,7 +4,7 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar, overload
+from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
@@ -30,13 +30,26 @@ from narada_core.models import (
     UserResourceCredentials,
 )
 from pydantic import BaseModel
-from pyodide.ffi import create_once_callable
+from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
-# TODO: `.get()` won't be necessary once frontend is fully migrated.
-_narada_parent_run_ids: list[str] = globals().get("_narada_parent_run_ids", [])
+
+_cached_parent_run_ids: list[str] | None = None
+
+
+def _parent_run_ids() -> list[str]:
+    # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the JavaScript harness.
+    # Before we can use it as a regular Python list, we need to call `.to_py()` on it.
+    global _cached_parent_run_ids
+    if _cached_parent_run_ids is None:
+        _cached_parent_run_ids = cast(
+            JsProxy,
+            _narada_parent_run_ids,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+        ).to_py()
+    return _cached_parent_run_ids
+
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
@@ -171,7 +184,7 @@ class BaseBrowserWindow(ABC):
             "prompt": agent_prefix + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
-            "parentRunIds": _narada_parent_run_ids,
+            "parentRunIds": _parent_run_ids(),
         }
         if clear_chat is not None:
             body["clearChat"] = clear_chat
