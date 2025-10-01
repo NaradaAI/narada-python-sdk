@@ -33,6 +33,11 @@ from pydantic import BaseModel
 from pyodide.ffi import create_once_callable
 from pyodide.http import pyfetch
 
+# Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
+# in the stack on the frontend.
+# TODO: `.get()` won't be necessary once frontend is fully migrated.
+_narada_parent_run_ids: list[str] = globals().get("_narada_parent_run_ids", [])
+
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
@@ -166,6 +171,7 @@ class BaseBrowserWindow(ABC):
             "prompt": agent_prefix + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
+            "parentRunIds": _narada_parent_run_ids,
         }
         if clear_chat is not None:
             body["clearChat"] = clear_chat
