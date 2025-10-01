@@ -1,7 +1,7 @@
 
 [project]
 name = "narada-pyodide"
-version = "0.0.22"
+version = "0.0.23"
 description = "Pyodide-compatible Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
