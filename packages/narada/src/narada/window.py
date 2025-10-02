@@ -13,6 +13,7 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GoToUrlRequest,
@@ -329,6 +330,10 @@ class BaseBrowserWindow(ABC):
             ),
             timeout=timeout,
         )
+
+    async def close(self, *, timeout: int | None = None) -> None:
+        """Gracefully closes the current browser window."""
+        return await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None

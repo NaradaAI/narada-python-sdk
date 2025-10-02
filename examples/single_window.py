@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 
 from narada import Narada
 
@@ -21,13 +23,22 @@ async def main() -> None:
 
         print("Response:", response.model_dump_json(indent=2))
 
+    # Change these to test the different options below.
+    should_quit_browser = False
+    should_close_window = False
+
     # The browser runs as an independent process. If you want to close it after the task is
     # complete, you can get its process ID from the window object.
     pid = window.browser_process_id
     # Process ID is only available if it was originally launched by Narada.
-    if pid is not None:
-        print(f"Browser process ID: {pid}")
-        # os.kill(pid, signal.SIGTERM)
+    if pid is not None and should_quit_browser:
+        print("Killing browser process with PID:", pid)
+        os.kill(pid, signal.SIGTERM)
+
+    # You can also close this specific window instead of quitting the entire browser process.
+    if should_close_window:
+        print("Closing window...")
+        await window.close()
 
 
 if __name__ == "__main__":
