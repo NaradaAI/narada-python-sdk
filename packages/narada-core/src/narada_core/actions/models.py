@@ -122,6 +122,10 @@ class AgenticSelectorRequest(BaseModel):
         }
 
 
+class CloseWindowRequest(BaseModel):
+    name: Literal["close_window"] = "close_window"
+
+
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str
@@ -152,6 +156,7 @@ class WriteGoogleSheetRequest(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | CloseWindowRequest
     | GoToUrlRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
