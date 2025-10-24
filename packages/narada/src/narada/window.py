@@ -22,7 +22,11 @@ from narada_core.actions.models import (
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
 )
-from narada_core.errors import NaradaError, NaradaTimeoutError
+from narada_core.errors import (
+    NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
+    NaradaError,
+    NaradaTimeoutError,
+)
 from narada_core.models import (
     Agent,
     File,
@@ -117,7 +121,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> Response[None]: ...
 
     @overload
@@ -138,7 +142,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
     async def dispatch_request(
@@ -158,7 +162,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
 
@@ -240,10 +244,10 @@ class BaseBrowserWindow(ABC):
                     # Poll every 3 seconds.
                     await asyncio.sleep(3)
                 else:
-                    raise NaradaTimeoutError
+                    raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
-            raise NaradaTimeoutError
+            raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
     @overload
     async def agent(
@@ -257,7 +261,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         variables: dict[str, str] | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> AgentResponse[None]: ...
 
     @overload
@@ -272,7 +276,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         variables: dict[str, str] | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
     async def agent(
@@ -286,7 +290,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         variables: dict[str, str] | None = None,
-        timeout: int = 120,
+        timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
         remote_dispatch_response = await self.dispatch_request(
