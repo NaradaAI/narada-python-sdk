@@ -226,6 +226,8 @@ class BaseBrowserWindow(ABC):
                         resp.raise_for_status()
                         response = await resp.json()
 
+                    response["requestId"] = request_id
+
                     if response["status"] != "pending":
                         response_content = response["response"]
                         if response_content is not None:
@@ -308,6 +310,7 @@ class BaseBrowserWindow(ABC):
         assert response_content is not None
 
         return AgentResponse(
+            request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),
