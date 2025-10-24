@@ -255,6 +255,7 @@ class BaseBrowserWindow(ABC):
                     raise NaradaError(f"Failed to poll for response: {status} {text}")
 
                 response = await fetch_response.json()
+                response["requestId"] = request_id
 
                 if response["status"] != "pending":
                     response_content = response["response"]
@@ -334,6 +335,7 @@ class BaseBrowserWindow(ABC):
         assert response_content is not None
 
         return AgentResponse(
+            request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),

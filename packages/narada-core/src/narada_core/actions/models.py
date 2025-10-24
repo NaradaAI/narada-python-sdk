@@ -14,6 +14,7 @@ class AgentUsage(BaseModel):
 
 
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
+    request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
     structured_output: _MaybeStructuredOutput | None
