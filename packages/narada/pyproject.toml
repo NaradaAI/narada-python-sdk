@@ -1,17 +1,12 @@
 [project]
 name = "narada"
-version = "0.1.23"
+version = "0.1.11.post1"
 description = "Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
-requires-python = ">=3.12"
-dependencies = [
-    "narada-core==0.0.5",
-    "aiohttp>=3.12.13",
-    "playwright>=1.53.0",
-    "rich>=14.0.0",
-]
+requires-python = ">=3.11,<3.12"
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/NaradaAI/narada-python-sdk/narada"
@@ -22,11 +17,5 @@ Issues = "https://github.com/NaradaAI/narada-python-sdk/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[dependency-groups]
-dev = ["pytest>=8.4.1", "pytest-asyncio>=1.0.0"]
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/narada"]
-
-[tool.uv.sources]
-narada-core = { workspace = true }
