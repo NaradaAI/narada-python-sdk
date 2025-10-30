@@ -12,12 +12,20 @@ async def main() -> None:
         await window.go_to_url(url="https://www.google.com")
 
         await window.agentic_selector(
+            action={"type": "fill", "value": "narada"},
+            selectors={
+                "tag_name": "textarea",
+                "name": "q",
+            },
+            fallback_operator_query='type "narada" in the search box',
+        )
+
+        await window.agentic_selector(
             action={"type": "click"},
             selectors={
-                # Change this to something else to see the fallback Operator query in action.
-                "aria_label": "Search for Images ",
+                "xpath": "/html/body/div[2]/div[4]/form/div[1]/div[1]/div[2]/div[4]/div[6]/center/input[1]",
             },
-            fallback_operator_query='click on "Images" near the top of the page',
+            fallback_operator_query="click on the Google Search button",
         )
 
 
