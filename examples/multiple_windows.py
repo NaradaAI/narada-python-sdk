@@ -1,14 +1,13 @@
 import asyncio
 
 from narada import Narada
-from narada.actions.models import AgentResponse
 
 
 async def main() -> None:
     # Initialize the Narada client.
     async with Narada() as narada:
         # Helper function to run a task in a new browser window.
-        async def run_task(prompt: str) -> AgentResponse:
+        async def run_task(prompt: str):
             window = await narada.open_and_initialize_browser_window()
             return await window.agent(prompt=prompt)
 
