@@ -10,7 +10,7 @@ async def main() -> None:
 
         # Upload a file to be later used as an attachment.
         current_dir = Path(__file__).parent
-        with open(current_dir / "story.txt") as f:
+        with open(current_dir / "demo_attachment_file.txt") as f:
             file = await window.upload_file(file=f)
 
         # Ask the agent to use the attachment.

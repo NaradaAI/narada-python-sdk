@@ -12,12 +12,12 @@ async def main() -> None:
         await window.go_to_url(url="https://www.google.com")
 
         await window.agentic_selector(
-            action={"type": "fill", "value": "narada"},
+            action={"type": "fill", "value": "Narada AI"},
             selectors={
                 "tag_name": "textarea",
                 "name": "q",
             },
-            fallback_operator_query='type "narada" in the search box',
+            fallback_operator_query='type "Narada AI" in the search box',
         )
 
         await window.agentic_selector(
