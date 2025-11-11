@@ -53,9 +53,9 @@ async def main() -> None:
         async def search_h_index() -> int:
             response = await window_2.agent(
                 prompt=(
-                    f"Search for {author_name} with Google and extract their h-index, which you "
-                    "can find by opening their Google Scholar profile and clicking on the CITED BY "
-                    "tab."
+                    f"Search for {author_name} of LLM Compiler with Google and extract their "
+                    "h-index, which you can find by opening their Google Scholar profile and "
+                    "clicking on the CITED BY tab."
                 ),
                 output_schema=ScholarInfo,
             )

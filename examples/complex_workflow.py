@@ -22,7 +22,7 @@ async def main() -> None:
         await window.go_to_url(url="https://arxiv.org/list/cs.AI/recent")
 
         resp = await window.agent(
-            prompt="What are the top 3 AI papers based on the current page?",
+            prompt="What are the top 2 AI papers based on the current page?",
             agent=Agent.GENERALIST,
             output_schema=Papers,
         )
@@ -30,7 +30,7 @@ async def main() -> None:
         papers = resp.structured_output
         assert papers is not None
 
-        print("Top 3 AI papers:", papers.model_dump_json(indent=2))
+        print("Top 2 AI papers:", papers.model_dump_json(indent=2))
 
         for paper in papers.papers:
             await window.go_to_url(url=paper.url)

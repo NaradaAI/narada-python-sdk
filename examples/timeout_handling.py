@@ -9,7 +9,7 @@ async def main() -> None:
         # Open a new browser window and initialize the Narada UI agent.
         window = await narada.open_and_initialize_browser_window()
 
-        max_attempts = 3
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
                 response = await window.agent(
