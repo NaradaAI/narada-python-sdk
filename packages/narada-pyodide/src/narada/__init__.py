@@ -5,6 +5,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
 )
 from narada_core.models import Agent, File, Response, ResponseContent
+from narada.render_html import render_html
 
 from narada.client import Narada
 from narada.window import (
@@ -30,4 +31,5 @@ __all__ = [
     "RemoteBrowserWindow",
     "Response",
     "ResponseContent",
+    "render_html",
 ]
