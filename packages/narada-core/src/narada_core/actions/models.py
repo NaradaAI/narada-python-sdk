@@ -33,6 +33,10 @@ class AgenticSelectorDoubleClickAction(TypedDict):
     type: Literal["double_click"]
 
 
+class AgenticSelectorHoverAction(TypedDict):
+    type: Literal["hover"]
+
+
 class AgenticSelectorFillAction(TypedDict):
     type: Literal["fill"]
     value: str
@@ -40,15 +44,22 @@ class AgenticSelectorFillAction(TypedDict):
 
 class AgenticSelectorSelectOptionByIndexAction(TypedDict):
     type: Literal["select_option_by_index"]
-    index: int
+    value: int
+
+
+class AgenticSelectorSelectOptionByValueAction(TypedDict):
+    type: Literal["select_option_by_value"]
+    value: str
 
 
 type AgenticSelectorAction = (
     AgenticSelectorClickAction
     | AgenticSelectorRightClickAction
     | AgenticSelectorDoubleClickAction
+    | AgenticSelectorHoverAction
     | AgenticSelectorFillAction
     | AgenticSelectorSelectOptionByIndexAction
+    | AgenticSelectorSelectOptionByValueAction
 )
 
 
@@ -60,10 +71,14 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             return {"type": "rightClick"}
         case "double_click":
             return {"type": "doubleClick"}
+        case "hover":
+            return {"type": "hover"}
         case "fill":
             return cast(dict[str, Any], action)
         case "select_option_by_index":
-            return {"type": "selectOptionByIndex", "value": action["index"]}
+            return {"type": "selectOptionByIndex", "value": action["value"]}
+        case "select_option_by_value":
+            return {"type": "selectOptionByValue", "value": action["value"]}
 
 
 class AgenticSelectors(TypedDict, total=False):
