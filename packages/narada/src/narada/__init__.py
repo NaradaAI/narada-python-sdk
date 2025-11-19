@@ -12,6 +12,7 @@ from narada_core.models import Agent, File, Response, ResponseContent
 
 from narada.client import Narada
 from narada.config import BrowserConfig
+from narada.render_html import render_html
 from narada.window import LocalBrowserWindow, RemoteBrowserWindow
 
 # Get version from package metadata
@@ -35,6 +36,7 @@ __all__ = [
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
     "RemoteBrowserWindow",
+    "render_html",
     "Response",
     "ResponseContent",
 ]
