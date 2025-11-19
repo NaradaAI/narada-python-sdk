@@ -1,7 +1,5 @@
+import base64
 from typing import TYPE_CHECKING
-
-from js import URL, Blob, Object  # type: ignore
-from pyodide.ffi import to_js  # type: ignore
 
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to open a new window.
@@ -15,10 +13,10 @@ def render_html(html: str) -> None:
     Args:
         html: The HTML content to render.
     """
-    options = to_js({"type": "text/html"}, dict_converter=Object.fromEntries)
-    data = to_js([html])
+    # Encode HTML to base64 for data URL
+    html_bytes = html.encode("utf-8")
+    html_base64 = base64.b64encode(html_bytes).decode("utf-8")
+    # Create data URL
+    data_url = f"data:text/html;base64,{html_base64}"
 
-    blob = Blob.new(data, options)
-    url = URL.createObjectURL(blob)
-    _window_open(url)
-    URL.revokeObjectURL(url)
+    _window_open(data_url)
