@@ -1,4 +1,5 @@
 import webbrowser
+from tempfile import NamedTemporaryFile
 
 
 def render_html(html: str) -> None:
@@ -8,5 +9,13 @@ def render_html(html: str) -> None:
     Args:
         html: The HTML content to render.
     """
-    data_url = f"data:text/html;charset=utf-8,{html}"
-    webbrowser.open_new_tab(data_url)
+    with NamedTemporaryFile(
+        mode="w+t",
+        encoding="utf-8",
+        suffix=".html",
+        delete=False,
+    ) as temp:
+        temp.write(html)
+        path = temp.name
+
+    webbrowser.open_new_tab(f"file://{path}")
