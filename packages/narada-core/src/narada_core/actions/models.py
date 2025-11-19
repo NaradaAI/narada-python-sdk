@@ -44,7 +44,7 @@ class AgenticSelectorFillAction(TypedDict):
 
 class AgenticSelectorSelectOptionByIndexAction(TypedDict):
     type: Literal["select_option_by_index"]
-    index: int
+    value: int
 
 
 class AgenticSelectorSelectOptionByValueAction(TypedDict):
@@ -76,7 +76,7 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "fill":
             return cast(dict[str, Any], action)
         case "select_option_by_index":
-            return {"type": "selectOptionByIndex", "value": action["index"]}
+            return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
             return {"type": "selectOptionByValue", "value": action["value"]}
 
