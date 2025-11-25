@@ -5,9 +5,9 @@ from narada_core.errors import (
     NaradaTimeoutError,
 )
 from narada_core.models import Agent, File, Response, ResponseContent
-from narada.render_html import render_html
 
 from narada.client import Narada
+from narada.utils import render_html
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,
