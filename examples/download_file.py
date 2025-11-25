@@ -20,7 +20,7 @@ Alice,28,San Francisco
 
     # Example 2: Download a binary file (PNG image)
     binary_content = load_demo_image()
-    download_file("example_image.png", binary_content)
+    download_file("Narada Downloads/example_image.png", binary_content)
 
     print("Files downloaded to your Downloads directory.")
 

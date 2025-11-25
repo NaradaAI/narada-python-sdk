@@ -8,12 +8,14 @@ if TYPE_CHECKING:
 
 def download_file(filename: str, content: str | bytes) -> None:
     """
-    Downloads a file to the user's device.
+    Downloads a file to the user's Downloads directory.
 
     Args:
-        filename: The name of the file to save.
-        content: The content to write. If str, writes in text mode (UTF-8). If
-                 bytes, writes in binary mode.
+        filename: The name of the file to save. Can include subdirectories
+                  (e.g., "reports/2025/data.csv") relative to the Downloads
+                  directory.
+        content: The content to write. If str, writes in text mode (UTF-8).
+                 If bytes, writes in binary mode.
     """
     _narada_download_file(filename, content)
 
