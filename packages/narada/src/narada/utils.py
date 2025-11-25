@@ -1,10 +1,27 @@
 import webbrowser
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Never
 
 
 def assert_never() -> Never:
     raise AssertionError("Expected code to be unreachable")
+
+
+def download_file(filename: str, content: str | bytes) -> None:
+    """
+    Downloads a file to the user's Downloads directory.
+
+    Args:
+        filename: The name of the file to save.
+        content: The content to write. If str, writes in text mode (UTF-8). If
+                 bytes, writes in binary mode.
+    """
+    path = Path.home() / "Downloads" / filename
+    if isinstance(content, str):
+        path.write_text(content, encoding="utf-8")
+    else:
+        path.write_bytes(content)
 
 
 def render_html(html: str) -> None:
