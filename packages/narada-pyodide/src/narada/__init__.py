@@ -5,9 +5,9 @@ from narada_core.errors import (
     NaradaTimeoutError,
 )
 from narada_core.models import Agent, File, Response, ResponseContent
-from narada.render_html import render_html
 
 from narada.client import Narada
+from narada.utils import download_file, render_html
 from narada.window import (
     LocalBrowserWindow,
     RemoteBrowserWindow,
@@ -23,13 +23,14 @@ except Exception:
 __all__ = [
     "__version__",
     "Agent",
+    "download_file",
     "File",
     "LocalBrowserWindow",
     "Narada",
     "NaradaError",
     "NaradaTimeoutError",
     "RemoteBrowserWindow",
+    "render_html",
     "Response",
     "ResponseContent",
-    "render_html",
 ]

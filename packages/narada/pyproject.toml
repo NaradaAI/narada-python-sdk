@@ -1,6 +1,6 @@
 [project]
 name = "narada"
-version = "0.1.26"
+version = "0.1.27"
 description = "Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
