@@ -309,13 +309,14 @@ wheels = [
 
 [[package]]
 name = "narada"
-version = "0.1.27"
+version = "0.1.28"
 source = { editable = "packages/narada" }
 dependencies = [
     { name = "aiohttp" },
     { name = "narada-core" },
     { name = "playwright" },
     { name = "rich" },
+    { name = "semver" },
 ]
 
 [package.dev-dependencies]
@@ -330,6 +331,7 @@ requires-dist = [
     { name = "narada-core", editable = "packages/narada-core" },
     { name = "playwright", specifier = ">=1.53.0" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "semver", specifier = ">=3.0.4" },
 ]
 
 [package.metadata.requires-dev]
@@ -340,7 +342,7 @@ dev = [
 
 [[package]]
 name = "narada-core"
-version = "0.0.5"
+version = "0.0.6"
 source = { editable = "packages/narada-core" }
 dependencies = [
     { name = "pydantic" },
@@ -351,10 +353,11 @@ requires-dist = [{ name = "pydantic", specifier = "==2.10.6" }]
 
 [[package]]
 name = "narada-pyodide"
-version = "0.0.29"
+version = "0.0.30"
 source = { editable = "packages/narada-pyodide" }
 dependencies = [
     { name = "narada-core" },
+    { name = "semver" },
 ]
 
 [package.dev-dependencies]
@@ -364,7 +367,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "narada-core", editable = "packages/narada-core" }]
+requires-dist = [
+    { name = "narada-core", editable = "packages/narada-core" },
+    { name = "semver", specifier = ">=3.0.4" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pyodide-py", specifier = ">=0.27.7" }]
@@ -600,6 +606,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a1/53/830aa4c3066a8ab0ae9a9955976fb770fe9c6102117c8ec4ab3ea62d89e8/rich-14.0.0.tar.gz", hash = "sha256:82f1bc23a6a21ebca4ae0c45af9bdbc492ed20231dcb63f297d6d1021a9d5725", size = 224078, upload-time = "2025-03-30T14:15:14.23Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/9b/63f4c7ebc259242c89b3acafdb37b41d1185c07ff0011164674e9076b491/rich-14.0.0-py3-none-any.whl", hash = "sha256:1c9491e1951aac09caffd42f448ee3d04e58923ffe14993f6e83068dc395d7e0", size = 243229, upload-time = "2025-03-30T14:15:12.283Z" },
+]
+
+[[package]]
+name = "semver"
+version = "3.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/d1/d3159231aec234a59dd7d601e9dd9fe96f3afff15efd33c1070019b26132/semver-3.0.4.tar.gz", hash = "sha256:afc7d8c584a5ed0a11033af086e8af226a9c0b206f313e0301f8dd7b6b589602", size = 269730, upload-time = "2025-01-24T13:19:27.617Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/24/4d91e05817e92e3a61c8a21e08fd0f390f5301f1c448b137c57c4bc6e543/semver-3.0.4-py3-none-any.whl", hash = "sha256:9c824d87ba7f7ab4a1890799cec8596f15c1241cb473404ea1cb0c55e4b04746", size = 17912, upload-time = "2025-01-24T13:19:24.949Z" },
 ]
 
 [[package]]
