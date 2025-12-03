@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+import aiohttp
+import semver
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -16,6 +18,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
+from narada_core.models import _SdkConfig
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
     ElementHandle,
@@ -31,6 +34,7 @@ from rich.console import Console
 
 from narada.config import BrowserConfig
 from narada.utils import assert_never
+from narada.version import __version__
 from narada.window import LocalBrowserWindow, create_side_panel_url
 
 
@@ -58,6 +62,8 @@ class Narada:
         self._console = Console()
 
     async def __aenter__(self) -> Narada:
+        await self._validate_sdk_config()
+
         self._playwright_context_manager = async_playwright()
         self._playwright = await self._playwright_context_manager.__aenter__()
         return self
@@ -69,6 +75,40 @@ class Narada:
         await self._playwright_context_manager.__aexit__(*args)
         self._playwright_context_manager = None
         self._playwright = None
+
+    async def _fetch_sdk_config(self) -> _SdkConfig | None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        url = f"{base_url}/sdk/config"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, headers={"x-api-key": self._api_key}
+                ) as resp:
+                    if not resp.ok:
+                        logging.warning(
+                            "Failed to fetch SDK config: %s %s",
+                            resp.status,
+                            await resp.text(),
+                        )
+                        return None
+
+                    return _SdkConfig.model_validate(await resp.json())
+        except Exception as e:
+            logging.warning("Failed to fetch SDK config: %s", e)
+            return None
+
+    async def _validate_sdk_config(self) -> None:
+        config = await self._fetch_sdk_config()
+        if config is None:
+            return
+
+        package_config = config.packages["narada"]
+        if semver.compare(__version__, package_config.min_required_version) < 0:
+            raise RuntimeError(
+                f"narada<={__version__} is not supported. Please upgrade to version "
+                f"{package_config.min_required_version} or higher."
+            )
 
     async def open_and_initialize_browser_window(
         self, config: BrowserConfig | None = None

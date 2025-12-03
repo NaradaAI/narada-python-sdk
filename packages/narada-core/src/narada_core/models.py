@@ -50,3 +50,18 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
 
 class File(TypedDict):
     key: str
+
+
+############################################################
+# Internal models. Do not use these if you're an end user. #
+############################################################
+
+type _PackageName = Literal["narada", "narada-pyodide"]
+
+
+class _PackageConfig(BaseModel):
+    min_required_version: str
+
+
+class _SdkConfig(BaseModel):
+    packages: dict[_PackageName, _PackageConfig]
