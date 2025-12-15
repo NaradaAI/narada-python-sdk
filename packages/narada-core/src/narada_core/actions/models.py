@@ -67,29 +67,9 @@ class AgenticSelectorGetTextAction(TypedDict):
     type: Literal["get_text"]
 
 
-class PropertyName(str, Enum):
-    VALUE = "value"
-    CHECKED = "checked"
-    HREF = "href"
-    SRC = "src"
-    ID = "id"
-    CLASSNAME = "className"
-    TAG_NAME = "tagName"
-    INNER_HTML = "innerHTML"
-    DISABLED = "disabled"
-    HIDDEN = "hidden"
-    READONLY = "readOnly"
-    REQUIRED = "required"
-    SELECTED_INDEX = "selectedIndex"
-    OFFSET_WIDTH = "offsetWidth"
-    OFFSET_HEIGHT = "offsetHeight"
-    SCROLL_TOP = "scrollTop"
-    SCROLL_LEFT = "scrollLeft"
-
-
 class AgenticSelectorGetPropertyAction(TypedDict):
     type: Literal["get_property"]
-    property_name: PropertyName
+    property_name: str
 
 
 AgenticSelectorAction = (
@@ -191,11 +171,15 @@ class AgenticSelectorResponse(BaseModel):
     value: str | None
 
 
+class Viewport(TypedDict):
+    width: int
+    height: int
+
+
 class RecordedClick(TypedDict):
     x: int
     y: int
-    width: int
-    height: int
+    viewport: Viewport
 
 
 class AgenticMouseClickAction(TypedDict):
@@ -254,22 +238,16 @@ def _dump_agentic_mouse_action(action: AgenticMouseAction) -> dict[str, Any]:
 
 
 def _dump_recorded_click(recorded_click: RecordedClick) -> dict[str, Any]:
-    return {
-        "x": recorded_click["x"],
-        "y": recorded_click["y"],
-        "viewport": {
-            "width": recorded_click["width"],
-            "height": recorded_click["height"],
-        },
-    }
+    # For now no renaming is needed since all field names match.
+    return recorded_click.model_dump()
 
 
 class AgenticMouseActionRequest(BaseModel):
     name: Literal["agentic_mouse_action"] = "agentic_mouse_action"
     action: AgenticMouseAction
     recorded_click: RecordedClick
-    resize_window: Optional[bool] = False
     fallback_operator_query: str
+    resize_window: bool = False
 
     @override
     def model_dump(self) -> dict[str, Any]:

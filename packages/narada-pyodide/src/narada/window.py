@@ -354,7 +354,7 @@ class BaseBrowserWindow(ABC):
         fallback_operator_query: str,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 60,
-    ) -> AgenticSelectorResponse | None:
+    ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
 
@@ -367,7 +367,7 @@ class BaseBrowserWindow(ABC):
             else None
         )
 
-        return await self._run_extension_action(
+        result = await self._run_extension_action(
             AgenticSelectorRequest(
                 action=action,
                 selectors=selectors,
@@ -376,6 +376,11 @@ class BaseBrowserWindow(ABC):
             response_model,
             timeout=timeout,
         )
+
+        if result is None:
+            return {"value": None}
+
+        return result
 
     async def agentic_mouse_action(
         self,
@@ -491,7 +496,7 @@ class BaseBrowserWindow(ABC):
             body["timeout"] = timeout
 
         fetch_response = await pyfetch(
-            "http://localhost:8000/fast/v2/extension-actions",
+            f"{self._base_url}/extension-actions",
             method="POST",
             headers=headers,
             body=json.dumps(body),

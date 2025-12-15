@@ -329,7 +329,7 @@ class BaseBrowserWindow(ABC):
         fallback_operator_query: str,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 60,
-    ) -> None:
+    ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
         """
@@ -338,7 +338,7 @@ class BaseBrowserWindow(ABC):
             if action["type"] in {"get_text", "get_property"}
             else None
         )
-        return await self._run_extension_action(
+        result = await self._run_extension_action(
             AgenticSelectorRequest(
                 action=action,
                 selectors=selectors,
@@ -348,13 +348,18 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
+        if result is None:
+            return {"value": None}
+
+        return result
+
     async def agentic_mouse_action(
         self,
         *,
         action: AgenticMouseAction,
         recorded_click: RecordedClick,
-        resize_window: Optional[bool] = True,
         fallback_operator_query: str,
+        resize_window: bool = True,
         timeout: int | None = 60,
     ) -> None:
         """Performs a mouse action at the specified click coordinates, falling back to using
