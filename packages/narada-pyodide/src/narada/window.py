@@ -4,12 +4,13 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
+from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
+    AgenticSelectorResponse,
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
@@ -21,6 +22,9 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
+    AgenticMouseAction,
+    RecordedClick,
+    AgenticMouseActionRequest,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -350,14 +354,51 @@ class BaseBrowserWindow(ABC):
         fallback_operator_query: str,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 60,
-    ) -> None:
+    ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
+
+        Returns AgenticSelectorResponse with the value for 'get_text' and 'get_property' actions,
+        otherwise returns None.
         """
-        return await self._run_extension_action(
+        response_model = (
+            AgenticSelectorResponse
+            if action["type"] in {"get_text", "get_property"}
+            else None
+        )
+
+        result = await self._run_extension_action(
             AgenticSelectorRequest(
                 action=action,
                 selectors=selectors,
+                fallback_operator_query=fallback_operator_query,
+            ),
+            response_model,
+            timeout=timeout,
+        )
+
+        if result is None:
+            return {"value": None}
+
+        return result
+
+    async def agentic_mouse_action(
+        self,
+        *,
+        action: AgenticMouseAction,
+        recorded_click: RecordedClick,
+        resize_window: Optional[bool] = True,
+        fallback_operator_query: str,
+        timeout: int | None = 60,
+    ) -> None:
+        """Performs a mouse action at the specified click coordinates, falling back to using
+        the Operator agent if the click fails.
+        """
+        return await self._run_extension_action(
+            AgenticMouseActionRequest(
+                action=action,
+                recorded_click=recorded_click,
+                resize_window=resize_window,
                 fallback_operator_query=fallback_operator_query,
             ),
             timeout=timeout,
@@ -455,7 +496,7 @@ class BaseBrowserWindow(ABC):
             body["timeout"] = timeout
 
         fetch_response = await pyfetch(
-            "https://api.narada.ai/fast/v2/extension-actions",
+            f"{self._base_url}/extension-actions",
             method="POST",
             headers=headers,
             body=json.dumps(body),
