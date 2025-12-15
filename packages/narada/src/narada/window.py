@@ -4,12 +4,15 @@ import time
 from abc import ABC
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any, TypeVar, overload
+from typing import IO, Any, Optional, TypeVar, overload
 
 import aiohttp
 from narada_core.actions.models import (
     AgenticSelectorAction,
     AgenticSelectorRequest,
+    AgenticSelectorResponse,
+    AgenticMouseActionRequest,
+    AgenticMouseAction,
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
@@ -21,6 +24,7 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     WriteGoogleSheetRequest,
+    RecordedClick,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -329,10 +333,38 @@ class BaseBrowserWindow(ABC):
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
         """
+        response_model = (
+            AgenticSelectorResponse
+            if action["type"] in {"get_text", "get_property"}
+            else None
+        )
         return await self._run_extension_action(
             AgenticSelectorRequest(
                 action=action,
                 selectors=selectors,
+                response_model=response_model,
+                fallback_operator_query=fallback_operator_query,
+            ),
+            timeout=timeout,
+        )
+
+    async def agentic_mouse_action(
+        self,
+        *,
+        action: AgenticMouseAction,
+        recorded_click: RecordedClick,
+        resize_window: Optional[bool] = True,
+        fallback_operator_query: str,
+        timeout: int | None = 60,
+    ) -> None:
+        """Performs a mouse action at the specified click coordinates, falling back to using
+        the Operator agent if the click fails.
+        """
+        return await self._run_extension_action(
+            AgenticMouseActionRequest(
+                action=action,
+                recorded_click=recorded_click,
+                resize_window=resize_window,
                 fallback_operator_query=fallback_operator_query,
             ),
             timeout=timeout,

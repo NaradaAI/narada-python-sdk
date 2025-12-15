@@ -1,4 +1,15 @@
-from typing import Any, Generic, Literal, TypedDict, TypeVar, cast, override
+from enum import Enum
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    Optional,
+    TypedDict,
+    NotRequired,
+    TypeVar,
+    cast,
+    override,
+)
 
 from pydantic import BaseModel
 
@@ -52,7 +63,36 @@ class AgenticSelectorSelectOptionByValueAction(TypedDict):
     value: str
 
 
-type AgenticSelectorAction = (
+class AgenticSelectorGetTextAction(TypedDict):
+    type: Literal["get_text"]
+
+
+class PropertyName(str, Enum):
+    VALUE = "value"
+    CHECKED = "checked"
+    HREF = "href"
+    SRC = "src"
+    ID = "id"
+    CLASSNAME = "className"
+    TAG_NAME = "tagName"
+    INNER_HTML = "innerHTML"
+    DISABLED = "disabled"
+    HIDDEN = "hidden"
+    READONLY = "readOnly"
+    REQUIRED = "required"
+    SELECTED_INDEX = "selectedIndex"
+    OFFSET_WIDTH = "offsetWidth"
+    OFFSET_HEIGHT = "offsetHeight"
+    SCROLL_TOP = "scrollTop"
+    SCROLL_LEFT = "scrollLeft"
+
+
+class AgenticSelectorGetPropertyAction(TypedDict):
+    type: Literal["get_property"]
+    property_name: PropertyName
+
+
+AgenticSelectorAction = (
     AgenticSelectorClickAction
     | AgenticSelectorRightClickAction
     | AgenticSelectorDoubleClickAction
@@ -60,6 +100,8 @@ type AgenticSelectorAction = (
     | AgenticSelectorFillAction
     | AgenticSelectorSelectOptionByIndexAction
     | AgenticSelectorSelectOptionByValueAction
+    | AgenticSelectorGetTextAction
+    | AgenticSelectorGetPropertyAction
 )
 
 
@@ -79,6 +121,13 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
             return {"type": "selectOptionByValue", "value": action["value"]}
+        case "get_text":
+            return {"type": "getText"}
+        case "get_property":
+            return {
+                "type": "getProperty",
+                "propertyName": action["property_name"].value,
+            }
 
 
 class AgenticSelectors(TypedDict, total=False):
@@ -138,6 +187,101 @@ class AgenticSelectorRequest(BaseModel):
         }
 
 
+class AgenticSelectorResponse(BaseModel):
+    value: str | None
+
+
+class RecordedClick(TypedDict):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class AgenticMouseClickAction(TypedDict):
+    type: Literal["click"]
+
+
+class AgenticMouseRightClickAction(TypedDict):
+    type: Literal["right_click"]
+
+
+class AgenticMouseDoubleClickAction(TypedDict):
+    type: Literal["double_click"]
+
+
+class AgenticMouseFillAction(TypedDict):
+    type: Literal["fill"]
+    text: str
+    press_enter: NotRequired[bool]
+
+
+class AgenticMouseScrollAction(TypedDict):
+    type: Literal["scroll"]
+    horizontal: int
+    vertical: int
+
+
+AgenticMouseAction = (
+    AgenticMouseClickAction
+    | AgenticMouseRightClickAction
+    | AgenticMouseDoubleClickAction
+    | AgenticMouseFillAction
+    | AgenticMouseScrollAction
+)
+
+
+def _dump_agentic_mouse_action(action: AgenticMouseAction) -> dict[str, Any]:
+    match action["type"]:
+        case "click":
+            return {"type": "click"}
+        case "right_click":
+            return {"type": "rightClick"}
+        case "double_click":
+            return {"type": "doubleClick"}
+        case "fill":
+            return {
+                "type": "fill",
+                "text": action["text"],
+                "pressEnter": action.get("press_enter", False),
+            }
+        case "scroll":
+            return {
+                "type": "scroll",
+                "deltaX": action["horizontal"],
+                "deltaY": action["vertical"],
+            }
+
+
+def _dump_recorded_click(recorded_click: RecordedClick) -> dict[str, Any]:
+    return {
+        "x": recorded_click["x"],
+        "y": recorded_click["y"],
+        "viewport": {
+            "width": recorded_click["width"],
+            "height": recorded_click["height"],
+        },
+    }
+
+
+class AgenticMouseActionRequest(BaseModel):
+    name: Literal["agentic_mouse_action"] = "agentic_mouse_action"
+    action: AgenticMouseAction
+    recorded_click: RecordedClick
+    resize_window: Optional[bool] = False
+    fallback_operator_query: str
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "action": _dump_agentic_mouse_action(self.action),
+            "recorded_click": _dump_recorded_click(self.recorded_click),
+            "resize_window": self.resize_window,
+            "fallback_operator_query": self.fallback_operator_query,
+        }
+
+
 class CloseWindowRequest(BaseModel):
     name: Literal["close_window"] = "close_window"
 
@@ -172,6 +316,7 @@ class WriteGoogleSheetRequest(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
     | PrintMessageRequest

@@ -3,6 +3,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
 )
 from narada_core.models import Agent, File, Response, ResponseContent
+from narada_core.actions.models import PropertyName
 
 from narada.client import Narada
 from narada.utils import download_file, render_html
@@ -25,4 +26,5 @@ __all__ = [
     "render_html",
     "Response",
     "ResponseContent",
+    "PropertyName",
 ]
