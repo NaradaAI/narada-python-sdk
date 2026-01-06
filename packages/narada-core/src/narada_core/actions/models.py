@@ -52,6 +52,15 @@ class AgenticSelectorSelectOptionByValueAction(TypedDict):
     value: str
 
 
+class AgenticSelectorGetTextAction(TypedDict):
+    type: Literal["get_text"]
+
+
+class AgenticSelectorGetPropertyAction(TypedDict):
+    type: Literal["get_property"]
+    property_name: str
+
+
 type AgenticSelectorAction = (
     AgenticSelectorClickAction
     | AgenticSelectorRightClickAction
@@ -60,6 +69,8 @@ type AgenticSelectorAction = (
     | AgenticSelectorFillAction
     | AgenticSelectorSelectOptionByIndexAction
     | AgenticSelectorSelectOptionByValueAction
+    | AgenticSelectorGetTextAction
+    | AgenticSelectorGetPropertyAction
 )
 
 
@@ -79,6 +90,10 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
             return {"type": "selectOptionByValue", "value": action["value"]}
+        case "get_text":
+            return {"type": "getText"}
+        case "get_property":
+            return {"type": "getProperty", "propertyName": action["property_name"]}
 
 
 class AgenticSelectors(TypedDict, total=False):
@@ -161,6 +176,14 @@ class ReadGoogleSheetRequest(BaseModel):
 
 class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
+
+
+class GetTextResponse(BaseModel):
+    text: str
+
+
+class GetPropertyResponse(BaseModel):
+    value: str
 
 
 class WriteGoogleSheetRequest(BaseModel):

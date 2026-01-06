@@ -9,6 +9,8 @@ from typing import IO, Any, TypeVar, overload
 import aiohttp
 from narada_core.actions.models import (
     AgenticSelectorAction,
+    AgenticSelectorGetPropertyAction,
+    AgenticSelectorGetTextAction,
     AgenticSelectorRequest,
     AgenticSelectors,
     AgentResponse,
@@ -16,6 +18,8 @@ from narada_core.actions.models import (
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
+    GetPropertyResponse,
+    GetTextResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
@@ -317,6 +321,26 @@ class BaseBrowserWindow(ABC):
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
         )
 
+    @overload
+    async def agentic_selector(
+        self,
+        *,
+        action: AgenticSelectorGetTextAction | AgenticSelectorGetPropertyAction,
+        selectors: AgenticSelectors,
+        fallback_operator_query: str,
+        timeout: int | None = 60,
+    ) -> str: ...
+
+    @overload
+    async def agentic_selector(
+        self,
+        *,
+        action: AgenticSelectorAction,
+        selectors: AgenticSelectors,
+        fallback_operator_query: str,
+        timeout: int | None = 60,
+    ) -> None: ...
+
     async def agentic_selector(
         self,
         *,
@@ -325,18 +349,45 @@ class BaseBrowserWindow(ABC):
         fallback_operator_query: str,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 60,
-    ) -> None:
+    ) -> str | None:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
+
+        Returns a string value for `get_text` and `get_property` actions, None otherwise.
         """
-        return await self._run_extension_action(
-            AgenticSelectorRequest(
-                action=action,
-                selectors=selectors,
-                fallback_operator_query=fallback_operator_query,
-            ),
-            timeout=timeout,
-        )
+        action_type = action["type"]
+
+        if action_type == "get_text":
+            response = await self._run_extension_action(
+                AgenticSelectorRequest(
+                    action=action,
+                    selectors=selectors,
+                    fallback_operator_query=fallback_operator_query,
+                ),
+                GetTextResponse,
+                timeout=timeout,
+            )
+            return response.text
+        elif action_type == "get_property":
+            response = await self._run_extension_action(
+                AgenticSelectorRequest(
+                    action=action,
+                    selectors=selectors,
+                    fallback_operator_query=fallback_operator_query,
+                ),
+                GetPropertyResponse,
+                timeout=timeout,
+            )
+            return response.value
+        else:
+            return await self._run_extension_action(
+                AgenticSelectorRequest(
+                    action=action,
+                    selectors=selectors,
+                    fallback_operator_query=fallback_operator_query,
+                ),
+                timeout=timeout,
+            )
 
     async def close(self, *, timeout: int | None = None) -> None:
         """Gracefully closes the current browser window."""
