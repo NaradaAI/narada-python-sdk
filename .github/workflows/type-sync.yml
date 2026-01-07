@@ -1,0 +1,69 @@
+name: Deploy type stubs to S3
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  generate-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyright
+          pip install pydantic==2.10.6
+
+      - name: Clean existing typings
+        run: rm -rf typings
+
+      - name: Generate type stubs for narada
+        run: |
+          echo "📦 Generating type stubs for narada package..."
+          PYTHONPATH=packages/narada-pyodide/src pyright --createstub narada
+          echo "narada type stubs generated"
+
+      - name: Generate type stubs for narada_core
+        run: |
+          echo "📦 Generating type stubs for narada_core package..."
+          PYTHONPATH=packages/narada-core/src pyright --createstub narada_core
+          echo "narada_core type stubs generated"
+
+      - name: Create zip archive
+        run: |
+          echo "Creating zip archive of type stubs..."
+          cd typings
+          echo "Contents to be zipped:"
+          find . -type f
+          zip -r ../typings.zip .
+          cd ..
+          echo "Archive created: typings.zip"
+          ls -lh typings.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 cp ./typings.zip ${{ vars.NARADA_TYPE_STUBS_S3_URI }}
+
+      - name: Print deployment info
+        run: |
+          echo "Type stubs deployed successfully"
