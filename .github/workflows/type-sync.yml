@@ -32,26 +32,17 @@ jobs:
 
       - name: Generate type stubs for narada
         run: |
-          echo "📦 Generating type stubs for narada package..."
           PYTHONPATH=packages/narada-pyodide/src pyright --createstub narada
-          echo "narada type stubs generated"
 
       - name: Generate type stubs for narada_core
         run: |
-          echo "📦 Generating type stubs for narada_core package..."
           PYTHONPATH=packages/narada-core/src pyright --createstub narada_core
-          echo "narada_core type stubs generated"
 
       - name: Create zip archive
         run: |
-          echo "Creating zip archive of type stubs..."
           cd typings
-          echo "Contents to be zipped:"
-          find . -type f
           zip -r ../typings.zip .
           cd ..
-          echo "Archive created: typings.zip"
-          ls -lh typings.zip
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -63,7 +54,3 @@ jobs:
       - name: Deploy to S3
         run: |
           aws s3 cp ./typings.zip ${{ vars.NARADA_TYPE_STUBS_S3_URI }}
-
-      - name: Print deployment info
-        run: |
-          echo "Type stubs deployed successfully"
