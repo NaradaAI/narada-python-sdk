@@ -1,4 +1,13 @@
-from typing import Any, Generic, Literal, TypedDict, TypeVar, cast, override
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    TypedDict,
+    NotRequired,
+    TypeVar,
+    cast,
+    override,
+)
 
 from pydantic import BaseModel
 
@@ -52,7 +61,16 @@ class AgenticSelectorSelectOptionByValueAction(TypedDict):
     value: str
 
 
-type AgenticSelectorAction = (
+class AgenticSelectorGetTextAction(TypedDict):
+    type: Literal["get_text"]
+
+
+class AgenticSelectorGetPropertyAction(TypedDict):
+    type: Literal["get_property"]
+    property_name: str
+
+
+AgenticSelectorAction = (
     AgenticSelectorClickAction
     | AgenticSelectorRightClickAction
     | AgenticSelectorDoubleClickAction
@@ -60,6 +78,8 @@ type AgenticSelectorAction = (
     | AgenticSelectorFillAction
     | AgenticSelectorSelectOptionByIndexAction
     | AgenticSelectorSelectOptionByValueAction
+    | AgenticSelectorGetTextAction
+    | AgenticSelectorGetPropertyAction
 )
 
 
@@ -79,6 +99,13 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
             return {"type": "selectOptionByValue", "value": action["value"]}
+        case "get_text":
+            return {"type": "getText"}
+        case "get_property":
+            return {
+                "type": "getProperty",
+                "propertyName": action["property_name"].value,
+            }
 
 
 class AgenticSelectors(TypedDict, total=False):
@@ -138,6 +165,94 @@ class AgenticSelectorRequest(BaseModel):
         }
 
 
+class AgenticSelectorResponse(BaseModel):
+    value: str | None
+
+
+class Viewport(TypedDict):
+    width: int
+    height: int
+
+
+class RecordedClick(TypedDict):
+    x: int
+    y: int
+    viewport: Viewport
+
+
+class AgenticMouseClickAction(TypedDict):
+    type: Literal["click"]
+
+
+class AgenticMouseRightClickAction(TypedDict):
+    type: Literal["right_click"]
+
+
+class AgenticMouseDoubleClickAction(TypedDict):
+    type: Literal["double_click"]
+
+
+class AgenticMouseFillAction(TypedDict):
+    type: Literal["fill"]
+    text: str
+    press_enter: NotRequired[bool]
+
+
+class AgenticMouseScrollAction(TypedDict):
+    type: Literal["scroll"]
+    horizontal: int
+    vertical: int
+
+
+AgenticMouseAction = (
+    AgenticMouseClickAction
+    | AgenticMouseRightClickAction
+    | AgenticMouseDoubleClickAction
+    | AgenticMouseFillAction
+    | AgenticMouseScrollAction
+)
+
+
+def _dump_agentic_mouse_action(action: AgenticMouseAction) -> dict[str, Any]:
+    match action["type"]:
+        case "click":
+            return {"type": "click"}
+        case "right_click":
+            return {"type": "rightClick"}
+        case "double_click":
+            return {"type": "doubleClick"}
+        case "fill":
+            return {
+                "type": "fill",
+                "text": action["text"],
+                "pressEnter": action.get("press_enter", False),
+            }
+        case "scroll":
+            return {
+                "type": "scroll",
+                "deltaX": action["horizontal"],
+                "deltaY": action["vertical"],
+            }
+
+
+class AgenticMouseActionRequest(BaseModel):
+    name: Literal["agentic_mouse_action"] = "agentic_mouse_action"
+    action: AgenticMouseAction
+    recorded_click: RecordedClick
+    fallback_operator_query: str
+    resize_window: bool = False
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "action": _dump_agentic_mouse_action(self.action),
+            "recorded_click": self.recorded_click,
+            "resize_window": self.resize_window,
+            "fallback_operator_query": self.fallback_operator_query,
+        }
+
+
 class CloseWindowRequest(BaseModel):
     name: Literal["close_window"] = "close_window"
 
@@ -172,6 +287,7 @@ class WriteGoogleSheetRequest(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
     | PrintMessageRequest

@@ -7,7 +7,7 @@ readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
-    "narada-core==0.0.6",
+    "narada-core==0.0.7",
     "aiohttp>=3.12.13",
     "playwright>=1.53.0",
     "rich>=14.0.0",
