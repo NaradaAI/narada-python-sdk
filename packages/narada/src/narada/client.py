@@ -21,6 +21,8 @@ from narada_core.errors import (
 from narada_core.models import _SdkConfig
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
+    Browser,
+    CDPSession,
     ElementHandle,
     Page,
     Playwright,
@@ -32,7 +34,7 @@ from playwright.async_api import (
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
 
-from narada.config import BrowserConfig
+from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import assert_never
 from narada.version import __version__
 from narada.window import LocalBrowserWindow, create_side_panel_url
@@ -146,6 +148,13 @@ class Narada:
 
         config = config or BrowserConfig()
 
+        if config.proxy is not None:
+            raise ValueError(
+                "Proxy configuration is not supported for `initialize_in_existing_browser_window`. "
+                "Proxy settings must be specified when launching Chrome. "
+                "Use `open_and_initialize_browser_window` instead."
+            )
+
         browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
 
         # Generate a unique tag for the initialization URL
@@ -193,6 +202,13 @@ class Narada:
         window_tag = uuid4().hex
         tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
 
+        # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
+        # We'll set up the CDP auth handler and then navigate to the init URL.
+        proxy_requires_auth = (
+            config.proxy is not None and config.proxy.requires_authentication
+        )
+        launch_url = "about:blank" if proxy_requires_auth else tagged_initialization_url
+
         browser_args = [
             f"--user-data-dir={config.user_data_dir}",
             f"--profile-directory={config.profile_directory}",
@@ -200,10 +216,19 @@ class Narada:
             "--no-default-browser-check",
             "--no-first-run",
             "--new-window",
-            tagged_initialization_url,
-            # TODO: This is needed if we don't use CDP but let Playwright manage the browser.
-            # "--disable-blink-features=AutomationControlled",
+            launch_url,
         ]
+
+        # Add proxy arguments if configured.
+        if config.proxy is not None:
+            config.proxy.validate()
+            browser_args.append(f"--proxy-server={config.proxy.server}")
+
+            if config.proxy.bypass:
+                browser_args.append(f"--proxy-bypass-list={config.proxy.bypass}")
+
+            if config.proxy.ignore_cert_errors:
+                browser_args.append("--ignore-certificate-errors")
 
         # Launch an independent browser process which will not be killed when the current program
         # exits.
@@ -235,6 +260,14 @@ class Narada:
         browser_window_id = None
         side_panel_page = None
         max_cdp_connect_attempts = 10
+
+        # Track whether we've already navigated from about:blank to the initialization URL.
+        # This is only relevant when proxy auth is enabled, where we launch with about:blank
+        # to set up CDP auth handlers before any network traffic. We must only navigate once,
+        # because on retry iterations context.pages[0] could be any page (side panel, devtools,
+        # etc.) and navigating it would break the initialization flow.
+        did_initial_navigation = False
+
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
@@ -246,8 +279,23 @@ class Narada:
                 await asyncio.sleep(2)
                 continue
 
-            # Grab the browser window ID from the page we just opened.
             context = browser.contexts[0]
+
+            # If proxy auth is needed, set up the handler at browser level then navigate to the
+            # initialization page. After navigation succeeds, Chrome has cached the proxy
+            # credentials, so we can detach the CDP session.
+            if proxy_requires_auth and not did_initial_navigation:
+                proxy_cdp_session = (
+                    await self._setup_proxy_authentication_browser_level(
+                        browser, config.proxy
+                    )
+                )
+                blank_page = context.pages[0]
+                await blank_page.goto(tagged_initialization_url)
+                await proxy_cdp_session.detach()
+                did_initial_navigation = True
+
+            # Grab the browser window ID from the page we just opened.
             initialization_page = next(
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
@@ -414,6 +462,73 @@ class Narada:
             return await Narada._wait_for_browser_window_id_silently(
                 initialization_page
             )
+
+    async def _setup_proxy_authentication_browser_level(
+        self, browser: Browser, proxy_config: ProxyConfig
+    ) -> CDPSession:
+        """Sets up proxy authentication handling via CDP at the browser level.
+
+        This uses a browser-level CDP session which can intercept auth challenges before they reach
+        individual pages, preventing Chrome from showing the proxy authentication dialog.
+
+        Chrome caches proxy credentials for the session after the first successful authentication.
+        The caller should detach the returned CDP session after the first navigation succeeds.
+        """
+        cdp_session = await browser.new_browser_cdp_session()
+
+        # Enable Fetch domain with a catch-all pattern to intercept auth challenges.
+        await cdp_session.send(
+            "Fetch.enable",
+            {
+                "handleAuthRequests": True,
+                "patterns": [{"urlPattern": "*"}],
+            },
+        )
+
+        async def handle_auth(params: dict[str, Any]) -> None:
+            request_id = params.get("requestId")
+            auth_challenge = params.get("authChallenge", {})
+
+            # Only handle proxy auth challenges
+            if auth_challenge.get("source") != "Proxy":
+                return
+
+            try:
+                await cdp_session.send(
+                    "Fetch.continueWithAuth",
+                    {
+                        "requestId": request_id,
+                        "authChallengeResponse": {
+                            "response": "ProvideCredentials",
+                            "username": proxy_config.username,
+                            "password": proxy_config.password,
+                        },
+                    },
+                )
+                logging.debug("Browser-level proxy authentication credentials provided")
+            except Exception as e:
+                logging.error("Failed to respond to proxy auth challenge: %s", e)
+
+        async def handle_request_paused(params: dict[str, Any]) -> None:
+            # Continue all paused requests immediately
+            request_id = params.get("requestId")
+            try:
+                await cdp_session.send(
+                    "Fetch.continueRequest", {"requestId": request_id}
+                )
+            except Exception:
+                pass
+
+        cdp_session.on(
+            "Fetch.authRequired",
+            lambda params: asyncio.create_task(handle_auth(params)),
+        )
+        cdp_session.on(
+            "Fetch.requestPaused",
+            lambda params: asyncio.create_task(handle_request_paused(params)),
+        )
+
+        return cdp_session
 
     async def _fix_download_behavior(self, side_panel_page: Page) -> None:
         """Reverts the download behavior to the default behavior for the extension, otherwise our
