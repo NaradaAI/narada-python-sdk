@@ -1,9 +1,7 @@
-from enum import Enum
 from typing import (
     Any,
     Generic,
     Literal,
-    Optional,
     TypedDict,
     NotRequired,
     TypeVar,
@@ -237,11 +235,6 @@ def _dump_agentic_mouse_action(action: AgenticMouseAction) -> dict[str, Any]:
             }
 
 
-def _dump_recorded_click(recorded_click: RecordedClick) -> dict[str, Any]:
-    # For now no renaming is needed since all field names match.
-    return recorded_click.model_dump()
-
-
 class AgenticMouseActionRequest(BaseModel):
     name: Literal["agentic_mouse_action"] = "agentic_mouse_action"
     action: AgenticMouseAction
@@ -254,7 +247,7 @@ class AgenticMouseActionRequest(BaseModel):
         return {
             "name": self.name,
             "action": _dump_agentic_mouse_action(self.action),
-            "recorded_click": _dump_recorded_click(self.recorded_click),
+            "recorded_click": self.recorded_click,
             "resize_window": self.resize_window,
             "fallback_operator_query": self.fallback_operator_query,
         }

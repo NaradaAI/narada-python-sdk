@@ -2,7 +2,6 @@ import asyncio
 
 from narada import Narada
 
-
 async def main() -> None:
     async with Narada() as narada:
         window = await narada.open_and_initialize_browser_window()
@@ -13,8 +12,11 @@ async def main() -> None:
             recorded_click={
                 "x": 500,
                 "y": 300,
-                "width": 1280,
-                "height": 720,
+                "viewport": {
+                    "width": 1280,
+                    "height": 720,
+                }
+
             },
             fallback_operator_query="click on the search box",
         )
@@ -24,8 +26,10 @@ async def main() -> None:
             recorded_click={
                 "x": 500,
                 "y": 300,
-                "width": 1280,
-                "height": 720,
+                "viewport": {
+                    "width": 1280,
+                    "height": 720,
+                }
             },
             fallback_operator_query='type "Narada AI" in the search box',
         )
@@ -35,8 +39,10 @@ async def main() -> None:
             recorded_click={
                 "x": 640,
                 "y": 360,
-                "width": 1280,
-                "height": 720,
+                "viewport": {
+                    "width": 1280,
+                    "height": 720,
+                }
             },
             fallback_operator_query="scroll down the page",
         )
