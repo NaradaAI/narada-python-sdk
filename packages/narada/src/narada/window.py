@@ -125,6 +125,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
+        callback_headers: dict[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -146,6 +147,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
+        callback_headers: dict[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -166,6 +168,7 @@ class BaseBrowserWindow(ABC):
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
+        callback_headers: dict[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -209,6 +212,8 @@ class BaseBrowserWindow(ABC):
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
             body["callbackSecret"] = callback_secret
+        if callback_headers is not None:
+            body["callbackHeaders"] = callback_headers
 
         try:
             async with aiohttp.ClientSession() as session:
