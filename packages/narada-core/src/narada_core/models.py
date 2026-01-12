@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Generic, Literal, TypedDict, TypeVar
+from typing import Generic, Literal, NotRequired, TypedDict, TypeVar
 
 from pydantic import BaseModel
 
@@ -29,9 +29,15 @@ class RemoteDispatchChatHistoryItem(TypedDict):
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
+class ActionTraceItemTypedDict(TypedDict):
+    url: str
+    action: str
+
+
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
+    actionTrace: NotRequired[list[ActionTraceItemTypedDict]]
 
 
 class Usage(TypedDict):
