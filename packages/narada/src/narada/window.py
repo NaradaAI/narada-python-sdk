@@ -8,6 +8,7 @@ from typing import IO, Any, Optional, TypeVar, overload
 
 import aiohttp
 from narada_core.actions.models import (
+    ActionTraceItem,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -318,13 +319,20 @@ class BaseBrowserWindow(ABC):
         response_content = remote_dispatch_response["response"]
         assert response_content is not None
 
+        action_trace_raw = response_content.get("actionTrace")
+        action_trace = (
+            [ActionTraceItem.model_validate(item) for item in action_trace_raw]
+            if action_trace_raw is not None
+            else None
+        )
+
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
-            action_trace=response_content.get("actionTrace"),
+            action_trace=action_trace,
         )
 
     async def agentic_selector(

@@ -22,13 +22,18 @@ class AgentUsage(BaseModel):
     credits: int
 
 
+class ActionTraceItem(BaseModel):
+    url: str
+    action: str
+
+
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
     structured_output: _MaybeStructuredOutput | None
     usage: AgentUsage
-    action_trace: str | None = None
+    action_trace: list[ActionTraceItem] | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):

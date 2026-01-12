@@ -29,10 +29,15 @@ class RemoteDispatchChatHistoryItem(TypedDict):
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
+class ActionTraceItemTypedDict(TypedDict):
+    url: str
+    action: str
+
+
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
-    actionTrace: NotRequired[str]
+    actionTrace: NotRequired[list[ActionTraceItemTypedDict]]
 
 
 class Usage(TypedDict):
