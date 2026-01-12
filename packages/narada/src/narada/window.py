@@ -324,6 +324,7 @@ class BaseBrowserWindow(ABC):
             text=response_content["text"],
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
+            action_trace=response_content.get("actionTrace"),
         )
 
     async def agentic_selector(

@@ -28,6 +28,7 @@ class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     text: str
     structured_output: _MaybeStructuredOutput | None
     usage: AgentUsage
+    action_trace: str | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Generic, Literal, TypedDict, TypeVar
+from typing import Generic, Literal, NotRequired, TypedDict, TypeVar
 
 from pydantic import BaseModel
 
@@ -32,6 +32,7 @@ _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | Non
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
+    actionTrace: NotRequired[str]
 
 
 class Usage(TypedDict):
