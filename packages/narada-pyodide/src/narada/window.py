@@ -35,6 +35,7 @@ from narada_core.errors import (
 from narada_core.models import (
     Agent,
     File,
+    McpServer,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
@@ -126,6 +127,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -147,6 +149,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -167,6 +170,7 @@ class BaseBrowserWindow(ABC):
         additional_context: dict[str, str] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -216,6 +220,8 @@ class BaseBrowserWindow(ABC):
             body["additionalContext"] = additional_context
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
+        if mcp_servers is not None:
+            body["mcpServers"] = mcp_servers
         if variables is not None:
             body["variables"] = variables
         if callback_url is not None:
@@ -300,6 +306,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: None = None,
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[None]: ...
@@ -314,6 +321,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -327,6 +335,7 @@ class BaseBrowserWindow(ABC):
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
@@ -338,6 +347,7 @@ class BaseBrowserWindow(ABC):
             generate_gif=generate_gif,
             output_schema=output_schema,
             time_zone=time_zone,
+            mcp_servers=mcp_servers,
             variables=variables,
             timeout=timeout,
         )
