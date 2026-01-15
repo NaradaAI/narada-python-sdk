@@ -1,7 +1,7 @@
 from enum import Enum, StrEnum
-from typing import Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Agent(Enum):
@@ -27,36 +27,37 @@ class AuthenticationType(StrEnum):
     CUSTOM_HEADERS = "custom-headers"
 
 
-class CustomHeader(TypedDict):
+class CustomHeader(BaseModel):
     key: str
     value: str
 
 
-class AuthenticationNone(TypedDict):
-    type: Literal[AuthenticationType.NONE]
+class AuthenticationNone(BaseModel):
+    type: Literal[AuthenticationType.NONE] = AuthenticationType.NONE
 
 
-class AuthenticationBearerToken(TypedDict):
-    type: Literal[AuthenticationType.BEARER_TOKEN]
+class AuthenticationBearerToken(BaseModel):
+    type: Literal[AuthenticationType.BEARER_TOKEN] = AuthenticationType.BEARER_TOKEN
     bearerToken: str
 
 
-class AuthenticationCustomHeaders(TypedDict):
-    type: Literal[AuthenticationType.CUSTOM_HEADERS]
+class AuthenticationCustomHeaders(BaseModel):
+    type: Literal[AuthenticationType.CUSTOM_HEADERS] = AuthenticationType.CUSTOM_HEADERS
     customHeaders: list[CustomHeader]
 
 
-Authentication = (
-    AuthenticationNone | AuthenticationBearerToken | AuthenticationCustomHeaders
-)
+Authentication = Annotated[
+    AuthenticationNone | AuthenticationBearerToken | AuthenticationCustomHeaders,
+    Field(discriminator="type"),
+]
 
 
-class McpServer(TypedDict, total=False):
+class McpServer(BaseModel):
     url: str
-    label: str | None
-    description: str | None
+    label: str | None = None
+    description: str | None = None
     authentication: Authentication
-    selectedTools: list[str] | None
+    selectedTools: list[str] | None = None
 
 
 class RemoteDispatchChatHistoryItem(TypedDict):

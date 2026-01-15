@@ -221,7 +221,9 @@ class BaseBrowserWindow(ABC):
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
         if mcp_servers is not None:
-            body["mcpServers"] = mcp_servers
+            body["mcpServers"] = [
+                server.model_dump(mode="json") for server in mcp_servers
+            ]
         if variables is not None:
             body["variables"] = variables
         if callback_url is not None:
