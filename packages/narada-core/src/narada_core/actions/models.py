@@ -1,4 +1,5 @@
 from typing import (
+    Annotated,
     Any,
     Generic,
     Literal,
@@ -9,7 +10,7 @@ from typing import (
     override,
 )
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -17,143 +18,156 @@ from pydantic import BaseModel, Field
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
+def to_camel(s: str) -> str:
+    """Convert snake_case to camelCase."""
+    parts = s.split("_")
+    return parts[0] + "".join(p.title() for p in parts[1:])
+
+
+class ApiModel(BaseModel):
+    """Base model for API-facing models with automatic camelCase aliasing."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+
 class AgentUsage(BaseModel):
     actions: int
     credits: int
 
 
-class ActionTraceItem(BaseModel):
+class ActionTraceItem(ApiModel):
     url: str
     action: str
 
 
 # Individual trace types for apaTrace - Pydantic models for parsing
-class GoToUrlTrace(BaseModel):
-    step_type: Literal["goToUrl"] = Field(alias="stepType")
+class GoToUrlTrace(ApiModel):
+    step_type: Literal["goToUrl"]
     url: str
     description: str
 
 
-class PrintTrace(BaseModel):
-    step_type: Literal["print"] = Field(alias="stepType")
+class PrintTrace(ApiModel):
+    step_type: Literal["print"]
     url: str
     message: str
 
 
-class AgentTrace(BaseModel):
-    step_type: Literal["agent"] = Field(alias="stepType")
+class AgentTrace(ApiModel):
+    step_type: Literal["agent"]
     url: str
-    agent_type: str = Field(alias="agentType")
-    action_trace: list[ActionTraceItem] | None = Field(None, alias="actionTrace")
+    agent_type: str
+    action_trace: list[ActionTraceItem] | None = None
     text: str | None = None
 
 
-class ForLoopTrace(BaseModel):
-    step_type: Literal["for"] = Field(alias="stepType")
+class ForLoopTrace(ApiModel):
+    step_type: Literal["for"]
     url: str
-    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"] = (
-        Field(alias="loopType")
-    )
+    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"]
     description: str
     iterations: list[list["ApaTraceItem"]]  # Recursive reference
 
 
-class WhileLoopTrace(BaseModel):
-    step_type: Literal["while"] = Field(alias="stepType")
+class WhileLoopTrace(ApiModel):
+    step_type: Literal["while"]
     url: str
     condition: str
     iterations: list[list["ApaTraceItem"]]  # Recursive reference
-    total_iterations: int = Field(alias="totalIterations")
+    total_iterations: int
 
 
-class AgenticSelectorTrace(BaseModel):
-    step_type: Literal["agenticSelector"] = Field(alias="stepType")
+class AgenticSelectorTrace(ApiModel):
+    step_type: Literal["agenticSelector"]
     url: str
     description: str
-    action_trace: list[ActionTraceItem] | None = Field(None, alias="actionTrace")
+    action_trace: list[ActionTraceItem] | None = None
 
 
-class AgenticMouseActionTrace(BaseModel):
-    step_type: Literal["agenticMouseAction"] = Field(alias="stepType")
+class AgenticMouseActionTrace(ApiModel):
+    step_type: Literal["agenticMouseAction"]
     url: str
     description: str
-    action_trace: list[ActionTraceItem] | None = Field(None, alias="actionTrace")
+    action_trace: list[ActionTraceItem] | None = None
 
 
-class WaitForElementTrace(BaseModel):
-    step_type: Literal["waitForElement"] = Field(alias="stepType")
-    url: str
-    description: str
-
-
-class PressKeysTrace(BaseModel):
-    step_type: Literal["pressKeys"] = Field(alias="stepType")
+class WaitForElementTrace(ApiModel):
+    step_type: Literal["waitForElement"]
     url: str
     description: str
 
 
-class ReadGoogleSheetTrace(BaseModel):
-    step_type: Literal["readGoogleSheet"] = Field(alias="stepType")
+class PressKeysTrace(ApiModel):
+    step_type: Literal["pressKeys"]
     url: str
     description: str
 
 
-class WriteGoogleSheetTrace(BaseModel):
-    step_type: Literal["writeGoogleSheet"] = Field(alias="stepType")
+class ReadGoogleSheetTrace(ApiModel):
+    step_type: Literal["readGoogleSheet"]
     url: str
     description: str
 
 
-class DataTableExportAsCsvTrace(BaseModel):
-    step_type: Literal["dataTableExportAsCsv"] = Field(alias="stepType")
+class WriteGoogleSheetTrace(ApiModel):
+    step_type: Literal["writeGoogleSheet"]
     url: str
     description: str
 
 
-class PythonTrace(BaseModel):
-    step_type: Literal["python"] = Field(alias="stepType")
+class DataTableExportAsCsvTrace(ApiModel):
+    step_type: Literal["dataTableExportAsCsv"]
     url: str
     description: str
 
 
-class ReadCsvTrace(BaseModel):
-    step_type: Literal["readCsv"] = Field(alias="stepType")
+class PythonTrace(ApiModel):
+    step_type: Literal["python"]
     url: str
     description: str
 
 
-class StartTrace(BaseModel):
-    step_type: Literal["start"] = Field(alias="stepType")
+class ReadCsvTrace(ApiModel):
+    step_type: Literal["readCsv"]
     url: str
     description: str
 
 
-class EndTrace(BaseModel):
-    step_type: Literal["end"] = Field(alias="stepType")
+class StartTrace(ApiModel):
+    step_type: Literal["start"]
     url: str
     description: str
 
 
-class GetFullHtmlTrace(BaseModel):
-    step_type: Literal["getFullHtml"] = Field(alias="stepType")
+class EndTrace(ApiModel):
+    step_type: Literal["end"]
     url: str
     description: str
 
 
-class GetSimplifiedHtmlTrace(BaseModel):
-    step_type: Literal["getSimplifiedHtml"] = Field(alias="stepType")
+class GetFullHtmlTrace(ApiModel):
+    step_type: Literal["getFullHtml"]
     url: str
     description: str
 
 
-class GetScreenshotTrace(BaseModel):
-    step_type: Literal["getScreenshot"] = Field(alias="stepType")
+class GetSimplifiedHtmlTrace(ApiModel):
+    step_type: Literal["getSimplifiedHtml"]
     url: str
     description: str
 
 
-# Union type for all trace types
-ApaTraceItem = (
+class GetScreenshotTrace(ApiModel):
+    step_type: Literal["getScreenshot"]
+    url: str
+    description: str
+
+
+ApaTraceItem = Annotated[
     GoToUrlTrace
     | PrintTrace
     | AgentTrace
@@ -172,62 +186,21 @@ ApaTraceItem = (
     | EndTrace
     | GetFullHtmlTrace
     | GetSimplifiedHtmlTrace
-    | GetScreenshotTrace
-)
+    | GetScreenshotTrace,
+    Field(discriminator="step_type"),
+]
 
 
-def _parse_apa_trace_item(data: dict[str, Any]) -> ApaTraceItem:
-    """Parse a single apaTrace item based on its stepType."""
-    step_type = data.get("stepType")
-    if not isinstance(step_type, str):
-        raise ValueError(f"Invalid stepType: {step_type}")
-
-    # Map stepType to the appropriate model
-    trace_classes: dict[str, type[BaseModel]] = {
-        "goToUrl": GoToUrlTrace,
-        "print": PrintTrace,
-        "agent": AgentTrace,
-        "for": ForLoopTrace,
-        "while": WhileLoopTrace,
-        "agenticSelector": AgenticSelectorTrace,
-        "agenticMouseAction": AgenticMouseActionTrace,
-        "waitForElement": WaitForElementTrace,
-        "pressKeys": PressKeysTrace,
-        "readCsv": ReadCsvTrace,
-        "readGoogleSheet": ReadGoogleSheetTrace,
-        "writeGoogleSheet": WriteGoogleSheetTrace,
-        "dataTableExportAsCsv": DataTableExportAsCsvTrace,
-        "python": PythonTrace,
-        "start": StartTrace,
-        "end": EndTrace,
-        "getFullHtml": GetFullHtmlTrace,
-        "getSimplifiedHtml": GetSimplifiedHtmlTrace,
-        "getScreenshot": GetScreenshotTrace,
-    }
-
-    trace_class = trace_classes.get(step_type)
-    if trace_class is None:
-        raise ValueError(f"Unknown stepType: {step_type}")
-
-    # Handle recursive types (for loops and while loops)
-    if step_type in ("for", "while") and "iterations" in data:
-        # Recursively parse iterations - create a copy to avoid mutating original
-        parsed_data = data.copy()
-        parsed_iterations = []
-        for iteration in data["iterations"]:
-            parsed_iteration = [_parse_apa_trace_item(item) for item in iteration]
-            parsed_iterations.append(parsed_iteration)
-        parsed_data["iterations"] = parsed_iterations
-        result = trace_class.model_validate(parsed_data)
-        return cast(ApaTraceItem, result)
-
-    result = trace_class.model_validate(data)
-    return cast(ApaTraceItem, result)
+# TypeAdapter for parsing discriminated union
+_ApaTraceItemAdapter = TypeAdapter(ApaTraceItem)
 
 
 def parse_apa_trace(trace_data: list[dict[str, Any] | Any]) -> list[ApaTraceItem]:
-    """Parse a list of apaTrace items."""
-    return [_parse_apa_trace_item(cast(dict[str, Any], item)) for item in trace_data]
+    """Parse a list of apaTrace items using Pydantic's discriminated union."""
+    return [
+        _ApaTraceItemAdapter.validate_python(cast(dict[str, Any], item))
+        for item in trace_data
+    ]
 
 
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
@@ -314,7 +287,7 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "get_property":
             return {
                 "type": "getProperty",
-                "propertyName": action["property_name"].value,
+                "propertyName": action["property_name"],
             }
 
 
