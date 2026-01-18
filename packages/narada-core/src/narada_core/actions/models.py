@@ -291,6 +291,33 @@ class WriteGoogleSheetRequest(BaseModel):
     values: list[list[str]]
 
 
+class GetFullHtmlRequest(BaseModel):
+    name: Literal["get_full_html"] = "get_full_html"
+
+
+class GetFullHtmlResponse(BaseModel):
+    html: str
+
+
+class GetSimplifiedHtmlRequest(BaseModel):
+    name: Literal["get_simplified_html"] = "get_simplified_html"
+
+
+class GetSimplifiedHtmlResponse(BaseModel):
+    html: str
+
+
+class GetScreenshotRequest(BaseModel):
+    name: Literal["get_screenshot"] = "get_screenshot"
+
+
+class GetScreenshotResponse(BaseModel):
+    base64_content: str
+    name: str
+    mime_type: str
+    timestamp: str
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
     | AgenticMouseActionRequest
@@ -299,6 +326,9 @@ type ExtensionActionRequest = (
     | PrintMessageRequest
     | ReadGoogleSheetRequest
     | WriteGoogleSheetRequest
+    | GetFullHtmlRequest
+    | GetSimplifiedHtmlRequest
+    | GetScreenshotRequest
 )
 
 

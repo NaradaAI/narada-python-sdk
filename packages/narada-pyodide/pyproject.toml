@@ -1,13 +1,13 @@
 
 [project]
 name = "narada-pyodide"
-version = "0.0.32"
+version = "0.0.33"
 description = "Pyodide-compatible Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
-dependencies = ["narada-core==0.0.8", "semver>=3.0.4"]
+dependencies = ["narada-core==0.0.9", "semver>=3.0.4"]
 
 [project.urls]
 Homepage = "https://github.com/NaradaAI/narada-python-sdk/packages/narada-pyodide"
