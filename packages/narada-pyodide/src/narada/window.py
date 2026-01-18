@@ -26,6 +26,12 @@ from narada_core.actions.models import (
     AgenticMouseAction,
     RecordedClick,
     AgenticMouseActionRequest,
+    GetFullHtmlRequest,
+    GetFullHtmlResponse,
+    GetSimplifiedHtmlRequest,
+    GetSimplifiedHtmlResponse,
+    GetScreenshotRequest,
+    GetScreenshotResponse,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -463,6 +469,34 @@ class BaseBrowserWindow(ABC):
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
             ),
+            timeout=timeout,
+        )
+
+    async def get_full_html(self, *, timeout: int | None = None) -> GetFullHtmlResponse:
+        """Gets the full HTML content of the current page."""
+        return await self._run_extension_action(
+            GetFullHtmlRequest(),
+            GetFullHtmlResponse,
+            timeout=timeout,
+        )
+
+    async def get_simplified_html(
+        self, *, timeout: int | None = None
+    ) -> GetSimplifiedHtmlResponse:
+        """Gets the simplified HTML content of the current page."""
+        return await self._run_extension_action(
+            GetSimplifiedHtmlRequest(),
+            GetSimplifiedHtmlResponse,
+            timeout=timeout,
+        )
+
+    async def get_screenshot(
+        self, *, timeout: int | None = None
+    ) -> GetScreenshotResponse:
+        """Takes a screenshot of the current browser window."""
+        return await self._run_extension_action(
+            GetScreenshotRequest(),
+            GetScreenshotResponse,
             timeout=timeout,
         )
 
