@@ -34,7 +34,6 @@ class ActionTraceItemTypedDict(TypedDict):
     action: str
 
 
-# Individual trace types for apaTrace - each mirrors the TypeScript structure
 class GoToUrlTraceTypedDict(TypedDict):
     stepType: Literal["goToUrl"]
     url: str
@@ -157,7 +156,6 @@ class GetScreenshotTraceTypedDict(TypedDict):
     description: str
 
 
-# Union type for all trace types (mirrors ApaUserFacingTracePart)
 ApaTraceItemTypedDict = (
     GoToUrlTraceTypedDict
     | PrintTraceTypedDict

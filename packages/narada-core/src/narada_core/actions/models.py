@@ -44,7 +44,6 @@ class ActionTraceItem(ApiModel):
     action: str
 
 
-# Individual trace types for apaTrace - Pydantic models for parsing
 class GoToUrlTrace(ApiModel):
     step_type: Literal["goToUrl"]
     url: str
