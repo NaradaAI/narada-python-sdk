@@ -32,6 +32,7 @@ from narada_core.actions.models import (
     GetSimplifiedHtmlResponse,
     GetScreenshotRequest,
     GetScreenshotResponse,
+    parse_apa_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -332,6 +333,11 @@ class BaseBrowserWindow(ABC):
             else None
         )
 
+        apa_trace_raw = response_content.get("apaTrace")
+        apa_trace = (
+            parse_apa_trace(apa_trace_raw) if apa_trace_raw is not None else None
+        )
+
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
@@ -339,6 +345,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            apa_trace=apa_trace,
         )
 
     async def agentic_selector(

@@ -1,4 +1,5 @@
 from typing import (
+    Annotated,
     Any,
     Generic,
     Literal,
@@ -9,7 +10,7 @@ from typing import (
     override,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -17,14 +18,188 @@ from pydantic import BaseModel
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
+def to_camel(s: str) -> str:
+    """Convert snake_case to camelCase."""
+    parts = s.split("_")
+    return parts[0] + "".join(p.title() for p in parts[1:])
+
+
+class ApiModel(BaseModel):
+    """Base model for API-facing models with automatic camelCase aliasing."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+
 class AgentUsage(BaseModel):
     actions: int
     credits: int
 
 
-class ActionTraceItem(BaseModel):
+class ActionTraceItem(ApiModel):
     url: str
     action: str
+
+
+class GoToUrlTrace(ApiModel):
+    step_type: Literal["goToUrl"]
+    url: str
+    description: str
+
+
+class PrintTrace(ApiModel):
+    step_type: Literal["print"]
+    url: str
+    message: str
+
+
+class AgentTrace(ApiModel):
+    step_type: Literal["agent"]
+    url: str
+    agent_type: str
+    action_trace: list[ActionTraceItem] | None = None
+    text: str | None = None
+
+
+class ForLoopTrace(ApiModel):
+    step_type: Literal["for"]
+    url: str
+    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"]
+    description: str
+    iterations: list[list["ApaTraceItem"]]  # Recursive reference
+
+
+class WhileLoopTrace(ApiModel):
+    step_type: Literal["while"]
+    url: str
+    condition: str
+    iterations: list[list["ApaTraceItem"]]  # Recursive reference
+    total_iterations: int
+
+
+class AgenticSelectorTrace(ApiModel):
+    step_type: Literal["agenticSelector"]
+    url: str
+    description: str
+    action_trace: list[ActionTraceItem] | None = None
+
+
+class AgenticMouseActionTrace(ApiModel):
+    step_type: Literal["agenticMouseAction"]
+    url: str
+    description: str
+    action_trace: list[ActionTraceItem] | None = None
+
+
+class WaitForElementTrace(ApiModel):
+    step_type: Literal["waitForElement"]
+    url: str
+    description: str
+
+
+class PressKeysTrace(ApiModel):
+    step_type: Literal["pressKeys"]
+    url: str
+    description: str
+
+
+class ReadGoogleSheetTrace(ApiModel):
+    step_type: Literal["readGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteGoogleSheetTrace(ApiModel):
+    step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class DataTableExportAsCsvTrace(ApiModel):
+    step_type: Literal["dataTableExportAsCsv"]
+    url: str
+    description: str
+
+
+class PythonTrace(ApiModel):
+    step_type: Literal["python"]
+    url: str
+    description: str
+
+
+class ReadCsvTrace(ApiModel):
+    step_type: Literal["readCsv"]
+    url: str
+    description: str
+
+
+class StartTrace(ApiModel):
+    step_type: Literal["start"]
+    url: str
+    description: str
+
+
+class EndTrace(ApiModel):
+    step_type: Literal["end"]
+    url: str
+    description: str
+
+
+class GetFullHtmlTrace(ApiModel):
+    step_type: Literal["getFullHtml"]
+    url: str
+    description: str
+
+
+class GetSimplifiedHtmlTrace(ApiModel):
+    step_type: Literal["getSimplifiedHtml"]
+    url: str
+    description: str
+
+
+class GetScreenshotTrace(ApiModel):
+    step_type: Literal["getScreenshot"]
+    url: str
+    description: str
+
+
+ApaTraceItem = Annotated[
+    GoToUrlTrace
+    | PrintTrace
+    | AgentTrace
+    | ForLoopTrace
+    | WhileLoopTrace
+    | AgenticSelectorTrace
+    | AgenticMouseActionTrace
+    | WaitForElementTrace
+    | PressKeysTrace
+    | ReadCsvTrace
+    | ReadGoogleSheetTrace
+    | WriteGoogleSheetTrace
+    | DataTableExportAsCsvTrace
+    | PythonTrace
+    | StartTrace
+    | EndTrace
+    | GetFullHtmlTrace
+    | GetSimplifiedHtmlTrace
+    | GetScreenshotTrace,
+    Field(discriminator="step_type"),
+]
+
+
+# TypeAdapter for parsing discriminated union
+_ApaTraceItemAdapter = TypeAdapter(ApaTraceItem)
+
+
+def parse_apa_trace(trace_data: list[dict[str, Any] | Any]) -> list[ApaTraceItem]:
+    """Parse a list of apaTrace items using Pydantic's discriminated union."""
+    return [
+        _ApaTraceItemAdapter.validate_python(cast(dict[str, Any], item))
+        for item in trace_data
+    ]
 
 
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
@@ -34,6 +209,7 @@ class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     structured_output: _MaybeStructuredOutput | None
     usage: AgentUsage
     action_trace: list[ActionTraceItem] | None = None
+    apa_trace: list[ApaTraceItem] | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):
@@ -110,7 +286,7 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "get_property":
             return {
                 "type": "getProperty",
-                "propertyName": action["property_name"].value,
+                "propertyName": action["property_name"],
             }
 
 
