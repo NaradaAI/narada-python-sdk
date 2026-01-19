@@ -8,7 +8,8 @@ from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, ove
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
-    ActionTraceItem,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -18,20 +19,19 @@ from narada_core.actions.models import (
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
+    GetFullHtmlRequest,
+    GetFullHtmlResponse,
+    GetScreenshotRequest,
+    GetScreenshotResponse,
+    GetSimplifiedHtmlRequest,
+    GetSimplifiedHtmlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
-    WriteGoogleSheetRequest,
-    AgenticMouseAction,
     RecordedClick,
-    AgenticMouseActionRequest,
-    GetFullHtmlRequest,
-    GetFullHtmlResponse,
-    GetSimplifiedHtmlRequest,
-    GetSimplifiedHtmlResponse,
-    GetScreenshotRequest,
-    GetScreenshotResponse,
+    WriteGoogleSheetRequest,
+    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -364,7 +364,7 @@ class BaseBrowserWindow(ABC):
 
         action_trace_raw = response_content.get("actionTrace")
         action_trace = (
-            [ActionTraceItem.model_validate(item) for item in action_trace_raw]
+            parse_action_trace(action_trace_raw)
             if action_trace_raw is not None
             else None
         )
@@ -410,7 +410,7 @@ class BaseBrowserWindow(ABC):
         )
 
         if result is None:
-            return {"value": None}
+            return AgenticSelectorResponse(value=None)
 
         return result
 
@@ -430,7 +430,7 @@ class BaseBrowserWindow(ABC):
             AgenticMouseActionRequest(
                 action=action,
                 recorded_click=recorded_click,
-                resize_window=resize_window,
+                resize_window=resize_window or True,
                 fallback_operator_query=fallback_operator_query,
             ),
             timeout=timeout,

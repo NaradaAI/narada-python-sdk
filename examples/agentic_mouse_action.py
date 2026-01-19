@@ -2,6 +2,7 @@ import asyncio
 
 from narada import Narada
 
+
 async def main() -> None:
     async with Narada() as narada:
         window = await narada.open_and_initialize_browser_window()

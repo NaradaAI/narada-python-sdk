@@ -5,10 +5,9 @@ import os
 from typing import Any
 
 import semver
+from narada.version import __version__
 from narada_core.models import _SdkConfig
 from pyodide.http import pyfetch
-
-from narada.version import __version__
 
 
 class Narada:

@@ -1,15 +1,18 @@
+from __future__ import annotations
+
 from typing import (
+    Annotated,
     Any,
     Generic,
     Literal,
-    TypedDict,
     NotRequired,
+    TypedDict,
     TypeVar,
     cast,
     override,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -22,9 +25,172 @@ class AgentUsage(BaseModel):
     credits: int
 
 
-class ActionTraceItem(BaseModel):
+class OperatorActionTraceItem(BaseModel):
     url: str
     action: str
+
+
+class GoToUrlTrace(BaseModel):
+    step_type: Literal["goToUrl"]
+    url: str
+    description: str
+
+
+class PrintTrace(BaseModel):
+    step_type: Literal["print"]
+    url: str
+    message: str
+
+
+class AgentTrace(BaseModel):
+    step_type: Literal["agent"]
+    url: str
+    agent_type: str
+    action_trace: ActionTrace | None = None
+    text: str | None = None
+
+
+class ForLoopTrace(BaseModel):
+    step_type: Literal["for"]
+    url: str
+    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"]
+    description: str
+    iterations: list[ApaActionTrace]  # Recursive reference
+
+
+class WhileLoopTrace(BaseModel):
+    step_type: Literal["while"]
+    url: str
+    condition: str
+    iterations: list[ApaActionTrace]  # Recursive reference
+    total_iterations: int
+
+
+class AgenticSelectorTrace(BaseModel):
+    step_type: Literal["agenticSelector"]
+    url: str
+    description: str
+    action_trace: ActionTrace | None = None
+
+
+class AgenticMouseActionTrace(BaseModel):
+    step_type: Literal["agenticMouseAction"]
+    url: str
+    description: str
+    action_trace: ActionTrace | None = None
+
+
+class WaitForElementTrace(BaseModel):
+    step_type: Literal["waitForElement"]
+    url: str
+    description: str
+
+
+class PressKeysTrace(BaseModel):
+    step_type: Literal["pressKeys"]
+    url: str
+    description: str
+
+
+class ReadGoogleSheetTrace(BaseModel):
+    step_type: Literal["readGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteGoogleSheetTrace(BaseModel):
+    step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class DataTableExportAsCsvTrace(BaseModel):
+    step_type: Literal["dataTableExportAsCsv"]
+    url: str
+    description: str
+
+
+class PythonTrace(BaseModel):
+    step_type: Literal["python"]
+    url: str
+    description: str
+
+
+class ReadCsvTrace(BaseModel):
+    step_type: Literal["readCsv"]
+    url: str
+    description: str
+
+
+class StartTrace(BaseModel):
+    step_type: Literal["start"]
+    url: str
+    description: str
+
+
+class EndTrace(BaseModel):
+    step_type: Literal["end"]
+    url: str
+    description: str
+
+
+class GetFullHtmlTrace(BaseModel):
+    step_type: Literal["getFullHtml"]
+    url: str
+    description: str
+
+
+class GetSimplifiedHtmlTrace(BaseModel):
+    step_type: Literal["getSimplifiedHtml"]
+    url: str
+    description: str
+
+
+class GetScreenshotTrace(BaseModel):
+    step_type: Literal["getScreenshot"]
+    url: str
+    description: str
+
+
+ApaStepTrace = Annotated[
+    GoToUrlTrace
+    | PrintTrace
+    | AgentTrace
+    | ForLoopTrace
+    | WhileLoopTrace
+    | AgenticSelectorTrace
+    | AgenticMouseActionTrace
+    | WaitForElementTrace
+    | PressKeysTrace
+    | ReadCsvTrace
+    | ReadGoogleSheetTrace
+    | WriteGoogleSheetTrace
+    | DataTableExportAsCsvTrace
+    | PythonTrace
+    | StartTrace
+    | EndTrace
+    | GetFullHtmlTrace
+    | GetSimplifiedHtmlTrace
+    | GetScreenshotTrace,
+    Field(discriminator="step_type"),
+]
+
+type OperatorActionTrace = list[OperatorActionTraceItem]
+type ApaActionTrace = list[ApaStepTrace]
+type ActionTrace = OperatorActionTrace | ApaActionTrace
+
+
+# TypeAdapter for parsing discriminated union
+_OperatorActionTraceAdapter = TypeAdapter(OperatorActionTrace)
+_ApaActionTraceAdapter = TypeAdapter(ApaActionTrace)
+
+
+def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
+    """Parse the action trace, it will either be a list of operator action trace items or a list of APA action trace items."""
+    try:
+        return _OperatorActionTraceAdapter.validate_python(trace_data)
+    except ValidationError:
+        return _ApaActionTraceAdapter.validate_python(trace_data)
 
 
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
@@ -33,7 +199,7 @@ class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     text: str
     structured_output: _MaybeStructuredOutput | None
     usage: AgentUsage
-    action_trace: list[ActionTraceItem] | None = None
+    action_trace: ActionTrace | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):
@@ -110,7 +276,7 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "get_property":
             return {
                 "type": "getProperty",
-                "propertyName": action["property_name"].value,
+                "propertyName": action["property_name"],
             }
 
 

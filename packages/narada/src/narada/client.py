@@ -11,6 +11,10 @@ from uuid import uuid4
 
 import aiohttp
 import semver
+from narada.config import BrowserConfig, ProxyConfig
+from narada.utils import assert_never
+from narada.version import __version__
+from narada.window import LocalBrowserWindow, create_side_panel_url
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -26,18 +30,13 @@ from playwright.async_api import (
     ElementHandle,
     Page,
     Playwright,
-    async_playwright,
 )
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import (
-    TimeoutError as PlaywrightTimeoutError,
+    async_playwright,
 )
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
-
-from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never
-from narada.version import __version__
-from narada.window import LocalBrowserWindow, create_side_panel_url
 
 
 @dataclass
