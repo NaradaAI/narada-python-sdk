@@ -188,11 +188,9 @@ _ApaActionTraceAdapter = TypeAdapter(ApaActionTrace)
 def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
     """Parse the action trace, it will either be a list of operator action trace items or a list of APA action trace items."""
     try:
-        return _OperatorActionTraceAdapter.validate_python(
-            cast(dict[str, Any], trace_data)
-        )
+        return _OperatorActionTraceAdapter.validate_python(trace_data)
     except ValidationError:
-        return _ApaActionTraceAdapter.validate_python(cast(dict[str, Any], trace_data))
+        return _ApaActionTraceAdapter.validate_python(trace_data)
 
 
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
-from typing import Generic, Literal, NotRequired, TypedDict, TypeVar
+from enum import Enum, StrEnum
+from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Agent(Enum):
@@ -21,6 +21,45 @@ class Agent(Enum):
 class UserResourceCredentials(TypedDict, total=False):
     salesforce: dict[str, str]
     jira: dict[str, str]
+
+
+class AuthenticationType(StrEnum):
+    NONE = "none"
+    BEARER_TOKEN = "bearer-token"
+    CUSTOM_HEADERS = "custom-headers"
+
+
+class CustomHeader(BaseModel):
+    key: str
+    value: str
+
+
+class AuthenticationNone(BaseModel):
+    type: Literal[AuthenticationType.NONE] = AuthenticationType.NONE
+
+
+class AuthenticationBearerToken(BaseModel):
+    type: Literal[AuthenticationType.BEARER_TOKEN] = AuthenticationType.BEARER_TOKEN
+    bearerToken: str
+
+
+class AuthenticationCustomHeaders(BaseModel):
+    type: Literal[AuthenticationType.CUSTOM_HEADERS] = AuthenticationType.CUSTOM_HEADERS
+    customHeaders: list[CustomHeader]
+
+
+Authentication = Annotated[
+    AuthenticationNone | AuthenticationBearerToken | AuthenticationCustomHeaders,
+    Field(discriminator="type"),
+]
+
+
+class McpServer(BaseModel):
+    url: str
+    label: str | None = None
+    description: str | None = None
+    authentication: Authentication
+    selectedTools: list[str] | None = None
 
 
 class RemoteDispatchChatHistoryItem(TypedDict):

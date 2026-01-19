@@ -42,6 +42,7 @@ from narada_core.errors import (
 from narada_core.models import (
     Agent,
     File,
+    McpServer,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
@@ -128,6 +129,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -150,6 +152,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -171,6 +174,7 @@ class BaseBrowserWindow(ABC):
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -212,6 +216,10 @@ class BaseBrowserWindow(ABC):
             body["attachment"] = attachment
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
+        if mcp_servers is not None:
+            body["mcpServers"] = [
+                server.model_dump(mode="json") for server in mcp_servers
+            ]
         if variables is not None:
             body["variables"] = variables
         if callback_url is not None:
@@ -277,6 +285,7 @@ class BaseBrowserWindow(ABC):
         output_schema: None = None,
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[None]: ...
@@ -292,6 +301,7 @@ class BaseBrowserWindow(ABC):
         output_schema: type[_StructuredOutput],
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -306,6 +316,7 @@ class BaseBrowserWindow(ABC):
         output_schema: type[BaseModel] | None = None,
         attachment: File | None = None,
         time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
@@ -318,6 +329,7 @@ class BaseBrowserWindow(ABC):
             output_schema=output_schema,
             attachment=attachment,
             time_zone=time_zone,
+            mcp_servers=mcp_servers,
             variables=variables,
             timeout=timeout,
         )
