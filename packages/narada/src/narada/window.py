@@ -4,35 +4,35 @@ import time
 from abc import ABC
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any, Optional, TypeVar, overload
+from typing import IO, Any, TypeVar, overload
 
 import aiohttp
+from narada.config import BrowserConfig
 from narada_core.actions.models import (
-    ActionTraceItem,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
-    AgenticMouseActionRequest,
-    AgenticMouseAction,
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
+    GetFullHtmlRequest,
+    GetFullHtmlResponse,
+    GetScreenshotRequest,
+    GetScreenshotResponse,
+    GetSimplifiedHtmlRequest,
+    GetSimplifiedHtmlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
-    WriteGoogleSheetRequest,
     RecordedClick,
-    GetFullHtmlRequest,
-    GetFullHtmlResponse,
-    GetSimplifiedHtmlRequest,
-    GetSimplifiedHtmlResponse,
-    GetScreenshotRequest,
-    GetScreenshotResponse,
-    parse_apa_trace,
+    WriteGoogleSheetRequest,
+    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -48,8 +48,6 @@ from narada_core.models import (
 )
 from playwright.async_api import BrowserContext
 from pydantic import BaseModel
-
-from narada.config import BrowserConfig
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -328,14 +326,9 @@ class BaseBrowserWindow(ABC):
 
         action_trace_raw = response_content.get("actionTrace")
         action_trace = (
-            [ActionTraceItem.model_validate(item) for item in action_trace_raw]
+            parse_action_trace(action_trace_raw)
             if action_trace_raw is not None
             else None
-        )
-
-        apa_trace_raw = response_content.get("apaTrace")
-        apa_trace = (
-            parse_apa_trace(apa_trace_raw) if apa_trace_raw is not None else None
         )
 
         return AgentResponse(
@@ -345,7 +338,6 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
-            apa_trace=apa_trace,
         )
 
     async def agentic_selector(
@@ -369,14 +361,13 @@ class BaseBrowserWindow(ABC):
             AgenticSelectorRequest(
                 action=action,
                 selectors=selectors,
-                response_model=response_model,
                 fallback_operator_query=fallback_operator_query,
             ),
             timeout=timeout,
         )
 
         if result is None:
-            return {"value": None}
+            return AgenticSelectorResponse(value=None)
 
         return result
 

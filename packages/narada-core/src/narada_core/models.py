@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 from typing import Generic, Literal, NotRequired, TypedDict, TypeVar
 
@@ -29,161 +31,165 @@ class RemoteDispatchChatHistoryItem(TypedDict):
 _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
 
 
-class ActionTraceItemTypedDict(TypedDict):
+class OperatorActionTraceItem(TypedDict):
     url: str
     action: str
 
 
-class GoToUrlTraceTypedDict(TypedDict):
-    stepType: Literal["goToUrl"]
+class GoToUrlTrace(TypedDict):
+    step_type: Literal["goToUrl"]
     url: str
     description: str
 
 
-class PrintTraceTypedDict(TypedDict):
-    stepType: Literal["print"]
+class PrintTrace(TypedDict):
+    step_type: Literal["print"]
     url: str
     message: str
 
 
-class AgentTraceTypedDict(TypedDict, total=False):
-    stepType: Literal["agent"]
+class AgentTrace(TypedDict):
+    step_type: Literal["agent"]
     url: str
-    agentType: str  # e.g., 'operator', 'generalist', 'coreAgent', etc.
-    actionTrace: list[ActionTraceItemTypedDict]  # For operator agents
+    agent_type: str  # e.g., 'operator', 'generalist', 'coreAgent', etc.
+    action_trace: ActionTrace
     text: str  # For non-operator agents
 
 
-class ForLoopTraceTypedDict(TypedDict):
-    stepType: Literal["for"]
+class ForLoopTrace(TypedDict):
+    step_type: Literal["for"]
     url: str
-    loopType: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"]
+    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"]
     description: str
-    iterations: list[list["ApaTraceItemTypedDict"]]  # Recursive reference
+    iterations: list[APAActionTrace]
 
 
-class WhileLoopTraceTypedDict(TypedDict):
-    stepType: Literal["while"]
+class WhileLoopTrace(TypedDict):
+    step_type: Literal["while"]
     url: str
     condition: str
-    iterations: list[list["ApaTraceItemTypedDict"]]  # Recursive reference
-    totalIterations: int
+    iterations: list[APAActionTrace]
+    total_iterations: int
 
 
-class AgenticSelectorTraceTypedDict(TypedDict, total=False):
-    stepType: Literal["agenticSelector"]
+class AgenticSelectorTrace(TypedDict):
+    step_type: Literal["agenticSelector"]
     url: str
     description: str
-    actionTrace: list[ActionTraceItemTypedDict]  # For operator agent fallback
+    action_trace: ActionTrace  # For operator agent fallback
 
 
-class AgenticMouseActionTraceTypedDict(TypedDict, total=False):
-    stepType: Literal["agenticMouseAction"]
+class AgenticMouseActionTrace(TypedDict):
+    step_type: Literal["agenticMouseAction"]
     url: str
     description: str
-    actionTrace: list[ActionTraceItemTypedDict]  # For operator agent fallback
+    action_trace: ActionTrace  # For operator agent fallback
 
 
-class WaitForElementTraceTypedDict(TypedDict):
-    stepType: Literal["waitForElement"]
-    url: str
-    description: str
-
-
-class PressKeysTraceTypedDict(TypedDict):
-    stepType: Literal["pressKeys"]
+class WaitForElementTrace(TypedDict):
+    step_type: Literal["waitForElement"]
     url: str
     description: str
 
 
-class ReadGoogleSheetTraceTypedDict(TypedDict):
-    stepType: Literal["readGoogleSheet"]
+class PressKeysTrace(TypedDict):
+    step_type: Literal["pressKeys"]
     url: str
     description: str
 
 
-class WriteGoogleSheetTraceTypedDict(TypedDict):
-    stepType: Literal["writeGoogleSheet"]
+class ReadGoogleSheetTrace(TypedDict):
+    step_type: Literal["readGoogleSheet"]
     url: str
     description: str
 
 
-class DataTableExportAsCsvTraceTypedDict(TypedDict):
-    stepType: Literal["dataTableExportAsCsv"]
+class WriteGoogleSheetTrace(TypedDict):
+    step_type: Literal["writeGoogleSheet"]
     url: str
     description: str
 
 
-class PythonTraceTypedDict(TypedDict):
-    stepType: Literal["python"]
+class DataTableExportAsCsvTrace(TypedDict):
+    step_type: Literal["dataTableExportAsCsv"]
     url: str
     description: str
 
 
-class ReadCsvTraceTypedDict(TypedDict):
-    stepType: Literal["readCsv"]
+class PythonTrace(TypedDict):
+    step_type: Literal["python"]
     url: str
     description: str
 
 
-class StartTraceTypedDict(TypedDict):
-    stepType: Literal["start"]
+class ReadCsvTrace(TypedDict):
+    step_type: Literal["readCsv"]
     url: str
     description: str
 
 
-class EndTraceTypedDict(TypedDict):
-    stepType: Literal["end"]
+class StartTrace(TypedDict):
+    step_type: Literal["start"]
     url: str
     description: str
 
 
-class GetFullHtmlTraceTypedDict(TypedDict):
-    stepType: Literal["getFullHtml"]
+class EndTrace(TypedDict):
+    step_type: Literal["end"]
     url: str
     description: str
 
 
-class GetSimplifiedHtmlTraceTypedDict(TypedDict):
-    stepType: Literal["getSimplifiedHtml"]
+class GetFullHtmlTrace(TypedDict):
+    step_type: Literal["getFullHtml"]
     url: str
     description: str
 
 
-class GetScreenshotTraceTypedDict(TypedDict):
-    stepType: Literal["getScreenshot"]
+class GetSimplifiedHtmlTrace(TypedDict):
+    step_type: Literal["getSimplifiedHtml"]
     url: str
     description: str
 
 
-ApaTraceItemTypedDict = (
-    GoToUrlTraceTypedDict
-    | PrintTraceTypedDict
-    | AgentTraceTypedDict
-    | ForLoopTraceTypedDict
-    | WhileLoopTraceTypedDict
-    | AgenticSelectorTraceTypedDict
-    | AgenticMouseActionTraceTypedDict
-    | WaitForElementTraceTypedDict
-    | PressKeysTraceTypedDict
-    | ReadCsvTraceTypedDict
-    | ReadGoogleSheetTraceTypedDict
-    | WriteGoogleSheetTraceTypedDict
-    | DataTableExportAsCsvTraceTypedDict
-    | PythonTraceTypedDict
-    | StartTraceTypedDict
-    | EndTraceTypedDict
-    | GetFullHtmlTraceTypedDict
-    | GetSimplifiedHtmlTraceTypedDict
-    | GetScreenshotTraceTypedDict
+class GetScreenshotTrace(TypedDict):
+    step_type: Literal["getScreenshot"]
+    url: str
+    description: str
+
+
+ApaStepTrace = (
+    GoToUrlTrace
+    | PrintTrace
+    | AgentTrace
+    | ForLoopTrace
+    | WhileLoopTrace
+    | AgenticSelectorTrace
+    | AgenticMouseActionTrace
+    | WaitForElementTrace
+    | PressKeysTrace
+    | ReadCsvTrace
+    | ReadGoogleSheetTrace
+    | WriteGoogleSheetTrace
+    | DataTableExportAsCsvTrace
+    | PythonTrace
+    | StartTrace
+    | EndTrace
+    | GetFullHtmlTrace
+    | GetSimplifiedHtmlTrace
+    | GetScreenshotTrace
 )
+
+
+type OperatorActionTrace = list[OperatorActionTraceItem]
+type APAActionTrace = list[ApaStepTrace]
+type ActionTrace = OperatorActionTrace | APAActionTrace
 
 
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
-    actionTrace: NotRequired[list[ActionTraceItemTypedDict]]
-    apaTrace: NotRequired[list[ApaTraceItemTypedDict]]
+    actionTrace: NotRequired[ActionTrace]
 
 
 class Usage(TypedDict):
