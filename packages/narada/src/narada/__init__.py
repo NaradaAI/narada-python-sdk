@@ -12,7 +12,11 @@ from narada.client import Narada
 from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import download_file, render_html
 from narada.version import __version__
-from narada.window import LocalBrowserWindow, RemoteBrowserWindow
+from narada.window import (
+    LocalBrowserWindow,
+    ManagedBrowserWindow,
+    RemoteBrowserWindow,
+)
 
 __all__ = [
     "__version__",
@@ -21,6 +25,7 @@ __all__ = [
     "download_file",
     "File",
     "LocalBrowserWindow",
+    "ManagedBrowserWindow",
     "Narada",
     "NaradaError",
     "NaradaExtensionMissingError",

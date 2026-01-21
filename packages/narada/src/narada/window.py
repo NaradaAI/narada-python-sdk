@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+import subprocess
 import time
 from abc import ABC
 from http import HTTPStatus
@@ -45,10 +47,12 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
-from playwright.async_api import BrowserContext
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 from pydantic import BaseModel
 
 from narada.config import BrowserConfig
+
+logger = logging.getLogger(__name__)
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -542,9 +546,11 @@ class LocalBrowserWindow(BaseBrowserWindow):
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
+        # Default to localhost for local development when NARADA_API_BASE_URL is not set
+        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
         super().__init__(
             api_key=api_key,
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
         self._browser_process_id = browser_process_id
@@ -576,14 +582,158 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+        # Default to localhost for local development when NARADA_API_BASE_URL is not set
+        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+
+
+class ManagedBrowserWindow(BaseBrowserWindow):
+    """A browser window that connects to a backend-managed containerized browser via CDP.
+    
+    This class connects to a browser container created by the backend API and provides
+    the same interface as other browser window classes for agent operations.
+    """
+
+    _cdp_websocket_url: str
+    _session_id: str
+    _run_locally: bool
+    _playwright: Playwright | None
+    _browser: Browser | None
+    _context: BrowserContext | None
+    _page: Page | None
+
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        cdp_websocket_url: str,
+        session_id: str,
+        run_locally: bool = False,
+        api_key: str | None = None,
+    ) -> None:
+        # Default to localhost for local development when NARADA_API_BASE_URL is not set
+        # This matches the behavior in client.py create_managed_browser()
+        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
+        super().__init__(
+            api_key=api_key or os.environ["NARADA_API_KEY"],
+            base_url=base_url,
+            browser_window_id=browser_window_id,
+        )
+        self._cdp_websocket_url = cdp_websocket_url
+        self._session_id = session_id
+        self._run_locally = run_locally
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+
+    @property
+    def browser(self) -> Browser | None:
+        """Get the Playwright browser instance."""
+        return self._browser
+
+    @property
+    def context(self) -> BrowserContext | None:
+        """Get the Playwright browser context."""
+        return self._context
+
+    @property
+    def page(self) -> Page | None:
+        """Get the default Playwright page."""
+        return self._page
+
+    @property
+    def session_id(self) -> str:
+        """Get the session ID (container ID)."""
+        return self._session_id
+
+    async def connect(self) -> None:
+        """Connect to the browser via CDP."""
+        if self._browser is not None:
+            return  # Already connected
+
+        # Connect via Playwright
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.connect_over_cdp(
+            self._cdp_websocket_url
+        )
+
+        # Get or create context
+        if self._browser.contexts:
+            self._context = self._browser.contexts[0]
+        else:
+            self._context = await self._browser.new_context()
+
+        # Get or create page
+        if self._context.pages:
+            self._page = self._context.pages[0]
+        else:
+            self._page = await self._context.new_page()
+
+        # Wait for extensions to initialize
+        await asyncio.sleep(3)
+
+    async def cleanup(self) -> None:
+        """Clean up Playwright resources and stop the backend container/task."""
+        # Stop the backend container/task first
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self._base_url}/managed-browser/stop-managed-browser-session",
+                    headers={"x-api-key": self._api_key},
+                    json={
+                        "container_id": self._session_id,
+                        "run_locally": self._run_locally,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.ok:
+                        response_data = await resp.json()
+                        if not response_data.get("success"):
+                            logger.warning(f"Failed to stop session: {response_data.get('message')}")
+                    else:
+                        logger.warning(f"Failed to stop session: {resp.status}")
+        except Exception as e:
+            # Log but don't fail - cleanup should be best effort
+            logger.warning(f"Error calling stop session endpoint: {e}")
+        
+        # Then clean up Playwright resources
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+
+        if self._playwright:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
+    async def __aenter__(self) -> "ManagedBrowserWindow":
+        """Async context manager entry."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        await self.cleanup()
+
+    def __str__(self) -> str:
+        return (
+            f"ManagedBrowserWindow("
+            f"session_id={self._session_id}, "
+            f"browser_window_id={self.browser_window_id})"
+        )
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
