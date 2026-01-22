@@ -11,6 +11,14 @@ from uuid import uuid4
 
 import aiohttp
 import semver
+from narada.config import BrowserConfig, ProxyConfig
+from narada.utils import assert_never
+from narada.version import __version__
+from narada.window import (
+    LocalBrowserWindow,
+    ManagedBrowserWindow,
+    create_side_panel_url,
+)
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -26,22 +34,13 @@ from playwright.async_api import (
     ElementHandle,
     Page,
     Playwright,
-    async_playwright,
 )
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import (
-    TimeoutError as PlaywrightTimeoutError,
+    async_playwright,
 )
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
-
-from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never
-from narada.version import __version__
-from narada.window import (
-    LocalBrowserWindow,
-    ManagedBrowserWindow,
-    create_side_panel_url,
-)
 
 
 @dataclass
@@ -88,8 +87,7 @@ class Narada:
         self._playwright = None
 
     async def _fetch_sdk_config(self) -> _SdkConfig | None:
-        # Default to localhost for local development when NARADA_API_BASE_URL is not set
-        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         url = f"{base_url}/sdk/config"
 
         try:
@@ -148,12 +146,11 @@ class Narada:
         self,
         config: BrowserConfig | None = None,
         enable_webrtc: bool = True,
-        webrtc_udp_port_range: str = "56000-56100",
         run_locally: bool = False,
     ) -> ManagedBrowserWindow:
         """Creates a managed browser by calling the backend to start a container.
-        
-        The backend creates a Docker container running a Kernel browser and returns
+
+        The backend creates a container running a managed browser and returns
         a CDP WebSocket URL. This method connects to it, initializes the extension,
         and returns a ManagedBrowserWindow instance.
         """
@@ -161,19 +158,12 @@ class Narada:
         playwright = self._playwright
 
         config = config or BrowserConfig()
-        # Default to localhost for local development when NARADA_API_BASE_URL is not set
-        # This allows local examples to work without setting environment variables
-        # Users can override by setting NARADA_API_BASE_URL explicitly
-        base_url = os.getenv("NARADA_API_BASE_URL")
-        if base_url is None:
-            # Try localhost first for local development
-            base_url = "http://localhost:8000/fast/v2"
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
 
         # Call backend endpoint to create container
         request_body: dict[str, Any] = {}
         if enable_webrtc:
             request_body["enable_webrtc"] = enable_webrtc
-            request_body["webrtc_udp_port_range"] = webrtc_udp_port_range
         if run_locally:
             request_body["run_locally"] = run_locally
 
@@ -183,7 +173,9 @@ class Narada:
                 endpoint_url,
                 headers={"x-api-key": self._api_key},
                 json=request_body,
-                timeout=aiohttp.ClientTimeout(total=180),  # 3 minutes for container startup
+                timeout=aiohttp.ClientTimeout(
+                    total=180
+                ),  # 3 minutes for container startup
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
@@ -200,15 +192,18 @@ class Narada:
 
         # Connect to browser via CDP
         browser = await playwright.chromium.connect_over_cdp(cdp_websocket_url)
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        context = (
+            browser.contexts[0] if browser.contexts else await browser.new_context()
+        )
 
         # Navigate to login URL (provided by backend with custom token)
         initialization_page = await context.new_page()
-        await initialization_page.goto(login_url, wait_until="domcontentloaded", timeout=60_000)
+        await initialization_page.goto(
+            login_url, wait_until="domcontentloaded", timeout=60_000
+        )
 
         await asyncio.sleep(6)  # Wait for sign-in to process to complete
         await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
-
 
         # Wait for browser window ID
         browser_window_id = await self._wait_for_browser_window_id(
@@ -230,7 +225,7 @@ class Narada:
             run_locally=run_locally,
             api_key=self._api_key,
         )
-        
+
         managed_window._playwright = playwright
         managed_window._browser = browser
         managed_window._context = context

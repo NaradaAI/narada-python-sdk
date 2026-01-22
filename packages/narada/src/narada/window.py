@@ -9,31 +9,32 @@ from pathlib import Path
 from typing import IO, Any, Optional, TypeVar, overload
 
 import aiohttp
+from narada.config import BrowserConfig
 from narada_core.actions.models import (
     ActionTraceItem,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
-    AgenticMouseActionRequest,
-    AgenticMouseAction,
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
+    GetFullHtmlRequest,
+    GetFullHtmlResponse,
+    GetScreenshotRequest,
+    GetScreenshotResponse,
+    GetSimplifiedHtmlRequest,
+    GetSimplifiedHtmlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
-    WriteGoogleSheetRequest,
     RecordedClick,
-    GetFullHtmlRequest,
-    GetFullHtmlResponse,
-    GetSimplifiedHtmlRequest,
-    GetSimplifiedHtmlResponse,
-    GetScreenshotRequest,
-    GetScreenshotResponse,
+    WriteGoogleSheetRequest,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -47,10 +48,14 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    async_playwright,
+)
 from pydantic import BaseModel
-
-from narada.config import BrowserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -546,8 +551,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
-        # Default to localhost for local development when NARADA_API_BASE_URL is not set
-        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             api_key=api_key,
             base_url=base_url,
@@ -582,8 +586,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
-        # Default to localhost for local development when NARADA_API_BASE_URL is not set
-        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
             base_url=base_url,
@@ -596,7 +599,7 @@ class RemoteBrowserWindow(BaseBrowserWindow):
 
 class ManagedBrowserWindow(BaseBrowserWindow):
     """A browser window that connects to a backend-managed containerized browser via CDP.
-    
+
     This class connects to a browser container created by the backend API and provides
     the same interface as other browser window classes for agent operations.
     """
@@ -618,9 +621,7 @@ class ManagedBrowserWindow(BaseBrowserWindow):
         run_locally: bool = False,
         api_key: str | None = None,
     ) -> None:
-        # Default to localhost for local development when NARADA_API_BASE_URL is not set
-        # This matches the behavior in client.py create_managed_browser()
-        base_url = os.getenv("NARADA_API_BASE_URL", "http://localhost:8000/fast/v2")
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
             base_url=base_url,
@@ -697,13 +698,14 @@ class ManagedBrowserWindow(BaseBrowserWindow):
                     if resp.ok:
                         response_data = await resp.json()
                         if not response_data.get("success"):
-                            logger.warning(f"Failed to stop session: {response_data.get('message')}")
+                            logger.warning(
+                                f"Failed to stop session: {response_data.get('message')}"
+                            )
                     else:
                         logger.warning(f"Failed to stop session: {resp.status}")
         except Exception as e:
-            # Log but don't fail - cleanup should be best effort
             logger.warning(f"Error calling stop session endpoint: {e}")
-        
+
         # Then clean up Playwright resources
         if self._browser:
             try:
