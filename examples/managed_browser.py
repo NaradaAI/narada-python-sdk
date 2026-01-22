@@ -11,7 +11,7 @@ async def main() -> None:
         # Run a task in this browser window
         response = await window.agent(
             prompt=(
-                'Search for "C++ Compiler" on Google and open the first arXiv paper on the results '
+                'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
                 "page, then tell me who the authors are."
             )
         )
