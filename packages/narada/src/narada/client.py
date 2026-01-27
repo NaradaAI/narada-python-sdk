@@ -113,6 +113,11 @@ class Narada:
         if config is None:
             return
 
+        # TODO: remove this. Quick fix for local testing
+        # # Skip version validation if version is unknown (e.g., when package metadata is not available)
+        # if __version__ == "unknown":
+        #     return
+
         package_config = config.packages["narada"]
         if semver.compare(__version__, package_config.min_required_version) < 0:
             raise RuntimeError(
@@ -145,12 +150,10 @@ class Narada:
     async def create_managed_browser(
         self,
         config: BrowserConfig | None = None,
-        enable_webrtc: bool = True,
-        run_locally: bool = False,
     ) -> ManagedBrowserWindow:
-        """Creates a managed browser by calling the backend to start a container.
+        """Creates a managed browser by calling the backend.
 
-        The backend creates a container running a managed browser and returns
+        The backend creates a managed browser session and returns
         a CDP WebSocket URL. This method connects to it, initializes the extension,
         and returns a ManagedBrowserWindow instance.
         """
@@ -159,15 +162,9 @@ class Narada:
 
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
-
-        # Call backend endpoint to create container
         request_body: dict[str, Any] = {}
-        if enable_webrtc:
-            request_body["enable_webrtc"] = enable_webrtc
-        if run_locally:
-            request_body["run_locally"] = run_locally
-
         endpoint_url = f"{base_url}/managed-browser/create-managed-browser-session"
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint_url,
@@ -175,7 +172,7 @@ class Narada:
                 json=request_body,
                 timeout=aiohttp.ClientTimeout(
                     total=180
-                ),  # 3 minutes for container startup
+                ),  # 3 minutes for session startup
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
@@ -187,11 +184,40 @@ class Narada:
                 response_data = await resp.json()
 
         cdp_websocket_url = response_data["cdp_websocket_url"]
-        container_id = response_data["container_id"]
+        session_id = response_data["session_id"]
         login_url = response_data["login_url"]
+        cdp_auth_headers = response_data.get("cdp_auth_headers", {})
 
-        # Connect to browser via CDP
-        browser = await playwright.chromium.connect_over_cdp(cdp_websocket_url)
+        # Connect to browser via CDP with authentication headers
+        try:
+            connect_headers = cdp_auth_headers if cdp_auth_headers else None
+            browser = await playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=connect_headers
+            )
+        except Exception as e:
+            # Clean up the session if CDP connection fails
+            try:
+                async with aiohttp.ClientSession() as cleanup_session:
+                    async with cleanup_session.post(
+                        f"{base_url}/managed-browser/stop-managed-browser-session",
+                        headers={"x-api-key": self._api_key},
+                        json={"session_id": session_id},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.ok:
+                            logging.info(
+                                f"Cleaned up session {session_id} after CDP connection failure"
+                            )
+                        else:
+                            logging.warning(
+                                f"Failed to cleanup session {session_id}: {resp.status}"
+                            )
+            except Exception as cleanup_error:
+                logging.warning(
+                    f"Error cleaning up session {session_id}: {cleanup_error}"
+                )
+            # Re-raise the original connection error
+            raise
         context = (
             browser.contexts[0] if browser.contexts else await browser.new_context()
         )
@@ -201,8 +227,9 @@ class Narada:
         await initialization_page.goto(
             login_url, wait_until="domcontentloaded", timeout=60_000
         )
-
-        await asyncio.sleep(6)  # Wait for sign-in to process to complete
+        
+        # Wait for sign-in to process to complete. 
+        await asyncio.sleep(15)  # TODO: improve it in the future
         await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
 
         # Wait for browser window ID
@@ -221,9 +248,9 @@ class Narada:
         managed_window = ManagedBrowserWindow(
             browser_window_id=browser_window_id,
             cdp_websocket_url=cdp_websocket_url,
-            session_id=container_id,
-            run_locally=run_locally,
+            session_id=session_id,
             api_key=self._api_key,
+            cdp_auth_headers=cdp_auth_headers,
         )
 
         managed_window._playwright = playwright

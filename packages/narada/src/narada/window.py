@@ -598,15 +598,15 @@ class RemoteBrowserWindow(BaseBrowserWindow):
 
 
 class ManagedBrowserWindow(BaseBrowserWindow):
-    """A browser window that connects to a backend-managed containerized browser via CDP.
+    """A browser window that connects to a backend-managed browser session via CDP.
 
-    This class connects to a browser container created by the backend API and provides
+    This class connects to a managed browser session created by the backend API and provides
     the same interface as other browser window classes for agent operations.
     """
 
     _cdp_websocket_url: str
+    _cdp_auth_headers: dict[str, str]
     _session_id: str
-    _run_locally: bool
     _playwright: Playwright | None
     _browser: Browser | None
     _context: BrowserContext | None
@@ -618,8 +618,8 @@ class ManagedBrowserWindow(BaseBrowserWindow):
         browser_window_id: str,
         cdp_websocket_url: str,
         session_id: str,
-        run_locally: bool = False,
         api_key: str | None = None,
+        cdp_auth_headers: dict[str, str] | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
@@ -628,8 +628,8 @@ class ManagedBrowserWindow(BaseBrowserWindow):
             browser_window_id=browser_window_id,
         )
         self._cdp_websocket_url = cdp_websocket_url
+        self._cdp_auth_headers = cdp_auth_headers or {}
         self._session_id = session_id
-        self._run_locally = run_locally
         self._playwright = None
         self._browser = None
         self._context = None
@@ -652,7 +652,7 @@ class ManagedBrowserWindow(BaseBrowserWindow):
 
     @property
     def session_id(self) -> str:
-        """Get the session ID (container ID)."""
+        """Get the session ID."""
         return self._session_id
 
     async def connect(self) -> None:
@@ -662,8 +662,10 @@ class ManagedBrowserWindow(BaseBrowserWindow):
 
         # Connect via Playwright
         self._playwright = await async_playwright().start()
+        # Only pass headers if they're not empty (Playwright expects None or a dict with values)
+        connect_headers = self._cdp_auth_headers if self._cdp_auth_headers else None
         self._browser = await self._playwright.chromium.connect_over_cdp(
-            self._cdp_websocket_url
+            self._cdp_websocket_url, headers=connect_headers
         )
 
         # Get or create context
@@ -682,16 +684,14 @@ class ManagedBrowserWindow(BaseBrowserWindow):
         await asyncio.sleep(3)
 
     async def cleanup(self) -> None:
-        """Clean up Playwright resources and stop the backend container/task."""
-        # Stop the backend container/task first
+        """Clean up Playwright resources and stop the backend managed browser session."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self._base_url}/managed-browser/stop-managed-browser-session",
                     headers={"x-api-key": self._api_key},
                     json={
-                        "container_id": self._session_id,
-                        "run_locally": self._run_locally,
+                        "session_id": self._session_id,
                     },
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
