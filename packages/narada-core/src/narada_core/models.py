@@ -81,6 +81,12 @@ class GoToUrlTrace(TypedDict):
     description: str
 
 
+class GetUrlTrace(TypedDict):
+    step_type: Literal["getUrl"]
+    url: str
+    description: str
+
+
 class PrintTrace(TypedDict):
     step_type: Literal["print"]
     url: str
@@ -199,6 +205,7 @@ class GetScreenshotTrace(TypedDict):
 
 ApaStepTrace = (
     GoToUrlTrace
+    | GetUrlTrace
     | PrintTrace
     | AgentTrace
     | ForLoopTrace
