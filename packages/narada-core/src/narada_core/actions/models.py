@@ -36,6 +36,12 @@ class GoToUrlTrace(BaseModel):
     description: str
 
 
+class GetUrlTrace(BaseModel):
+    step_type: Literal["getUrl"]
+    url: str
+    description: str
+
+
 class PrintTrace(BaseModel):
     step_type: Literal["print"]
     url: str
@@ -154,6 +160,7 @@ class GetScreenshotTrace(BaseModel):
 
 ApaStepTrace = Annotated[
     GoToUrlTrace
+    | GetUrlTrace
     | PrintTrace
     | AgentTrace
     | ForLoopTrace
@@ -484,6 +491,14 @@ class GetScreenshotResponse(BaseModel):
     timestamp: str
 
 
+class GetUrlRequest(BaseModel):
+    name: Literal["get_url"] = "get_url"
+
+
+class GetUrlResponse(BaseModel):
+    url: str
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
     | AgenticMouseActionRequest
@@ -495,6 +510,7 @@ type ExtensionActionRequest = (
     | GetFullHtmlRequest
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
+    | GetUrlRequest
 )
 
 
