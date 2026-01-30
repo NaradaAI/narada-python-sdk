@@ -14,7 +14,11 @@ import semver
 from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import assert_never
 from narada.version import __version__
-from narada.window import LocalBrowserWindow, create_side_panel_url
+from narada.window import (
+    LocalBrowserWindow,
+    CloudBrowserWindow,
+    create_side_panel_url,
+)
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -57,6 +61,7 @@ class Narada:
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
+    _cloud_window: CloudBrowserWindow | None = None
 
     def __init__(self, *, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ["NARADA_API_KEY"]
@@ -70,6 +75,10 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
+        if self._cloud_window is not None:
+            await self._cloud_window.cleanup()
+            self._cloud_window = None
+
         if self._playwright_context_manager is None:
             return
 
@@ -132,6 +141,129 @@ class Narada:
             config=config,
             context=side_panel_page.context,
         )
+
+    async def create_cloud_browser(
+        self,
+        config: BrowserConfig | None = None,
+        session_name: str | None = None,
+    ) -> CloudBrowserWindow:
+        """Creates a cloud browser by calling the backend.
+
+        The backend creates a cloud browser session and returns
+        a CDP WebSocket URL. This method connects to it, initializes the extension,
+        and returns a CloudBrowserWindow instance.
+        """
+        assert self._playwright is not None
+        playwright = self._playwright
+
+        config = config or BrowserConfig()
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        request_body: dict[str, Any] = {}
+        endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
+        params: dict[str, str] = {}
+        if session_name is not None:
+            params["session_name"] = session_name
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                endpoint_url,
+                headers={"x-api-key": self._api_key},
+                json=request_body,
+                params=params if params else None,
+                timeout=aiohttp.ClientTimeout(
+                    total=180
+                ),  # 3 minutes for session startup
+            ) as resp:
+                if not resp.ok:
+                    error_text = await resp.text()
+                    raise RuntimeError(
+                        f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                        f"Endpoint URL: {endpoint_url}"
+                    )
+                response_data = await resp.json()
+
+        cdp_websocket_url = response_data["cdp_websocket_url"]
+        session_id = response_data["session_id"]
+        login_url = response_data["login_url"]
+        cdp_auth_headers = response_data.get("cdp_auth_headers", {})
+
+        # Connect to browser via CDP with authentication headers
+        try:
+            connect_headers = cdp_auth_headers if cdp_auth_headers else None
+            browser = await playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=connect_headers
+            )
+        except Exception as e:
+            # Clean up the session if CDP connection fails
+            try:
+                async with aiohttp.ClientSession() as cleanup_session:
+                    async with cleanup_session.post(
+                        f"{base_url}/cloud-browser/stop-cloud-browser-session",
+                        headers={"x-api-key": self._api_key},
+                        json={"session_id": session_id},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.ok:
+                            logging.info(
+                                f"Cleaned up session {session_id} after CDP connection failure"
+                            )
+                        else:
+                            logging.warning(
+                                f"Failed to cleanup session {session_id}: {resp.status}"
+                            )
+            except Exception as cleanup_error:
+                logging.warning(
+                    f"Error cleaning up session {session_id}: {cleanup_error}"
+                )
+            # Re-raise the original connection error
+            raise
+        context = (
+            browser.contexts[0] if browser.contexts else await browser.new_context()
+        )
+
+        # Navigate to login URL (provided by backend with custom token)
+        initialization_page = await context.new_page()
+        await initialization_page.goto(
+            login_url, wait_until="domcontentloaded", timeout=60_000
+        )
+
+        # Wait for sign-in to process to complete.
+        await asyncio.sleep(15)  # TODO: improve it in the future
+        await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
+
+        # Wait for browser window ID
+        browser_window_id = await self._wait_for_browser_window_id(
+            initialization_page, config
+        )
+
+        # TODO: consider this
+        # Get side panel page
+        # side_panel_url = create_side_panel_url(config, browser_window_id)
+        # side_panel_page = next(
+        #     (p for p in context.pages if p.url == side_panel_url), None
+        # )
+        # await self._fix_download_behavior(side_panel_page)
+
+        cloud_window = CloudBrowserWindow(
+            browser_window_id=browser_window_id,
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            api_key=self._api_key,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+
+        cloud_window._playwright = playwright
+        cloud_window._browser = browser
+        cloud_window._context = context
+        cloud_window._page = initialization_page
+
+        # Track the window for cleanup in __aexit__
+        self._cloud_window = cloud_window
+
+        if config.interactive:
+            self._print_success_message(browser_window_id)
+
+        return cloud_window
 
     async def initialize_in_existing_browser_window(
         self, config: BrowserConfig | None = None
