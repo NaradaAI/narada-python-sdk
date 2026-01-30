@@ -14,7 +14,7 @@ from narada.utils import download_file, render_html
 from narada.version import __version__
 from narada.window import (
     LocalBrowserWindow,
-    ManagedBrowserWindow,
+    CloudBrowserWindow,
     RemoteBrowserWindow,
 )
 
@@ -25,7 +25,7 @@ __all__ = [
     "download_file",
     "File",
     "LocalBrowserWindow",
-    "ManagedBrowserWindow",
+    "CloudBrowserWindow",
     "Narada",
     "NaradaError",
     "NaradaExtensionMissingError",

@@ -597,10 +597,10 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
 
 
-class ManagedBrowserWindow(BaseBrowserWindow):
-    """A browser window that connects to a backend-managed browser session via CDP.
+class CloudBrowserWindow(BaseBrowserWindow):
+    """A browser window that connects to a backend-cloud browser session via CDP.
 
-    This class connects to a managed browser session created by the backend API and provides
+    This class connects to a cloud browser session created by the backend API and provides
     the same interface as other browser window classes for agent operations.
     """
 
@@ -684,11 +684,11 @@ class ManagedBrowserWindow(BaseBrowserWindow):
         await asyncio.sleep(3)
 
     async def cleanup(self) -> None:
-        """Clean up Playwright resources and stop the backend managed browser session."""
+        """Clean up Playwright resources and stop the backend cloud browser session."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self._base_url}/managed-browser/stop-managed-browser-session",
+                    f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
                     headers={"x-api-key": self._api_key},
                     json={
                         "session_id": self._session_id,
@@ -721,7 +721,7 @@ class ManagedBrowserWindow(BaseBrowserWindow):
                 pass
             self._playwright = None
 
-    async def __aenter__(self) -> "ManagedBrowserWindow":
+    async def __aenter__(self) -> "CloudBrowserWindow":
         """Async context manager entry."""
         await self.connect()
         return self
@@ -732,7 +732,7 @@ class ManagedBrowserWindow(BaseBrowserWindow):
 
     def __str__(self) -> str:
         return (
-            f"ManagedBrowserWindow("
+            f"CloudBrowserWindow("
             f"session_id={self._session_id}, "
             f"browser_window_id={self.browser_window_id})"
         )

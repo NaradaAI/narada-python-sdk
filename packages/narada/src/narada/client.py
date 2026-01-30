@@ -16,7 +16,7 @@ from narada.utils import assert_never
 from narada.version import __version__
 from narada.window import (
     LocalBrowserWindow,
-    ManagedBrowserWindow,
+    CloudBrowserWindow,
     create_side_panel_url,
 )
 from narada_core.errors import (
@@ -61,7 +61,7 @@ class Narada:
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
-    _managed_window: ManagedBrowserWindow | None = None
+    _cloud_window: CloudBrowserWindow | None = None
 
     def __init__(self, *, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ["NARADA_API_KEY"]
@@ -75,9 +75,9 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        if self._managed_window is not None:
-            await self._managed_window.cleanup()
-            self._managed_window = None
+        if self._cloud_window is not None:
+            await self._cloud_window.cleanup()
+            self._cloud_window = None
 
         if self._playwright_context_manager is None:
             return
@@ -113,11 +113,6 @@ class Narada:
         if config is None:
             return
 
-        # TODO: remove this. Quick fix for local testing
-        # # Skip version validation if version is unknown (e.g., when package metadata is not available)
-        # if __version__ == "unknown":
-        #     return
-
         package_config = config.packages["narada"]
         if semver.compare(__version__, package_config.min_required_version) < 0:
             raise RuntimeError(
@@ -147,15 +142,16 @@ class Narada:
             context=side_panel_page.context,
         )
 
-    async def create_managed_browser(
+    async def create_cloud_browser(
         self,
         config: BrowserConfig | None = None,
-    ) -> ManagedBrowserWindow:
-        """Creates a managed browser by calling the backend.
+        session_name: str | None = None,
+    ) -> CloudBrowserWindow:
+        """Creates a cloud browser by calling the backend.
 
-        The backend creates a managed browser session and returns
+        The backend creates a cloud browser session and returns
         a CDP WebSocket URL. This method connects to it, initializes the extension,
-        and returns a ManagedBrowserWindow instance.
+        and returns a CloudBrowserWindow instance.
         """
         assert self._playwright is not None
         playwright = self._playwright
@@ -163,13 +159,17 @@ class Narada:
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         request_body: dict[str, Any] = {}
-        endpoint_url = f"{base_url}/managed-browser/create-managed-browser-session"
+        endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
+        params: dict[str, str] = {}
+        if session_name is not None:
+            params["session_name"] = session_name
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint_url,
                 headers={"x-api-key": self._api_key},
                 json=request_body,
+                params=params if params else None,
                 timeout=aiohttp.ClientTimeout(
                     total=180
                 ),  # 3 minutes for session startup
@@ -177,9 +177,8 @@ class Narada:
                 if not resp.ok:
                     error_text = await resp.text()
                     raise RuntimeError(
-                        f"Failed to create managed browser session: {resp.status} {error_text}\n"
-                        f"Endpoint URL: {endpoint_url}\n"
-                        f"Base URL: {base_url}"
+                        f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                        f"Endpoint URL: {endpoint_url}"
                     )
                 response_data = await resp.json()
 
@@ -199,7 +198,7 @@ class Narada:
             try:
                 async with aiohttp.ClientSession() as cleanup_session:
                     async with cleanup_session.post(
-                        f"{base_url}/managed-browser/stop-managed-browser-session",
+                        f"{base_url}/cloud-browser/stop-cloud-browser-session",
                         headers={"x-api-key": self._api_key},
                         json={"session_id": session_id},
                         timeout=aiohttp.ClientTimeout(total=10),
@@ -227,8 +226,8 @@ class Narada:
         await initialization_page.goto(
             login_url, wait_until="domcontentloaded", timeout=60_000
         )
-        
-        # Wait for sign-in to process to complete. 
+
+        # Wait for sign-in to process to complete.
         await asyncio.sleep(15)  # TODO: improve it in the future
         await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
 
@@ -245,7 +244,7 @@ class Narada:
         # )
         # await self._fix_download_behavior(side_panel_page)
 
-        managed_window = ManagedBrowserWindow(
+        cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
             cdp_websocket_url=cdp_websocket_url,
             session_id=session_id,
@@ -253,18 +252,18 @@ class Narada:
             cdp_auth_headers=cdp_auth_headers,
         )
 
-        managed_window._playwright = playwright
-        managed_window._browser = browser
-        managed_window._context = context
-        managed_window._page = initialization_page
+        cloud_window._playwright = playwright
+        cloud_window._browser = browser
+        cloud_window._context = context
+        cloud_window._page = initialization_page
 
         # Track the window for cleanup in __aexit__
-        self._managed_window = managed_window
+        self._cloud_window = cloud_window
 
         if config.interactive:
             self._print_success_message(browser_window_id)
 
-        return managed_window
+        return cloud_window
 
     async def initialize_in_existing_browser_window(
         self, config: BrowserConfig | None = None
