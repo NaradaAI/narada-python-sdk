@@ -61,11 +61,12 @@ class Narada:
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
-    _cloud_window: CloudBrowserWindow | None = None
+    _cloud_windows: set[CloudBrowserWindow]
 
     def __init__(self, *, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ["NARADA_API_KEY"]
         self._console = Console()
+        self._cloud_windows = set()
 
     async def __aenter__(self) -> Narada:
         await self._validate_sdk_config()
@@ -75,9 +76,9 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        if self._cloud_window is not None:
-            await self._cloud_window.cleanup()
-            self._cloud_window = None
+        for cloud_window in self._cloud_windows:
+            await cloud_window.cleanup()
+        self._cloud_windows.clear()
 
         if self._playwright_context_manager is None:
             return
@@ -114,6 +115,8 @@ class Narada:
             return
 
         package_config = config.packages["narada"]
+        if __version__ == "unknown":
+            return
         if semver.compare(__version__, package_config.min_required_version) < 0:
             raise RuntimeError(
                 f"narada<={__version__} is not supported. Please upgrade to version "
@@ -142,7 +145,7 @@ class Narada:
             context=side_panel_page.context,
         )
 
-    async def create_cloud_browser(
+    async def open_and_initialize_cloud_browser_window(
         self,
         config: BrowserConfig | None = None,
         session_name: str | None = None,
@@ -258,7 +261,7 @@ class Narada:
         cloud_window._page = initialization_page
 
         # Track the window for cleanup in __aexit__
-        self._cloud_window = cloud_window
+        self._cloud_windows.add(cloud_window)
 
         if config.interactive:
             self._print_success_message(browser_window_id)

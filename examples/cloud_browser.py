@@ -6,9 +6,8 @@ from narada import Narada
 
 async def main() -> None:
     async with Narada() as narada:
-        # Optional: pass session_name to label the session
-        window = await narada.create_cloud_browser(
-            session_name="my-cloud-browser-session"
+        window = await narada.open_and_initialize_cloud_browser_window(
+            session_name="my-cloud-browser-session"  # Optional: label the session
         )
 
         # Run a task in this browser window
