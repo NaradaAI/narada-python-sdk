@@ -115,8 +115,6 @@ class Narada:
             return
 
         package_config = config.packages["narada"]
-        if __version__ == "unknown":
-            return
         if semver.compare(__version__, package_config.min_required_version) < 0:
             raise RuntimeError(
                 f"narada<={__version__} is not supported. Please upgrade to version "
