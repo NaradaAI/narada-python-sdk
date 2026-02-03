@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 from narada import Narada
 
