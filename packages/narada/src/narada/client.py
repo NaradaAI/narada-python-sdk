@@ -247,13 +247,10 @@ class Narada:
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
-            cdp_websocket_url=cdp_websocket_url,
             session_id=session_id,
             api_key=self._api_key,
-            cdp_auth_headers=cdp_auth_headers,
         )
 
-        cloud_window._playwright = playwright
         cloud_window._browser = browser
         cloud_window._context = context
         cloud_window._page = initialization_page

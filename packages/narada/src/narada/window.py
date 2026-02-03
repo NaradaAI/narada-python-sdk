@@ -53,7 +53,6 @@ from playwright.async_api import (
     BrowserContext,
     Page,
     Playwright,
-    async_playwright,
 )
 from pydantic import BaseModel
 
@@ -614,22 +613,12 @@ class CloudBrowserWindow(BaseBrowserWindow):
     the same interface as other browser window classes for agent operations.
     """
 
-    _cdp_websocket_url: str
-    _cdp_auth_headers: dict[str, str]
-    _session_id: str
-    _playwright: Playwright | None
-    _browser: Browser | None
-    _context: BrowserContext | None
-    _page: Page | None
-
     def __init__(
         self,
         *,
         browser_window_id: str,
-        cdp_websocket_url: str,
         session_id: str,
         api_key: str | None = None,
-        cdp_auth_headers: dict[str, str] | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
@@ -637,64 +626,10 @@ class CloudBrowserWindow(BaseBrowserWindow):
             base_url=base_url,
             browser_window_id=browser_window_id,
         )
-        self._cdp_websocket_url = cdp_websocket_url
-        self._cdp_auth_headers = cdp_auth_headers or {}
         self._session_id = session_id
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-
-    @property
-    def browser(self) -> Browser | None:
-        """Get the Playwright browser instance."""
-        return self._browser
-
-    @property
-    def context(self) -> BrowserContext | None:
-        """Get the Playwright browser context."""
-        return self._context
-
-    @property
-    def page(self) -> Page | None:
-        """Get the default Playwright page."""
-        return self._page
-
-    @property
-    def session_id(self) -> str:
-        """Get the session ID."""
-        return self._session_id
-
-    async def connect(self) -> None:
-        """Connect to the browser via CDP."""
-        if self._browser is not None:
-            return  # Already connected
-
-        # Connect via Playwright
-        self._playwright = await async_playwright().start()
-        # Only pass headers if they're not empty (Playwright expects None or a dict with values)
-        connect_headers = self._cdp_auth_headers if self._cdp_auth_headers else None
-        self._browser = await self._playwright.chromium.connect_over_cdp(
-            self._cdp_websocket_url, headers=connect_headers
-        )
-
-        # Get or create context
-        if self._browser.contexts:
-            self._context = self._browser.contexts[0]
-        else:
-            self._context = await self._browser.new_context()
-
-        # Get or create page
-        if self._context.pages:
-            self._page = self._context.pages[0]
-        else:
-            self._page = await self._context.new_page()
-
-        # Wait for extensions to initialize
-        await asyncio.sleep(3)
 
     async def cleanup(self) -> None:
-        """Clean up Playwright resources and stop the backend cloud browser session."""
+        """Stop the cloud browser session."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -715,37 +650,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
                         logger.warning(f"Failed to stop session: {resp.status}")
         except Exception as e:
             logger.warning(f"Error calling stop session endpoint: {e}")
-
-        # Then clean up Playwright resources
-        if self._browser:
-            try:
-                await self._browser.close()
-            except Exception:
-                pass
-            self._browser = None
-
-        if self._playwright:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                pass
-            self._playwright = None
-
-    async def __aenter__(self) -> "CloudBrowserWindow":
-        """Async context manager entry."""
-        await self.connect()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Async context manager exit."""
-        await self.cleanup()
-
-    def __str__(self) -> str:
-        return (
-            f"CloudBrowserWindow("
-            f"session_id={self._session_id}, "
-            f"browser_window_id={self.browser_window_id})"
-        )
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
