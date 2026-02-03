@@ -76,8 +76,9 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        for cloud_window in self._cloud_windows:
-            await cloud_window.cleanup()
+        async with asyncio.TaskGroup() as tg:
+            for cloud_window in self._cloud_windows:
+                tg.create_task(cloud_window.cleanup())
         self._cloud_windows.clear()
 
         if self._playwright_context_manager is None:
@@ -147,6 +148,7 @@ class Narada:
         self,
         config: BrowserConfig | None = None,
         session_name: str | None = None,
+        session_timeout: int | None = None,
     ) -> CloudBrowserWindow:
         """Creates a cloud browser by calling the backend.
 
@@ -159,18 +161,17 @@ class Narada:
 
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
-        request_body: dict[str, Any] = {}
+        request_body = {
+            "session_name": session_name,
+            "session_timeout": session_timeout,
+        }
         endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
-        params: dict[str, str] = {}
-        if session_name is not None:
-            params["session_name"] = session_name
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint_url,
                 headers={"x-api-key": self._api_key},
                 json=request_body,
-                params=params if params else None,
                 timeout=aiohttp.ClientTimeout(
                     total=180
                 ),  # 3 minutes for session startup
@@ -186,13 +187,12 @@ class Narada:
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
-        cdp_auth_headers = response_data.get("cdp_auth_headers", {})
+        cdp_auth_headers = response_data.get("cdp_auth_headers")
 
         # Connect to browser via CDP with authentication headers
         try:
-            connect_headers = cdp_auth_headers if cdp_auth_headers else None
             browser = await playwright.chromium.connect_over_cdp(
-                cdp_websocket_url, headers=connect_headers
+                cdp_websocket_url, headers=cdp_auth_headers
             )
         except Exception as e:
             # Clean up the session if CDP connection fails
