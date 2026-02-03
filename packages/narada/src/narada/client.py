@@ -10,15 +10,6 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
-import semver
-from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never
-from narada.version import __version__
-from narada.window import (
-    LocalBrowserWindow,
-    CloudBrowserWindow,
-    create_side_panel_url,
-)
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -27,6 +18,7 @@ from narada_core.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada_core.models import _SdkConfig
+from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
     Browser,
@@ -34,13 +26,20 @@ from playwright.async_api import (
     ElementHandle,
     Page,
     Playwright,
-)
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-from playwright.async_api import (
     async_playwright,
 )
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
+
+from narada.config import BrowserConfig, ProxyConfig
+from narada.utils import assert_never
+from narada.version import __version__
+from narada.window import (
+    CloudBrowserWindow,
+    LocalBrowserWindow,
+    create_side_panel_url,
+)
 
 
 @dataclass
@@ -116,7 +115,9 @@ class Narada:
             return
 
         package_config = config.packages["narada"]
-        if semver.compare(__version__, package_config.min_required_version) < 0:
+        current_version = Version(__version__)
+        min_required_version = Version(package_config.min_required_version)
+        if current_version < min_required_version:
             raise RuntimeError(
                 f"narada<={__version__} is not supported. Please upgrade to version "
                 f"{package_config.min_required_version} or higher."

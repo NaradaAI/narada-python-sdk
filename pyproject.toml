@@ -2,5 +2,11 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.ruff.lint]
+extend-select = ["I"]
+
 [tool.uv.workspace]
 members = ["packages/*"]
+
+[dependency-groups]
+dev = ["ruff>=0.15.0"]
