@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from abc import ABC
@@ -47,8 +48,12 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
-from playwright.async_api import BrowserContext
+from playwright.async_api import (
+    BrowserContext,
+)
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -552,9 +557,10 @@ class LocalBrowserWindow(BaseBrowserWindow):
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             api_key=api_key,
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
         self._browser_process_id = browser_process_id
@@ -586,14 +592,61 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+
+
+class CloudBrowserWindow(BaseBrowserWindow):
+    """A browser window that connects to a backend-cloud browser session via CDP.
+
+    This class connects to a cloud browser session created by the backend API and provides
+    the same interface as other browser window classes for agent operations.
+    """
+
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        session_id: str,
+        api_key: str | None = None,
+    ) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        super().__init__(
+            api_key=api_key or os.environ["NARADA_API_KEY"],
+            base_url=base_url,
+            browser_window_id=browser_window_id,
+        )
+        self._session_id = session_id
+
+    async def cleanup(self) -> None:
+        """Stop the cloud browser session."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
+                    headers={"x-api-key": self._api_key},
+                    json={
+                        "session_id": self._session_id,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.ok:
+                        response_data = await resp.json()
+                        if not response_data.get("success"):
+                            logger.warning(
+                                f"Failed to stop session: {response_data.get('message')}"
+                            )
+                    else:
+                        logger.warning(f"Failed to stop session: {resp.status}")
+        except Exception as e:
+            logger.warning(f"Error calling stop session endpoint: {e}")
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
