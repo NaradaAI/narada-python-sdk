@@ -194,7 +194,7 @@ class Narada:
             browser = await playwright.chromium.connect_over_cdp(
                 cdp_websocket_url, headers=cdp_auth_headers
             )
-        except Exception as e:
+        except Exception:
             # Clean up the session if CDP connection fails
             try:
                 async with aiohttp.ClientSession() as cleanup_session:

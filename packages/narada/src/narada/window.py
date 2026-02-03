@@ -49,10 +49,7 @@ from narada_core.models import (
     UserResourceCredentials,
 )
 from playwright.async_api import (
-    Browser,
     BrowserContext,
-    Page,
-    Playwright,
 )
 from pydantic import BaseModel
 
