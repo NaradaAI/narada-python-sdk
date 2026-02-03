@@ -251,10 +251,6 @@ class Narada:
             api_key=self._api_key,
         )
 
-        cloud_window._browser = browser
-        cloud_window._context = context
-        cloud_window._page = initialization_page
-
         # Track the window for cleanup in __aexit__
         self._cloud_windows.add(cloud_window)
 
