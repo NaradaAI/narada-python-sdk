@@ -1,6 +1,6 @@
 [project]
 name = "narada-core"
-version = "0.0.10"
+version = "0.0.11"
 description = "Code shared by the `narada` and `narada-pyodide` packages."
 license = "Apache-2.0"
 readme = "README.md"
@@ -8,7 +8,7 @@ authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
     # Must use a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
-    "pydantic==2.10.6",
+    "pydantic==2.12.5",
 ]
 
 [project.urls]
