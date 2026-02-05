@@ -29,8 +29,8 @@ jobs:
         run: uv sync --locked --all-extras --dev
 
       - name: Check format
-        run: uv ruff format --check --diff
+        run: uv run ruff format --check --diff
 
       # TODO: Enable linting
       # - name: Lint code
-      #   run: uv ruff check
+      #   run: uv run ruff check
