@@ -419,14 +419,13 @@ class BaseBrowserWindow(ABC):
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
-    async def get_url(self, *, timeout: int | None = None) -> str:
+    async def get_url(self, *, timeout: int | None = None) -> GetUrlResponse:
         """Gets the URL of the current active page."""
-        result = await self._run_extension_action(
+        return await self._run_extension_action(
             GetUrlRequest(),
             GetUrlResponse,
             timeout=timeout,
         )
-        return result.url
 
     async def print_message(self, *, message: str, timeout: int | None = None) -> None:
         """Prints a message in the Narada extension side panel chat."""
