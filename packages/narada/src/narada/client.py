@@ -56,14 +56,23 @@ class Narada:
     _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
-    _api_key: str
+    _auth_headers: dict[str, str]
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
     _cloud_windows: set[CloudBrowserWindow]
 
-    def __init__(self, *, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ["NARADA_API_KEY"]
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        auth_headers: dict[str, str] | None = None,
+    ) -> None:
+        if auth_headers is not None:
+            self._auth_headers = auth_headers
+        else:
+            api_key = api_key or os.environ["NARADA_API_KEY"]
+            self._auth_headers = {"x-api-key": api_key}
         self._console = Console()
         self._cloud_windows = set()
 
@@ -93,9 +102,7 @@ class Narada:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, headers={"x-api-key": self._api_key}
-                ) as resp:
+                async with session.get(url, headers=self._auth_headers) as resp:
                     if not resp.ok:
                         logging.warning(
                             "Failed to fetch SDK config: %s %s",
@@ -138,7 +145,7 @@ class Narada:
         await self._fix_download_behavior(side_panel_page)
 
         return LocalBrowserWindow(
-            api_key=self._api_key,
+            auth_headers=self._auth_headers,
             browser_process_id=launch_browser_result.browser_process_id,
             browser_window_id=browser_window_id,
             config=config,
@@ -171,7 +178,7 @@ class Narada:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint_url,
-                headers={"x-api-key": self._api_key},
+                headers=self._auth_headers,
                 json=request_body,
                 timeout=aiohttp.ClientTimeout(
                     total=180
@@ -201,7 +208,7 @@ class Narada:
                 async with aiohttp.ClientSession() as cleanup_session:
                     async with cleanup_session.post(
                         f"{base_url}/cloud-browser/stop-cloud-browser-session",
-                        headers={"x-api-key": self._api_key},
+                        headers=self._auth_headers,
                         json={"session_id": session_id},
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
@@ -249,7 +256,7 @@ class Narada:
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
             session_id=session_id,
-            api_key=self._api_key,
+            auth_headers=self._auth_headers,
         )
 
         # Track the window for cleanup in __aexit__
@@ -312,7 +319,7 @@ class Narada:
             self._print_success_message(browser_window_id)
 
         return LocalBrowserWindow(
-            api_key=self._api_key,
+            auth_headers=self._auth_headers,
             browser_process_id=None,
             browser_window_id=browser_window_id,
             config=config,

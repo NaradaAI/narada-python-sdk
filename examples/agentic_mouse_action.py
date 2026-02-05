@@ -16,8 +16,7 @@ async def main() -> None:
                 "viewport": {
                     "width": 1280,
                     "height": 720,
-                }
-
+                },
             },
             fallback_operator_query="click on the search box",
         )
@@ -30,7 +29,7 @@ async def main() -> None:
                 "viewport": {
                     "width": 1280,
                     "height": 720,
-                }
+                },
             },
             fallback_operator_query='type "Narada AI" in the search box',
         )
@@ -43,7 +42,7 @@ async def main() -> None:
                 "viewport": {
                     "width": 1280,
                     "height": 720,
-                }
+                },
             },
             fallback_operator_query="scroll down the page",
         )
