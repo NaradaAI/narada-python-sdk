@@ -4,10 +4,11 @@ import logging
 import os
 from typing import Any
 
-import semver
-from narada.version import __version__
 from narada_core.models import _SdkConfig
+from packaging.version import Version
 from pyodide.http import pyfetch
+
+from narada.version import __version__
 
 
 class Narada:
@@ -44,7 +45,9 @@ class Narada:
             return
 
         package_config = config.packages["narada-pyodide"]
-        if semver.compare(__version__, package_config.min_required_version) < 0:
+        current_version = Version(__version__)
+        min_required_version = Version(package_config.min_required_version)
+        if current_version < min_required_version:
             raise RuntimeError(
                 f"narada-pyodide<={__version__} is not supported. Please reload the page to "
                 f"upgrade to version {package_config.min_required_version} or higher."

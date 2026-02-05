@@ -562,6 +562,7 @@ class BaseBrowserWindow(ABC):
         body = {
             "action": request.model_dump(),
             "browserWindowId": self.browser_window_id,
+            "parentRunIds": _parent_run_ids(),
         }
         if timeout is not None:
             body["timeout"] = timeout

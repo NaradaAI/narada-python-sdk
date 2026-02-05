@@ -10,11 +10,6 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
-import semver
-from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never
-from narada.version import __version__
-from narada.window import LocalBrowserWindow, create_side_panel_url
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -23,6 +18,7 @@ from narada_core.errors import (
     NaradaUnsupportedBrowserError,
 )
 from narada_core.models import _SdkConfig
+from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
 from playwright.async_api import (
     Browser,
@@ -30,13 +26,20 @@ from playwright.async_api import (
     ElementHandle,
     Page,
     Playwright,
-)
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-from playwright.async_api import (
     async_playwright,
 )
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
+
+from narada.config import BrowserConfig, ProxyConfig
+from narada.utils import assert_never
+from narada.version import __version__
+from narada.window import (
+    CloudBrowserWindow,
+    LocalBrowserWindow,
+    create_side_panel_url,
+)
 
 
 @dataclass
@@ -53,14 +56,25 @@ class Narada:
     _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
-    _api_key: str
+    _auth_headers: dict[str, str]
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
+    _cloud_windows: set[CloudBrowserWindow]
 
-    def __init__(self, *, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ["NARADA_API_KEY"]
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        auth_headers: dict[str, str] | None = None,
+    ) -> None:
+        if auth_headers is not None:
+            self._auth_headers = auth_headers
+        else:
+            api_key = api_key or os.environ["NARADA_API_KEY"]
+            self._auth_headers = {"x-api-key": api_key}
         self._console = Console()
+        self._cloud_windows = set()
 
     async def __aenter__(self) -> Narada:
         await self._validate_sdk_config()
@@ -70,6 +84,11 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
+        async with asyncio.TaskGroup() as tg:
+            for cloud_window in self._cloud_windows:
+                tg.create_task(cloud_window.cleanup())
+        self._cloud_windows.clear()
+
         if self._playwright_context_manager is None:
             return
 
@@ -83,9 +102,7 @@ class Narada:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, headers={"x-api-key": self._api_key}
-                ) as resp:
+                async with session.get(url, headers=self._auth_headers) as resp:
                     if not resp.ok:
                         logging.warning(
                             "Failed to fetch SDK config: %s %s",
@@ -105,7 +122,9 @@ class Narada:
             return
 
         package_config = config.packages["narada"]
-        if semver.compare(__version__, package_config.min_required_version) < 0:
+        current_version = Version(__version__)
+        min_required_version = Version(package_config.min_required_version)
+        if current_version < min_required_version:
             raise RuntimeError(
                 f"narada<={__version__} is not supported. Please upgrade to version "
                 f"{package_config.min_required_version} or higher."
@@ -126,12 +145,127 @@ class Narada:
         await self._fix_download_behavior(side_panel_page)
 
         return LocalBrowserWindow(
-            api_key=self._api_key,
+            auth_headers=self._auth_headers,
             browser_process_id=launch_browser_result.browser_process_id,
             browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
         )
+
+    async def open_and_initialize_cloud_browser_window(
+        self,
+        config: BrowserConfig | None = None,
+        session_name: str | None = None,
+        session_timeout: int | None = None,
+    ) -> CloudBrowserWindow:
+        """Creates a cloud browser by calling the backend.
+
+        The backend creates a cloud browser session and returns
+        a CDP WebSocket URL. This method connects to it, initializes the extension,
+        and returns a CloudBrowserWindow instance.
+        """
+        assert self._playwright is not None
+        playwright = self._playwright
+
+        config = config or BrowserConfig()
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        request_body = {
+            "session_name": session_name,
+            "session_timeout": session_timeout,
+        }
+        endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                endpoint_url,
+                headers=self._auth_headers,
+                json=request_body,
+                timeout=aiohttp.ClientTimeout(
+                    total=180
+                ),  # 3 minutes for session startup
+            ) as resp:
+                if not resp.ok:
+                    error_text = await resp.text()
+                    raise RuntimeError(
+                        f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                        f"Endpoint URL: {endpoint_url}"
+                    )
+                response_data = await resp.json()
+
+        cdp_websocket_url = response_data["cdp_websocket_url"]
+        session_id = response_data["session_id"]
+        login_url = response_data["login_url"]
+        cdp_auth_headers = response_data.get("cdp_auth_headers")
+
+        # Connect to browser via CDP with authentication headers
+        try:
+            browser = await playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=cdp_auth_headers
+            )
+        except Exception:
+            # Clean up the session if CDP connection fails
+            try:
+                async with aiohttp.ClientSession() as cleanup_session:
+                    async with cleanup_session.post(
+                        f"{base_url}/cloud-browser/stop-cloud-browser-session",
+                        headers=self._auth_headers,
+                        json={"session_id": session_id},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.ok:
+                            logging.info(
+                                f"Cleaned up session {session_id} after CDP connection failure"
+                            )
+                        else:
+                            logging.warning(
+                                f"Failed to cleanup session {session_id}: {resp.status}"
+                            )
+            except Exception as cleanup_error:
+                logging.warning(
+                    f"Error cleaning up session {session_id}: {cleanup_error}"
+                )
+            # Re-raise the original connection error
+            raise
+        context = (
+            browser.contexts[0] if browser.contexts else await browser.new_context()
+        )
+
+        # Navigate to login URL (provided by backend with custom token)
+        initialization_page = await context.new_page()
+        await initialization_page.goto(
+            login_url, wait_until="domcontentloaded", timeout=60_000
+        )
+
+        # Wait for sign-in to process to complete.
+        await asyncio.sleep(15)  # TODO: improve it in the future
+        await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
+
+        # Wait for browser window ID
+        browser_window_id = await self._wait_for_browser_window_id(
+            initialization_page, config
+        )
+
+        # TODO: consider this
+        # Get side panel page
+        # side_panel_url = create_side_panel_url(config, browser_window_id)
+        # side_panel_page = next(
+        #     (p for p in context.pages if p.url == side_panel_url), None
+        # )
+        # await self._fix_download_behavior(side_panel_page)
+
+        cloud_window = CloudBrowserWindow(
+            browser_window_id=browser_window_id,
+            session_id=session_id,
+            auth_headers=self._auth_headers,
+        )
+
+        # Track the window for cleanup in __aexit__
+        self._cloud_windows.add(cloud_window)
+
+        if config.interactive:
+            self._print_success_message(browser_window_id)
+
+        return cloud_window
 
     async def initialize_in_existing_browser_window(
         self, config: BrowserConfig | None = None
@@ -185,7 +319,7 @@ class Narada:
             self._print_success_message(browser_window_id)
 
         return LocalBrowserWindow(
-            api_key=self._api_key,
+            auth_headers=self._auth_headers,
             browser_process_id=None,
             browser_window_id=browser_window_id,
             config=config,

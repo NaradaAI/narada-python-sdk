@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from abc import ABC
@@ -7,7 +8,6 @@ from pathlib import Path
 from typing import IO, Any, TypeVar, overload
 
 import aiohttp
-from narada.config import BrowserConfig
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
@@ -49,8 +49,14 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
-from playwright.async_api import BrowserContext
+from playwright.async_api import (
+    BrowserContext,
+)
 from pydantic import BaseModel
+
+from narada.config import BrowserConfig
+
+logger = logging.getLogger(__name__)
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -64,18 +70,18 @@ class _PresignedPost(BaseModel):
 
 
 class BaseBrowserWindow(ABC):
-    _api_key: str
+    _auth_headers: dict[str, str]
     _base_url: str
     _browser_window_id: str
 
     def __init__(
         self,
         *,
-        api_key: str,
+        auth_headers: dict[str, str],
         base_url: str,
         browser_window_id: str,
     ) -> None:
-        self._api_key = api_key
+        self._auth_headers = auth_headers
         self._base_url = base_url
         self._browser_window_id = browser_window_id
 
@@ -96,7 +102,7 @@ class BaseBrowserWindow(ABC):
             # First generate a presigned POST for uploading the file.
             async with session.post(
                 f"{self._base_url}/remote-dispatch/generate-file-upload-presigned-post",
-                headers={"x-api-key": self._api_key},
+                headers=self._auth_headers,
                 json={"filename": filename},
             ) as resp:
                 resp.raise_for_status()
@@ -189,8 +195,6 @@ class BaseBrowserWindow(ABC):
         """
         deadline = time.monotonic() + timeout
 
-        headers = {"x-api-key": self._api_key}
-
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
         )
@@ -235,7 +239,7 @@ class BaseBrowserWindow(ABC):
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self._base_url}/remote-dispatch",
-                    headers=headers,
+                    headers=self._auth_headers,
                     json=body,
                     timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as resp:
@@ -245,7 +249,7 @@ class BaseBrowserWindow(ABC):
                 while (now := time.monotonic()) < deadline:
                     async with session.get(
                         f"{self._base_url}/remote-dispatch/responses/{request_id}",
-                        headers=headers,
+                        headers=self._auth_headers,
                         timeout=aiohttp.ClientTimeout(total=deadline - now),
                     ) as resp:
                         resp.raise_for_status()
@@ -377,6 +381,7 @@ class BaseBrowserWindow(ABC):
                 selectors=selectors,
                 fallback_operator_query=fallback_operator_query,
             ),
+            response_model=response_model,
             timeout=timeout,
         )
 
@@ -516,8 +521,6 @@ class BaseBrowserWindow(ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel | None:
-        headers = {"x-api-key": self._api_key}
-
         body = {
             "action": request.model_dump(),
             "browserWindowId": self.browser_window_id,
@@ -528,7 +531,7 @@ class BaseBrowserWindow(ABC):
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self._base_url}/extension-actions",
-                headers=headers,
+                headers=self._auth_headers,
                 json=body,
                 # Don't specify `timeout` here as the (soft) timeout is handled by the server.
             ) as resp:
@@ -556,15 +559,16 @@ class LocalBrowserWindow(BaseBrowserWindow):
     def __init__(
         self,
         *,
-        api_key: str,
+        auth_headers: dict[str, str],
         browser_process_id: int | None,
         browser_window_id: str,
         config: BrowserConfig,
         context: BrowserContext,
     ) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
-            api_key=api_key,
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            auth_headers=auth_headers,
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
         self._browser_process_id = browser_process_id
@@ -595,15 +599,75 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
-    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        api_key: str | None = None,
+        auth_headers: dict[str, str] | None = None,
+    ) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        if auth_headers is None:
+            api_key = api_key or os.environ["NARADA_API_KEY"]
+            auth_headers = {"x-api-key": api_key}
         super().__init__(
-            api_key=api_key or os.environ["NARADA_API_KEY"],
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            auth_headers=auth_headers,
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+
+
+class CloudBrowserWindow(BaseBrowserWindow):
+    """A browser window that connects to a backend-cloud browser session via CDP.
+
+    This class connects to a cloud browser session created by the backend API and provides
+    the same interface as other browser window classes for agent operations.
+    """
+
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        session_id: str,
+        api_key: str | None = None,
+        auth_headers: dict[str, str] | None = None,
+    ) -> None:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        if auth_headers is None:
+            api_key = api_key or os.environ["NARADA_API_KEY"]
+            auth_headers = {"x-api-key": api_key}
+        super().__init__(
+            auth_headers=auth_headers,
+            base_url=base_url,
+            browser_window_id=browser_window_id,
+        )
+        self._session_id = session_id
+
+    async def cleanup(self) -> None:
+        """Stop the cloud browser session."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
+                    headers=self._auth_headers,
+                    json={
+                        "session_id": self._session_id,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.ok:
+                        response_data = await resp.json()
+                        if not response_data.get("success"):
+                            logger.warning(
+                                f"Failed to stop session: {response_data.get('message')}"
+                            )
+                    else:
+                        logger.warning(f"Failed to stop session: {resp.status}")
+        except Exception as e:
+            logger.warning(f"Error calling stop session endpoint: {e}")
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
