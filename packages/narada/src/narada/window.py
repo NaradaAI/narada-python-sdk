@@ -26,6 +26,8 @@ from narada_core.actions.models import (
     GetScreenshotResponse,
     GetSimplifiedHtmlRequest,
     GetSimplifiedHtmlResponse,
+    GetUrlRequest,
+    GetUrlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
     ReadGoogleSheetRequest,
@@ -420,6 +422,14 @@ class BaseBrowserWindow(ABC):
         """Navigates the active page in this window to the given URL."""
         return await self._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
+        )
+
+    async def get_url(self, *, timeout: int | None = None) -> GetUrlResponse:
+        """Gets the URL of the current active page."""
+        return await self._run_extension_action(
+            GetUrlRequest(),
+            GetUrlResponse,
+            timeout=timeout,
         )
 
     async def print_message(self, *, message: str, timeout: int | None = None) -> None:
