@@ -9,9 +9,7 @@ def _default_executable_path() -> str:
     elif sys.platform == "darwin":
         return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     else:
-        raise NotImplementedError(
-            f"No default browser executable path for {sys.platform}"
-        )
+        return "/usr/bin/google-chrome"
 
 
 def _default_user_data_dir() -> str:
