@@ -1,13 +1,13 @@
 [project]
 name = "narada"
-version = "0.1.33a6"
+version = "0.1.33a7"
 description = "Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
-    "narada-core==0.0.11",
+    "narada-core==0.0.12",
     "aiohttp>=3.12.13",
     "playwright>=1.53.0",
     "rich>=14.0.0",
