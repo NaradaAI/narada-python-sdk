@@ -215,11 +215,14 @@ class Narada:
                     ) as resp:
                         if resp.ok:
                             logging.info(
-                                f"Cleaned up session {session_id} after CDP connection failure"
+                                "Cleaned up session %s after CDP connection failure",
+                                session_id,
                             )
                         else:
                             logging.warning(
-                                f"Failed to cleanup session {session_id}: {resp.status}"
+                                "Failed to cleanup session %s: %s",
+                                session_id,
+                                resp.status,
                             )
             except Exception as cleanup_error:
                 logging.warning(
