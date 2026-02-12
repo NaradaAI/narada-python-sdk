@@ -1,11 +1,19 @@
 import webbrowser
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Never
+from typing import Never, TypeVar
+
+_T = TypeVar("_T")
 
 
 def assert_never() -> Never:
     raise AssertionError("Expected code to be unreachable")
+
+
+def assert_not_none(value: _T | None) -> _T:
+    if value is None:
+        raise ValueError("Unexpected None value")
+    return value
 
 
 def download_file(filename: str, content: str | bytes) -> None:

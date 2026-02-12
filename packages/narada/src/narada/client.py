@@ -33,7 +33,7 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never
+from narada.utils import assert_never, assert_not_none
 from narada.version import __version__
 from narada.window import (
     CloudBrowserWindow,
@@ -164,9 +164,6 @@ class Narada:
         a CDP WebSocket URL. This method connects to it, initializes the extension,
         and returns a CloudBrowserWindow instance.
         """
-        assert self._playwright is not None
-        playwright = self._playwright
-
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         request_body = {
@@ -195,12 +192,16 @@ class Narada:
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
-        cdp_auth_headers = response_data.get("cdp_auth_headers")
+        cdp_auth_headers = response_data["cdp_auth_headers"]
 
-        # Connect to browser via CDP with authentication headers
+        # Connect to browser via CDP with authentication headers and log the user in.
         try:
-            browser = await playwright.chromium.connect_over_cdp(
-                cdp_websocket_url, headers=cdp_auth_headers
+            return await self._initialize_cloud_browser_window(
+                config=config,
+                cdp_websocket_url=cdp_websocket_url,
+                session_id=session_id,
+                login_url=login_url,
+                cdp_auth_headers=cdp_auth_headers,
             )
         except Exception:
             # Clean up the session if CDP connection fails
@@ -214,36 +215,58 @@ class Narada:
                     ) as resp:
                         if resp.ok:
                             logging.info(
-                                f"Cleaned up session {session_id} after CDP connection failure"
+                                "Cleaned up session %s after CDP connection failure",
+                                session_id,
                             )
                         else:
                             logging.warning(
-                                f"Failed to cleanup session {session_id}: {resp.status}"
+                                "Failed to cleanup session %s: %s",
+                                session_id,
+                                resp.status,
                             )
             except Exception as cleanup_error:
                 logging.warning(
-                    f"Error cleaning up session {session_id}: {cleanup_error}"
+                    "Error cleaning up session %s: %s", session_id, cleanup_error
                 )
             # Re-raise the original connection error
             raise
-        context = (
-            browser.contexts[0] if browser.contexts else await browser.new_context()
+
+    async def _initialize_cloud_browser_window(
+        self,
+        *,
+        config: BrowserConfig,
+        cdp_websocket_url: str,
+        session_id: str,
+        login_url: str,
+        cdp_auth_headers: dict[str, str],
+    ) -> CloudBrowserWindow:
+        assert self._playwright is not None
+
+        # Connect to browser via CDP with authentication headers
+        browser = await self._playwright.chromium.connect_over_cdp(
+            cdp_websocket_url, headers=cdp_auth_headers
         )
 
         # Navigate to login URL (provided by backend with custom token)
-        initialization_page = await context.new_page()
+        context = browser.contexts[0]
+        initialization_page = context.pages[0]
         await initialization_page.goto(
             login_url, wait_until="domcontentloaded", timeout=60_000
         )
 
-        # Wait for sign-in to process to complete.
-        await asyncio.sleep(15)  # TODO: improve it in the future
-        await initialization_page.reload(wait_until="domcontentloaded", timeout=60_000)
-
-        # Wait for browser window ID
-        browser_window_id = await self._wait_for_browser_window_id(
-            initialization_page, config
-        )
+        # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
+        # few times.
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
+                browser_window_id = await self._wait_for_browser_window_id(
+                    initialization_page, config
+                )
+            except NaradaExtensionMissingError:
+                if attempt == max_attempts - 1:
+                    raise
+                logging.info("Waiting for Narada extension to be installed...")
+                await asyncio.sleep(1)
 
         # TODO: consider this
         # Get side panel page
@@ -420,7 +443,9 @@ class Narada:
             if proxy_requires_auth and not did_initial_navigation:
                 proxy_cdp_session = (
                     await self._setup_proxy_authentication_browser_level(
-                        browser, config.proxy
+                        browser,
+                        # Not None because `proxy_requires_auth` is True.
+                        assert_not_none(config.proxy),
                     )
                 )
                 blank_page = context.pages[0]
@@ -476,9 +501,7 @@ class Narada:
             return None
 
     @staticmethod
-    async def _wait_for_browser_window_id_silently(
-        page: Page, *, timeout: int = 15_000
-    ) -> str:
+    async def _wait_for_browser_window_id_silently(page: Page, *, timeout: int) -> str:
         selectors = [
             Narada._BROWSER_WINDOW_ID_SELECTOR,
             Narada._UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
@@ -546,7 +569,7 @@ class Narada:
         assert_never()
 
     async def _wait_for_browser_window_id_interactively(
-        self, page: Page, *, per_attempt_timeout: int = 15_000
+        self, page: Page, *, per_attempt_timeout: int
     ) -> str:
         try:
             while True:
@@ -583,17 +606,18 @@ class Narada:
         self,
         initialization_page: Page,
         config: BrowserConfig,
+        timeout: int = 15_000,
     ) -> str:
         """Waits for the browser window ID to be available, potentially letting the user respond to
         recoverable errors interactively.
         """
         if config.interactive:
             return await self._wait_for_browser_window_id_interactively(
-                initialization_page
+                initialization_page, per_attempt_timeout=timeout
             )
         else:
             return await Narada._wait_for_browser_window_id_silently(
-                initialization_page
+                initialization_page, timeout=timeout
             )
 
     async def _setup_proxy_authentication_browser_level(
