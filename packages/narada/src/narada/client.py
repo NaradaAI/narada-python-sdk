@@ -164,9 +164,6 @@ class Narada:
         a CDP WebSocket URL. This method connects to it, initializes the extension,
         and returns a CloudBrowserWindow instance.
         """
-        assert self._playwright is not None
-        playwright = self._playwright
-
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         request_body = {
@@ -195,12 +192,16 @@ class Narada:
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
-        cdp_auth_headers = response_data.get("cdp_auth_headers")
+        cdp_auth_headers = response_data["cdp_auth_headers"]
 
-        # Connect to browser via CDP with authentication headers
+        # Connect to browser via CDP with authentication headers and log the user in.
         try:
-            browser = await playwright.chromium.connect_over_cdp(
-                cdp_websocket_url, headers=cdp_auth_headers
+            return await self._initialize_cloud_browser_window(
+                config=config,
+                cdp_websocket_url=cdp_websocket_url,
+                session_id=session_id,
+                login_url=login_url,
+                cdp_auth_headers=cdp_auth_headers,
             )
         except Exception:
             # Clean up the session if CDP connection fails
@@ -226,6 +227,22 @@ class Narada:
                 )
             # Re-raise the original connection error
             raise
+
+    async def _initialize_cloud_browser_window(
+        self,
+        *,
+        config: BrowserConfig,
+        cdp_websocket_url: str,
+        session_id: str,
+        login_url: str,
+        cdp_auth_headers: dict[str, str],
+    ) -> CloudBrowserWindow:
+        assert self._playwright is not None
+
+        # Connect to browser via CDP with authentication headers
+        browser = await self._playwright.chromium.connect_over_cdp(
+            cdp_websocket_url, headers=cdp_auth_headers
+        )
 
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
