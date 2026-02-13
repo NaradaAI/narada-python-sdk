@@ -596,7 +596,7 @@ class Narada:
         self,
         initialization_page: Page,
         config: BrowserConfig,
-        timeout: int = 15_000,
+        timeout: int = 30_000,
     ) -> str:
         """Waits for the browser window ID to be available, potentially letting the user respond to
         recoverable errors interactively.
