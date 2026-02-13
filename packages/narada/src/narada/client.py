@@ -60,7 +60,6 @@ class Narada:
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
-    _cloud_windows: set[CloudBrowserWindow]
 
     def __init__(
         self,
@@ -74,7 +73,6 @@ class Narada:
             api_key = api_key or os.environ["NARADA_API_KEY"]
             self._auth_headers = {"x-api-key": api_key}
         self._console = Console()
-        self._cloud_windows = set()
 
     async def __aenter__(self) -> Narada:
         await self._validate_sdk_config()
@@ -84,11 +82,6 @@ class Narada:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        async with asyncio.TaskGroup() as tg:
-            for cloud_window in self._cloud_windows:
-                tg.create_task(cloud_window.cleanup())
-        self._cloud_windows.clear()
-
         if self._playwright_context_manager is None:
             return
 
@@ -210,7 +203,7 @@ class Narada:
                     async with cleanup_session.post(
                         f"{base_url}/cloud-browser/stop-cloud-browser-session",
                         headers=self._auth_headers,
-                        json={"session_id": session_id},
+                        json={"session_id": session_id, "status": "failed"},
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.ok:
@@ -281,9 +274,6 @@ class Narada:
             session_id=session_id,
             auth_headers=self._auth_headers,
         )
-
-        # Track the window for cleanup in __aexit__
-        self._cloud_windows.add(cloud_window)
 
         if config.interactive:
             self._print_success_message(browser_window_id)
