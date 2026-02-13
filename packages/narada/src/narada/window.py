@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -5,7 +7,7 @@ import time
 from abc import ABC
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any, TypeVar, overload, override
+from typing import IO, TYPE_CHECKING, Any, TypeVar, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -55,6 +57,11 @@ from playwright.async_api import (
 from pydantic import BaseModel
 
 from narada.config import BrowserConfig
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser
+
+    from narada.cloud_downloads import CDPDownloadHandler, DownloadInfo
 
 logger = logging.getLogger(__name__)
 
@@ -648,6 +655,11 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
     This class connects to a cloud browser session created by the backend API and provides
     the same interface as other browser window classes for agent operations.
+
+    When created via :meth:`Narada.open_and_initialize_cloud_browser_window`, a
+    :class:`~narada.cloud_downloads.CDPDownloadHandler` is automatically set up so that
+    any files downloaded during agent actions can be transferred to local disk via the
+    :meth:`transfer_download` / :meth:`transfer_all_downloads` convenience methods.
     """
 
     def __init__(
@@ -657,6 +669,8 @@ class CloudBrowserWindow(BaseBrowserWindow):
         session_id: str,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        browser: Browser | None = None,
+        download_handler: CDPDownloadHandler | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         if auth_headers is None:
@@ -668,10 +682,166 @@ class CloudBrowserWindow(BaseBrowserWindow):
             browser_window_id=browser_window_id,
         )
         self._session_id = session_id
+        self._browser = browser
+        self._download_handler = download_handler
 
     @property
     def cloud_browser_session_id(self) -> str:
         return self._session_id
+
+    # ------------------------------------------------------------------
+    # Download helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def has_pending_downloads(self) -> bool:
+        """Return ``True`` if any tracked download is still in progress."""
+        if self._download_handler is None:
+            return False
+        return self._download_handler.has_pending_downloads
+
+    async def wait_for_download(
+        self, *, timeout: float | None = None
+    ) -> DownloadInfo | None:
+        """Wait for the next download to complete on the remote browser.
+
+        Returns :class:`~narada.cloud_downloads.DownloadInfo` on success, or
+        ``None`` on timeout / cancellation.
+        """
+        print("[cloud_browser_window] wait_for_download called")
+        if self._download_handler is None:
+            logger.warning("Download handler not available on this window")
+            return None
+        return await self._download_handler.wait_for_download(timeout=timeout)
+
+    async def get_completed_downloads(self) -> list[DownloadInfo]:
+        """Return info for all downloads that have completed so far (non-blocking)."""
+        if self._download_handler is None:
+            return []
+        # Collect completed downloads from the handler's internal state.
+        from narada.cloud_downloads import DownloadInfo as _DI
+
+        results: list[DownloadInfo] = []
+        handler = self._download_handler
+        for guid, info in handler._downloads.items():
+            if info["state"] == "completed":
+                results.append(
+                    _DI(
+                        guid=guid,
+                        filename=info["filename"],
+                        remote_path=f"{handler._remote_download_dir}/{guid}",
+                        size=info["received"],
+                    )
+                )
+        return results
+
+    async def transfer_download(
+        self,
+        download: DownloadInfo,
+        local_path: str | Path,
+    ) -> Path | None:
+        """Transfer a single completed download from the remote browser to local disk.
+
+        Uses CDP Fetch + IO.read to stream the file in chunks over the WebSocket.
+
+        Args:
+            download: A :class:`~narada.cloud_downloads.DownloadInfo` obtained from
+                :meth:`wait_for_download` or :meth:`get_completed_downloads`.
+            local_path: Where to save the file locally.
+
+        Returns:
+            The resolved local path, or ``None`` on failure.
+        """
+        print("[cloud_browser_window] transfer_download called")
+        if self._browser is None:
+            logger.warning("Browser reference not available -- cannot transfer file")
+            return None
+
+        from narada.cloud_downloads import download_remote_file_to_local
+
+        return await download_remote_file_to_local(
+            self._browser, download.remote_path, local_path
+        )
+
+    async def transfer_all_downloads(
+        self,
+        local_dir: str | Path = "/Users/Volodymyr/projects/narada/remote_downloads",
+        *,
+        timeout: float | None = None,
+    ) -> list[Path]:
+        """Wait for all tracked downloads, then transfer each to *local_dir*.
+
+        This is a convenience wrapper that calls :meth:`wait_for_all` on the
+        download handler and then :meth:`transfer_download` for each result.
+
+        Args:
+            local_dir: Directory to save files into. Created automatically.
+            timeout: Maximum seconds to wait for downloads to finish.
+
+        Returns:
+            List of local paths for successfully transferred files.
+        """
+        print("[cloud_browser_window] transfer_all_downloads called")
+        if self._download_handler is None or self._browser is None:
+            logger.warning(
+                "Download handler / browser not available -- cannot transfer files"
+            )
+            return []
+
+        local_dir = Path(local_dir)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        completed = await self._download_handler.wait_for_all(timeout=timeout)
+
+        transferred: list[Path] = []
+        for dl in completed:
+            dest = local_dir / dl.filename
+            result = await self.transfer_download(dl, dest)
+            if result is not None:
+                transferred.append(result)
+            else:
+                logger.warning("Transfer failed for %s", dl.filename)
+
+        return transferred
+
+    # ------------------------------------------------------------------
+    # Debug
+    # ------------------------------------------------------------------
+
+    async def pause(self) -> None:
+        """Pause execution so you can interact with the cloud browser manually.
+
+        Prints the session ID and a prompt, then blocks until you press ENTER.
+        CDP download listeners remain active, so any downloads you trigger
+        during the pause will be captured.  After resuming, all completed
+        downloads are automatically transferred to the default local directory.
+        """
+        print(
+            f"\n{'=' * 60}"
+            f"\n  Cloud browser session: {self._session_id}"
+            f"\n  Browser window ID:     {self._browser_window_id}"
+            f"\n{'=' * 60}"
+            f"\n"
+            f"\n  >>> Session is PAUSED -- interact with the browser manually."
+            f"\n  CDP download listeners are active; downloads will be captured."
+            f"\n"
+            f"\n  Press ENTER to resume and transfer downloads..."
+            f"\n"
+        )
+        await asyncio.get_event_loop().run_in_executor(None, input)
+
+        # Auto-transfer any downloads that were captured during the pause.
+        paths = await self.transfer_all_downloads()
+        if paths:
+            print(f"\n[cloud_downloads] Transferred {len(paths)} file(s):")
+            for p in paths:
+                print(f"  -> {p}")
+        else:
+            print("\n[cloud_downloads] No downloads to transfer.")
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     @override
     async def close(self, *, timeout: int | None = None) -> None:
@@ -680,6 +850,15 @@ class CloudBrowserWindow(BaseBrowserWindow):
         Unlike local browser windows where close() closes a single window, this stops the
         entire cloud session since the serverless container manages the browser lifecycle.
         """
+        # Disconnect Playwright from the browser (does not stop the remote session).
+        if self._browser is not None:
+            try:
+                self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+            self._download_handler = None
+
         await _stop_cloud_browser_session(
             base_url=self._base_url,
             auth_headers=self._auth_headers,
