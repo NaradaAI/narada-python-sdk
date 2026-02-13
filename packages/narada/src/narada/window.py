@@ -5,7 +5,7 @@ import time
 from abc import ABC
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any, TypeVar, overload
+from typing import IO, Any, TypeVar, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -603,6 +603,7 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         self,
         *,
         browser_window_id: str,
+        cloud_browser_session_id: str | None = None,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
     ) -> None:
@@ -614,6 +615,28 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             auth_headers=auth_headers,
             base_url=base_url,
             browser_window_id=browser_window_id,
+        )
+        self._cloud_browser_session_id = cloud_browser_session_id
+
+    @property
+    def cloud_browser_session_id(self) -> str | None:
+        return self._cloud_browser_session_id
+
+    @override
+    async def close(self, *, timeout: int | None = None) -> None:
+        """Closes the browser window.
+
+        If this window is backed by a cloud browser session, this also stops the cloud
+        session.
+        """
+        if self._cloud_browser_session_id is None:
+            return await super().close(timeout=timeout)
+
+        await _stop_cloud_browser_session(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            session_id=self._cloud_browser_session_id,
+            timeout=timeout,
         )
 
     def __str__(self) -> str:
@@ -646,28 +669,59 @@ class CloudBrowserWindow(BaseBrowserWindow):
         )
         self._session_id = session_id
 
-    async def cleanup(self) -> None:
-        """Stop the cloud browser session."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
-                    headers=self._auth_headers,
-                    json={
-                        "session_id": self._session_id,
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.ok:
-                        response_data = await resp.json()
-                        if not response_data.get("success"):
-                            logger.warning(
-                                f"Failed to stop session: {response_data.get('message')}"
-                            )
-                    else:
-                        logger.warning(f"Failed to stop session: {resp.status}")
-        except Exception as e:
-            logger.warning(f"Error calling stop session endpoint: {e}")
+    @property
+    def cloud_browser_session_id(self) -> str:
+        return self._session_id
+
+    @override
+    async def close(self, *, timeout: int | None = None) -> None:
+        """Stops the cloud browser session.
+
+        Unlike local browser windows where close() closes a single window, this stops the
+        entire cloud session since the serverless container manages the browser lifecycle.
+        """
+        await _stop_cloud_browser_session(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            session_id=self._session_id,
+            timeout=timeout,
+        )
+
+    def __str__(self) -> str:
+        return (
+            "CloudBrowserWindow("
+            f"cloud_browser_session_id={self._session_id}, "
+            f"browser_window_id={self.browser_window_id}"
+            ")"
+        )
+
+
+async def _stop_cloud_browser_session(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_id: str,
+    timeout: int | None = None,
+) -> None:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/cloud-browser/stop-cloud-browser-session",
+                headers=auth_headers,
+                json={"session_id": session_id},
+                timeout=aiohttp.ClientTimeout(total=timeout or 10),
+            ) as resp:
+                if resp.ok:
+                    response_data = await resp.json()
+                    if not response_data.get("success"):
+                        logger.warning(
+                            "Failed to stop session: %s",
+                            response_data.get("message"),
+                        )
+                else:
+                    logger.warning("Failed to stop session: %s", resp.status)
+    except Exception as e:
+        logger.warning("Error calling stop session endpoint: %s", e)
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:

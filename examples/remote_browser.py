@@ -9,7 +9,29 @@ async def main() -> None:
     # https://app.narada.ai/initialize.
     browser_window_id = "REPLACE_WITH_BROWSER_WINDOW_ID"
 
-    window = RemoteBrowserWindow(browser_window_id=browser_window_id)
+    # Optional: If the window was launched as a cloud browser session, provide its session ID to
+    # enable additional management capabilities such as stopping the session:
+    #
+    # ```
+    # win_1 = await narada.open_and_initialize_cloud_browser_window(...)
+    #
+    # browser_window_id = win_1.browser_window_id
+    # cloud_browser_session_id = win_1.cloud_browser_session_id
+    #
+    # ...
+    #
+    # win_2 = RemoteBrowserWindow(
+    #     browser_window_id=browser_window_id,
+    #     loud_browser_session_id=cloud_browser_session_id,
+    # )
+    # await win_2.close()  # This will stop the cloud session.
+    # ```
+    cloud_browser_session_id = None
+
+    window = RemoteBrowserWindow(
+        browser_window_id=browser_window_id,
+        cloud_browser_session_id=cloud_browser_session_id,
+    )
 
     # Run a task on another machine.
     response = await window.agent(
