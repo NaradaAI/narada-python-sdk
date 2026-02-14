@@ -8,6 +8,8 @@ async def main() -> None:
     # Initialize the Narada client.
     async with Narada() as narada:
         # Open a cloud browser window and initialize the Narada UI agent.
+        # A CDP download handler is automatically set up behind the scenes so
+        # any file the agent downloads is tracked.
         window = await narada.open_and_initialize_cloud_browser_window(
             session_name="my-cloud-browser-session",  # Optional: label the session
             session_timeout=3600,  # Optional: session timeout in seconds
@@ -22,6 +24,30 @@ async def main() -> None:
         )
 
         print("Response:", response.model_dump_json(indent=2))
+
+        # ── Download handling ────────────────────────────────────────
+        # Transfer any files the agent downloaded during the task above.
+        # The CDP download handler captures download events automatically;
+        # transfer_all_downloads() waits for pending downloads and streams
+        # each file from the remote browser to the local directory.
+        downloaded_paths = await window.transfer_all_downloads()
+        if downloaded_paths:
+            print(f"Downloaded {len(downloaded_paths)} file(s):")
+            for path in downloaded_paths:
+                print(f"  -> {path}")
+
+        # Or wait for a single download and transfer it individually:
+        #
+        #   download = await window.wait_for_download(timeout=60)
+        #   if download is not None:
+        #       local_path = await window.transfer_download(download, f"./downloads/{download.filename}")
+        #       print(f"Saved: {local_path}")
+        #
+        # You can also inspect already-completed downloads without waiting:
+        #
+        #   completed = await window.get_completed_downloads()
+        #   print(f"{len(completed)} file(s) downloaded")
+        # ─────────────────────────────────────────────────────────────
 
     # The cloud session is still running after exiting the context manager.
     # You can save the session ID for later reconnection or management.

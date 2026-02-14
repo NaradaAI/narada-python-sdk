@@ -261,19 +261,24 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
-        # TODO: consider this
-        # Get side panel page
-        # side_panel_url = create_side_panel_url(config, browser_window_id)
-        # side_panel_page = next(
-        #     (p for p in context.pages if p.url == side_panel_url), None
-        # )
-        # await self._fix_download_behavior(side_panel_page)
+        # Set up browser-level CDP download handler so downloads from any tab are captured.
+        from narada.cloud_downloads import CDPDownloadHandler
+
+        download_handler = CDPDownloadHandler(
+            session_id=session_id,
+            on_download_complete=config.on_download_complete,
+        )
+        await download_handler.setup(browser)
+        print("[client] CDP download handler setup complete. browser=", browser)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
             session_id=session_id,
             auth_headers=self._auth_headers,
+            browser=browser,
+            download_handler=download_handler,
         )
+        print("[client] cloud_window created. cloud_window=", cloud_window)
 
         if config.interactive:
             self._print_success_message(browser_window_id)
