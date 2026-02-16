@@ -17,6 +17,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
+from narada.cloud_downloads import CDPDownloadHandler
 from narada_core.models import _SdkConfig
 from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
@@ -261,15 +262,12 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
-        # Set up browser-level CDP download handler so downloads from any tab are captured.
-        from narada.cloud_downloads import CDPDownloadHandler
-
+        # Set up browser-level CDP download handler to capture downloads from any tab
         download_handler = CDPDownloadHandler(
             session_id=session_id,
             on_download_complete=config.on_download_complete,
         )
         await download_handler.setup(browser)
-        print("[client] CDP download handler setup complete. browser=", browser)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
@@ -278,7 +276,6 @@ class Narada:
             browser=browser,
             download_handler=download_handler,
         )
-        print("[client] cloud_window created. cloud_window=", cloud_window)
 
         if config.interactive:
             self._print_success_message(browser_window_id)

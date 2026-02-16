@@ -57,11 +57,9 @@ from playwright.async_api import (
 from pydantic import BaseModel
 
 from narada.config import BrowserConfig
+from playwright.async_api import Browser
+from narada.cloud_downloads import CDPDownloadHandler, DownloadInfo
 
-if TYPE_CHECKING:
-    from playwright.async_api import Browser
-
-    from narada.cloud_downloads import CDPDownloadHandler, DownloadInfo
 
 logger = logging.getLogger(__name__)
 
@@ -655,11 +653,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
     This class connects to a cloud browser session created by the backend API and provides
     the same interface as other browser window classes for agent operations.
-
-    When created via :meth:`Narada.open_and_initialize_cloud_browser_window`, a
-    :class:`~narada.cloud_downloads.CDPDownloadHandler` is automatically set up so that
-    any files downloaded during agent actions can be transferred to local disk via the
-    :meth:`transfer_download` / :meth:`transfer_all_downloads` convenience methods.
     """
 
     def __init__(
@@ -688,10 +681,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
     @property
     def cloud_browser_session_id(self) -> str:
         return self._session_id
-
-    # ------------------------------------------------------------------
-    # Download helpers
-    # ------------------------------------------------------------------
 
     @property
     def has_pending_downloads(self) -> bool:
@@ -752,7 +741,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
         Returns:
             The resolved local path, or ``None`` on failure.
         """
-        print("[cloud_browser_window] transfer_download called")
         if self._browser is None:
             logger.warning("Browser reference not available -- cannot transfer file")
             return None
@@ -804,44 +792,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
         return transferred
 
-    # ------------------------------------------------------------------
-    # Debug
-    # ------------------------------------------------------------------
-
-    async def pause(self) -> None:
-        """Pause execution so you can interact with the cloud browser manually.
-
-        Prints the session ID and a prompt, then blocks until you press ENTER.
-        CDP download listeners remain active, so any downloads you trigger
-        during the pause will be captured.  After resuming, all completed
-        downloads are automatically transferred to the default local directory.
-        """
-        print(
-            f"\n{'=' * 60}"
-            f"\n  Cloud browser session: {self._session_id}"
-            f"\n  Browser window ID:     {self._browser_window_id}"
-            f"\n{'=' * 60}"
-            f"\n"
-            f"\n  >>> Session is PAUSED -- interact with the browser manually."
-            f"\n  CDP download listeners are active; downloads will be captured."
-            f"\n"
-            f"\n  Press ENTER to resume and transfer downloads..."
-            f"\n"
-        )
-        await asyncio.get_event_loop().run_in_executor(None, input)
-
-        # Auto-transfer any downloads that were captured during the pause.
-        paths = await self.transfer_all_downloads()
-        if paths:
-            print(f"\n[cloud_downloads] Transferred {len(paths)} file(s):")
-            for p in paths:
-                print(f"  -> {p}")
-        else:
-            print("\n[cloud_downloads] No downloads to transfer.")
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     @override
     async def close(self, *, timeout: int | None = None) -> None:
@@ -850,7 +800,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
         Unlike local browser windows where close() closes a single window, this stops the
         entire cloud session since the serverless container manages the browser lifecycle.
         """
-        # Disconnect Playwright from the browser (does not stop the remote session).
+        # Disconnect Playwright from the browser
         if self._browser is not None:
             try:
                 self._browser.close()

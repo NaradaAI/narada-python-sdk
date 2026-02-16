@@ -76,8 +76,6 @@ class BrowserConfig:
     extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"
     interactive: bool = True
     proxy: ProxyConfig | None = None
-    # If set, each completed cloud-browser download runs this sync callable in a thread (run_in_executor).
-    # Signature: (session_id: str, guid: str, filename: str) -> None.
     on_download_complete: Callable[[str, str, str], None] | None = None
 
     @property

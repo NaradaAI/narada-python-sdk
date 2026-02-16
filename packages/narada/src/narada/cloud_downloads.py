@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -63,10 +64,6 @@ class CDPDownloadHandler:
         self._cdp_session: Any | None = None  # playwright CDPSession
         self._browser: Browser | None = None
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
-
     async def setup(self, browser: Browser) -> None:
         """Attach to the browser and start listening for download events."""
         self._browser = browser
@@ -90,15 +87,6 @@ class CDPDownloadHandler:
             lambda event: asyncio.create_task(self._on_download_progress(event)),
         )
 
-        print(
-            "[cloud_downloads] CDP download listeners attached (browser-level) "
-            f"session_id={self._session_id!r} on_download_complete={self._on_download_complete is not None}"
-        )
-
-    # ------------------------------------------------------------------
-    # Internal event handlers
-    # ------------------------------------------------------------------
-
     async def _on_download_begin(self, event: dict[str, Any]) -> None:
         guid: str = event.get("guid", "")
         filename: str = event.get("suggestedFilename", "download")
@@ -111,7 +99,6 @@ class CDPDownloadHandler:
         self._done_events[guid] = asyncio.Event()
 
     async def _on_download_progress(self, event: dict[str, Any]) -> None:
-        print("[cloud_downloads] _on_download_progress called")
         guid: str = event.get("guid", "")
         state: str = event.get("state", "")
         received: int = event.get("receivedBytes", 0)
@@ -147,10 +134,6 @@ class CDPDownloadHandler:
             print(f"[cloud_downloads] Download {state}: {filename}")
             if guid in self._done_events:
                 self._done_events[guid].set()
-
-    # ------------------------------------------------------------------
-    # Public query / wait helpers
-    # ------------------------------------------------------------------
 
     @property
     def has_pending_downloads(self) -> bool:
@@ -270,11 +253,6 @@ class CDPDownloadHandler:
         return results
 
 
-# --------------------------------------------------------------------------
-# File transfer: remote browser -> local filesystem
-# --------------------------------------------------------------------------
-
-
 async def download_remote_file_to_local(
     browser: Browser,
     remote_file_path: str,
@@ -299,7 +277,6 @@ async def download_remote_file_to_local(
     Returns:
         The resolved local :class:`~pathlib.Path`, or ``None`` on failure.
     """
-    print("[cloud_downloads] download_remote_file_to_local called")
     local_path = Path(local_path)
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -310,7 +287,10 @@ async def download_remote_file_to_local(
     cdp = await transfer_page.context.new_cdp_session(transfer_page)
 
     try:
-        print(f"[cloud_downloads] Reading remote file: {remote_file_path}")
+        read_start_ts = time.strftime("%H:%M:%S", time.localtime())
+        print(
+            f"[cloud_downloads] Reading remote file: {remote_file_path} -> {local_path.name} (started at {read_start_ts})"
+        )
 
         # Enable Fetch domain to intercept file:// responses
         await cdp.send(
@@ -361,8 +341,10 @@ async def download_remote_file_to_local(
             return None
 
         # Stream the file contents to local disk in chunks.
+        stream_start = time.perf_counter()
+        start_ts = time.strftime("%H:%M:%S", time.localtime())
         print(
-            f"[cloud_downloads] Streaming file from remote to local: {remote_file_path} -> {local_path}"
+            f"[cloud_downloads] Streaming file from remote to local: {remote_file_path} -> {local_path} (started at {start_ts})"
         )
         downloaded = 0
 
@@ -386,7 +368,19 @@ async def download_remote_file_to_local(
                     break
 
         await cdp.send("IO.close", {"handle": stream_handle})
-        print(f"[cloud_downloads] Transfer complete: {local_path} ({downloaded:,} bytes)")
+        stream_elapsed = time.perf_counter() - stream_start
+        end_ts = time.strftime("%H:%M:%S", time.localtime())
+        print(
+            f"[cloud_downloads] Transfer complete: {local_path} ({downloaded:,} bytes) in {stream_elapsed:.2f}s (finished at {end_ts})"
+        )
+        logger.info(
+            "Streamed file from AgentCore to local: %s -> %s (%s bytes, %.2fs, finished at %s)",
+            remote_file_path,
+            local_path,
+            f"{downloaded:,}",
+            stream_elapsed,
+            end_ts,
+        )
         return local_path
 
     except Exception as exc:
