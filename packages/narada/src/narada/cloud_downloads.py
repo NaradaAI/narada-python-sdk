@@ -21,9 +21,16 @@ if TYPE_CHECKING:
     from playwright.async_api import Browser
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 DEFAULT_REMOTE_DOWNLOAD_DIR = "/tmp/remote_downloads"
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
+
+# CDP Browser.downloadProgress state values
+_STATE_IN_PROGRESS = "inProgress"
+_STATE_COMPLETED = "completed"
+_STATE_CANCELED = "canceled"
+_STATE_INTERRUPTED = "interrupted"
 
 
 @dataclass
@@ -57,11 +64,11 @@ class CDPDownloadHandler:
         self._remote_download_dir = remote_download_dir
         self._session_id = session_id
         self._on_download_complete = on_download_complete
-        # guid -> {filename, state, received}
+        # guid -> dict with keys "filename", "state", "received"
         self._downloads: dict[str, dict[str, Any]] = {}
-        # guid -> asyncio.Event (set when the download reaches a terminal state)
+        # guid -> Event set when that download reaches a terminal state
         self._done_events: dict[str, asyncio.Event] = {}
-        self._cdp_session: Any | None = None  # playwright CDPSession
+        self._cdp_session: Any | None = None
         self._browser: Browser | None = None
 
     async def setup(self, browser: Browser) -> None:
@@ -90,10 +97,9 @@ class CDPDownloadHandler:
     async def _on_download_begin(self, event: dict[str, Any]) -> None:
         guid: str = event.get("guid", "")
         filename: str = event.get("suggestedFilename", "download")
-        print(f"[cloud_downloads] Download started: {filename} (guid: {guid})")
         self._downloads[guid] = {
             "filename": filename,
-            "state": "inProgress",
+            "state": _STATE_IN_PROGRESS,
             "received": 0,
         }
         self._done_events[guid] = asyncio.Event()
@@ -107,33 +113,22 @@ class CDPDownloadHandler:
             self._downloads[guid]["state"] = state
             self._downloads[guid]["received"] = received
 
-        if state == "completed":
-            filename = self._downloads.get(guid, {}).get("filename", guid)
-            print(
-                f"[cloud_downloads] Download completed: {filename} ({received:,} bytes)"
-            )
+        if state in (_STATE_COMPLETED, _STATE_CANCELED, _STATE_INTERRUPTED):
             if guid in self._done_events:
                 self._done_events[guid].set()
+
+        if state == _STATE_COMPLETED:
+            filename = self._downloads.get(guid, {}).get("filename", guid)
             if self._on_download_complete and self._session_id:
-                print(
-                    f"[cloud_downloads] Running transfer in executor (session_id={self._session_id}, filename={filename})"
-                )
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 loop.run_in_executor(
                     None,
                     lambda: self._on_download_complete(
                         self._session_id, guid, filename
                     ),
                 )
-            else:
-                print(
-                    "[cloud_downloads] No transfer: on_download_complete or session_id not set"
-                )
-        elif state in ("canceled", "interrupted"):
-            filename = self._downloads.get(guid, {}).get("filename", guid)
-            print(f"[cloud_downloads] Download {state}: {filename}")
-            if guid in self._done_events:
-                self._done_events[guid].set()
+        elif state in (_STATE_CANCELED, _STATE_INTERRUPTED):
+            pass
 
     async def wait_for_download(
         self, *, timeout: float | None = None
@@ -145,32 +140,28 @@ class CDPDownloadHandler:
 
         Returns ``None`` on timeout or if the download was canceled/interrupted.
         """
-        print("[cloud_downloads] wait_for_download called")
         # Find first download that hasn't finished yet, or the most recent completed one
         # that hasn't been consumed.
         target_guid: str | None = None
         for guid, info in self._downloads.items():
-            if info["state"] == "inProgress":
+            if info["state"] == _STATE_IN_PROGRESS:
                 target_guid = guid
                 break
 
         if target_guid is None:
             # All existing downloads are already done; wait for a new one by polling.
             # We do a simple poll loop so we can detect newly arriving downloads.
-            deadline = (
-                asyncio.get_event_loop().time() + timeout
-                if timeout is not None
-                else None
-            )
+            loop = asyncio.get_running_loop()
+            deadline = (loop.time() + timeout) if timeout is not None else None
             while True:
                 for guid, info in self._downloads.items():
                     if guid not in self._done_events or not self._done_events[guid].is_set():
-                        if info["state"] == "inProgress":
+                        if info["state"] == _STATE_IN_PROGRESS:
                             target_guid = guid
                             break
                 if target_guid is not None:
                     break
-                if deadline is not None and asyncio.get_event_loop().time() >= deadline:
+                if deadline is not None and loop.time() >= deadline:
                     return None
                 await asyncio.sleep(0.5)
 
@@ -187,7 +178,7 @@ class CDPDownloadHandler:
             return None
 
         info = self._downloads[target_guid]
-        if info["state"] != "completed":
+        if info["state"] != _STATE_COMPLETED:
             return None
 
         return DownloadInfo(
@@ -206,12 +197,7 @@ class CDPDownloadHandler:
         successfully.  Downloads that were canceled or interrupted are skipped.
         """
         if not self._downloads:
-            print("[cloud_downloads] No downloads were captured")
             return []
-
-        print(
-            f"[cloud_downloads] Waiting for {len(self._downloads)} download(s) to complete..."
-        )
 
         # Gather all done-events with an optional timeout.
         waiter = asyncio.gather(*(ev.wait() for ev in self._done_events.values()))
@@ -225,7 +211,7 @@ class CDPDownloadHandler:
 
         results: list[DownloadInfo] = []
         for guid, info in self._downloads.items():
-            if info["state"] == "completed":
+            if info["state"] == _STATE_COMPLETED:
                 results.append(
                     DownloadInfo(
                         guid=guid,
@@ -234,14 +220,7 @@ class CDPDownloadHandler:
                         size=info["received"],
                     )
                 )
-            else:
-                print(
-                    f"[cloud_downloads] Skipping {info['filename']} -- ended with state: {info['state']}"
-                )
 
-        print(
-            f"[cloud_downloads] {len(results)}/{len(self._downloads)} download(s) succeeded"
-        )
         return results
 
 
@@ -280,9 +259,6 @@ async def download_remote_file_to_local(
 
     try:
         read_start_ts = time.strftime("%H:%M:%S", time.localtime())
-        print(
-            f"[cloud_downloads] Reading remote file: {remote_file_path} -> {local_path.name} (started at {read_start_ts})"
-        )
 
         # Enable Fetch domain to intercept file:// responses
         await cdp.send(
@@ -300,8 +276,8 @@ async def download_remote_file_to_local(
                     "Fetch.takeResponseBodyAsStream", {"requestId": request_id}
                 )
                 stream_handle_holder["handle"] = stream_result.get("stream")
-            except Exception as exc:
-                print(f"[cloud_downloads] takeResponseBodyAsStream failed: {exc}")
+            except Exception:
+                pass
             finally:
                 fetch_done.set()
 
@@ -322,21 +298,24 @@ async def download_remote_file_to_local(
         try:
             await asyncio.wait_for(fetch_done.wait(), timeout=30)
         except asyncio.TimeoutError:
-            print("[cloud_downloads] Timeout waiting for Fetch intercept")
+            logger.warning("Timeout waiting for Fetch intercept")
             return None
 
         await cdp.send("Fetch.disable")
 
         stream_handle = stream_handle_holder.get("handle")
         if not stream_handle:
-            print("[cloud_downloads] No stream handle obtained")
+            logger.warning("No stream handle obtained")
             return None
 
         # Stream the file contents to local disk in chunks.
         stream_start = time.perf_counter()
         start_ts = time.strftime("%H:%M:%S", time.localtime())
-        print(
-            f"[cloud_downloads] Streaming file from remote to local: {remote_file_path} -> {local_path} (started at {start_ts})"
+        logger.info(
+            "Streaming file from remote to local: %s -> %s (started at %s)",
+            remote_file_path,
+            local_path,
+            start_ts,
         )
         downloaded = 0
 
@@ -361,22 +340,16 @@ async def download_remote_file_to_local(
 
         await cdp.send("IO.close", {"handle": stream_handle})
         stream_elapsed = time.perf_counter() - stream_start
-        end_ts = time.strftime("%H:%M:%S", time.localtime())
-        print(
-            f"[cloud_downloads] Transfer complete: {local_path} ({downloaded:,} bytes) in {stream_elapsed:.2f}s (finished at {end_ts})"
-        )
         logger.info(
-            "Streamed file from AgentCore to local: %s -> %s (%s bytes, %.2fs, finished at %s)",
-            remote_file_path,
+            "Transfer complete: %s (%s bytes) in %.2fs",
             local_path,
             f"{downloaded:,}",
             stream_elapsed,
-            end_ts,
         )
         return local_path
 
     except Exception as exc:
-        print(f"[cloud_downloads] Transfer failed: {exc}")
+        logger.exception("Transfer failed: %s", exc)
         return None
 
     finally:
