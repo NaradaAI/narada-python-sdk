@@ -262,6 +262,17 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
+        # TODO: This is a hack 
+        await browser.close()
+        browser = await self._playwright.chromium.connect_over_cdp(cdp_websocket_url, headers=cdp_auth_headers)
+        context = browser.contexts[0]
+        # Get side panel page
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        side_panel_page = next(
+            (p for p in context.pages if p.url == side_panel_url), None
+        )
+        await self._fix_download_behavior(side_panel_page)
+
         # Set up browser-level CDP download handler to capture downloads from any tab
         download_handler = CDPDownloadHandler(
             session_id=session_id,
