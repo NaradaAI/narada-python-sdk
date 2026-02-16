@@ -682,13 +682,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
     def cloud_browser_session_id(self) -> str:
         return self._session_id
 
-    @property
-    def has_pending_downloads(self) -> bool:
-        """Return ``True`` if any tracked download is still in progress."""
-        if self._download_handler is None:
-            return False
-        return self._download_handler.has_pending_downloads
-
     async def wait_for_download(
         self, *, timeout: float | None = None
     ) -> DownloadInfo | None:
@@ -703,27 +696,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
             return None
         return await self._download_handler.wait_for_download(timeout=timeout)
 
-    async def get_completed_downloads(self) -> list[DownloadInfo]:
-        """Return info for all downloads that have completed so far (non-blocking)."""
-        if self._download_handler is None:
-            return []
-        # Collect completed downloads from the handler's internal state.
-        from narada.cloud_downloads import DownloadInfo as _DI
-
-        results: list[DownloadInfo] = []
-        handler = self._download_handler
-        for guid, info in handler._downloads.items():
-            if info["state"] == "completed":
-                results.append(
-                    _DI(
-                        guid=guid,
-                        filename=info["filename"],
-                        remote_path=f"{handler._remote_download_dir}/{guid}",
-                        size=info["received"],
-                    )
-                )
-        return results
-
     async def transfer_download(
         self,
         download: DownloadInfo,
@@ -735,7 +707,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
         Args:
             download: A :class:`~narada.cloud_downloads.DownloadInfo` obtained from
-                :meth:`wait_for_download` or :meth:`get_completed_downloads`.
+                :meth:`wait_for_download`.
             local_path: Where to save the file locally.
 
         Returns:
@@ -753,7 +725,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
     async def transfer_all_downloads(
         self,
-        local_dir: str | Path = "/Users/Volodymyr/projects/narada/remote_downloads",
+        local_dir: str | Path = "",
         *,
         timeout: float | None = None,
     ) -> list[Path]:

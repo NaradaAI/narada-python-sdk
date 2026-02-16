@@ -135,14 +135,6 @@ class CDPDownloadHandler:
             if guid in self._done_events:
                 self._done_events[guid].set()
 
-    @property
-    def has_pending_downloads(self) -> bool:
-        print("[cloud_downloads] has_pending_downloads called")
-        """Return ``True`` if any tracked download has not yet finished."""
-        return any(
-            info["state"] == "inProgress" for info in self._downloads.values()
-        )
-
     async def wait_for_download(
         self, *, timeout: float | None = None
     ) -> DownloadInfo | None:
