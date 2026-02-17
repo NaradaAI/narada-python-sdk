@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class Agent(Enum):
     GENERALIST = 1
     OPERATOR = 2
+    CORE_AGENT = 3
 
     def prompt_prefix(self) -> str:
         match self:
@@ -16,6 +17,8 @@ class Agent(Enum):
                 return ""
             case Agent.OPERATOR:
                 return "/Operator "
+            case Agent.CORE_AGENT:
+                return "/coreAgent "
 
 
 class UserResourceCredentials(TypedDict, total=False):
