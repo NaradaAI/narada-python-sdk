@@ -158,6 +158,57 @@ class GetScreenshotTrace(BaseModel):
     description: str
 
 
+class ObjectExportAsJsonTrace(BaseModel):
+    step_type: Literal["objectExportAsJson"]
+    url: str
+    description: str
+
+
+class RunCustomAgentTrace(BaseModel):
+    step_type: Literal["runCustomAgent"]
+    url: str
+    workflow_id: str
+    workflow_name: str
+    status: Literal["success", "error"]
+    error_message: str | None = None
+
+
+class IfTrace(BaseModel):
+    step_type: Literal["if"]
+    url: str
+    description: str
+
+
+class SetVariableTrace(BaseModel):
+    step_type: Literal["setVariable"]
+    url: str
+    description: str
+
+
+class WaitTrace(BaseModel):
+    step_type: Literal["wait"]
+    url: str
+    description: str
+
+
+class DataTableInsertRowTrace(BaseModel):
+    step_type: Literal["dataTableInsertRow"]
+    url: str
+    description: str
+
+
+class DataTableUpdateCellValueTrace(BaseModel):
+    step_type: Literal["dataTableUpdateCellValue"]
+    url: str
+    description: str
+
+
+class ObjectSetPropertiesTrace(BaseModel):
+    step_type: Literal["objectSetProperties"]
+    url: str
+    description: str
+
+
 ApaStepTrace = Annotated[
     GoToUrlTrace
     | GetUrlTrace
@@ -173,12 +224,20 @@ ApaStepTrace = Annotated[
     | ReadGoogleSheetTrace
     | WriteGoogleSheetTrace
     | DataTableExportAsCsvTrace
+    | ObjectExportAsJsonTrace
     | PythonTrace
     | StartTrace
     | EndTrace
     | GetFullHtmlTrace
     | GetSimplifiedHtmlTrace
-    | GetScreenshotTrace,
+    | GetScreenshotTrace
+    | RunCustomAgentTrace
+    | IfTrace
+    | SetVariableTrace
+    | WaitTrace
+    | DataTableInsertRowTrace
+    | DataTableUpdateCellValueTrace
+    | ObjectSetPropertiesTrace,
     Field(discriminator="step_type"),
 ]
 
