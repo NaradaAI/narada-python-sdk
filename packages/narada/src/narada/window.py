@@ -58,7 +58,11 @@ from pydantic import BaseModel
 
 from narada.config import BrowserConfig
 from playwright.async_api import Browser
-from narada.cloud_downloads import CDPDownloadHandler, DownloadInfo
+from narada.cloud_downloads import (
+    CDPDownloadHandler,
+    DownloadInfo,
+    local_path_for_session_download,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -733,9 +737,11 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
         This is a convenience wrapper that calls :meth:`wait_for_all` on the
         download handler and then :meth:`transfer_download` for each result.
+        Files are saved under ``local_dir / session_id / filename`` so concurrent
+        sessions do not overwrite.
 
         Args:
-            local_dir: Directory to save files into. Created automatically.
+            local_dir: Base directory to save files into. Created automatically.
             timeout: Maximum seconds to wait for downloads to finish.
 
         Returns:
@@ -755,7 +761,8 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
         transferred: list[Path] = []
         for dl in completed:
-            dest = local_dir / dl.filename
+            dest = local_path_for_session_download(local_dir, self._session_id, dl.filename)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             result = await self.transfer_download(dl, dest)
             if result is not None:
                 transferred.append(result)
@@ -766,12 +773,44 @@ class CloudBrowserWindow(BaseBrowserWindow):
 
 
     @override
-    async def close(self, *, timeout: int | None = None) -> None:
+    async def close(
+        self,
+        *,
+        timeout: int | None = None,
+        local_download_dir: str | Path | None = None,
+        download_wait_timeout: float = 60.0,
+    ) -> None:
         """Stops the cloud browser session.
 
         Unlike local browser windows where close() closes a single window, this stops the
         entire cloud session since the serverless container manages the browser lifecycle.
+
+        Before disconnecting, any downloads captured by the CDP handler are transferred
+        to *local_download_dir* (default: ``./cloud_downloads``), so file downloads
+        from the session are available locally when using the SDK without a backend
+        callback.
         """
+        if self._browser is not None and self._download_handler is not None:
+            download_dir = (
+                Path(local_download_dir)
+                if local_download_dir is not None
+                else Path.cwd() / "cloud_downloads"
+            )
+            try:
+                paths = await self.transfer_all_downloads(
+                    download_dir, timeout=download_wait_timeout
+                )
+                if paths:
+                    logger.info(
+                        "Transferred %d download(s) to %s before closing",
+                        len(paths),
+                        download_dir,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to transfer downloads before close: %s", exc
+                )
+
         # Disconnect Playwright from the browser
         if self._browser is not None:
             try:
@@ -810,7 +849,7 @@ async def _stop_cloud_browser_session(
                 f"{base_url}/cloud-browser/stop-cloud-browser-session",
                 headers=auth_headers,
                 json={"session_id": session_id},
-                timeout=aiohttp.ClientTimeout(total=timeout or 10),
+                timeout=aiohttp.ClientTimeout(total=timeout or 80),
             ) as resp:
                 if resp.ok:
                     response_data = await resp.json()

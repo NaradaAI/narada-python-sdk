@@ -10,7 +10,7 @@ async def main() -> None:
         # Open a cloud browser window and initialize the Narada UI agent.
         window = await narada.open_and_initialize_cloud_browser_window(
             session_name="my-cloud-browser-session",  # Optional: label the session
-            session_timeout=3600,  # Optional: session timeout in seconds
+            session_timeout=3600,  # Optional: timeout in seconds, up to 8 hours, default is 30 minutes
         )
 
         # Run a task in this browser window.
@@ -21,7 +21,9 @@ async def main() -> None:
             )
         )
 
+        # All downloads are placed in the cloud_downloads directory.
         print("Response:", response.model_dump_json(indent=2))
+
         
     # The cloud session is still running after exiting the context manager.
     # You can save the session ID for later reconnection or management.

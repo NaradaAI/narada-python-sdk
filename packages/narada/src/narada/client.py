@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import subprocess
@@ -17,7 +18,12 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada.cloud_downloads import CDPDownloadHandler
+from pathlib import Path
+
+from narada.cloud_downloads import (
+    CDPDownloadHandler,
+    make_default_on_download_complete_callback,
+)
 from narada_core.models import _SdkConfig
 from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
@@ -74,6 +80,7 @@ class Narada:
             api_key = api_key or os.environ["NARADA_API_KEY"]
             self._auth_headers = {"x-api-key": api_key}
         self._console = Console()
+        self._pending_download_futures: list[concurrent.futures.Future] = []
 
     async def __aenter__(self) -> Narada:
         await self._validate_sdk_config()
@@ -85,6 +92,16 @@ class Narada:
     async def __aexit__(self, *args: Any) -> None:
         if self._playwright_context_manager is None:
             return
+
+        # Wait for any in-flight download transfers (from default callback) so the
+        # browser is not closed until transfers finish. Await so the event loop can
+        # run the transfer coroutines (they were scheduled via run_coroutine_threadsafe).
+        for fut in self._pending_download_futures:
+            try:
+                await asyncio.wait_for(asyncio.wrap_future(fut), timeout=300)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        self._pending_download_futures.clear()
 
         await self._playwright_context_manager.__aexit__(*args)
         self._playwright_context_manager = None
@@ -234,6 +251,7 @@ class Narada:
         login_url: str,
         cdp_auth_headers: dict[str, str],
     ) -> CloudBrowserWindow:
+        print(f"\n\ninitialize_cloud_browser_window called")
         assert self._playwright is not None
 
         # Connect to browser via CDP with authentication headers
@@ -273,10 +291,20 @@ class Narada:
         )
         await self._fix_download_behavior(side_panel_page)
 
-        # Set up browser-level CDP download handler to capture downloads from any tab
+        # Set up browser-level CDP download handler to capture downloads from any tab.
+        # When no callback is provided, use a default that transfers each completed
+        # download to ./cloud_downloads/<session_id>/ so concurrent sessions do not overwrite.
+        on_download_complete = config.on_download_complete
+        if on_download_complete is None:
+            loop = asyncio.get_running_loop()
+            base_dir = Path.cwd() / "cloud_downloads"
+            on_download_complete = make_default_on_download_complete_callback(
+                browser, loop, base_dir, self._pending_download_futures
+            )
+
         download_handler = CDPDownloadHandler(
             session_id=session_id,
-            on_download_complete=config.on_download_complete,
+            on_download_complete=on_download_complete,
         )
         await download_handler.setup(browser)
 
