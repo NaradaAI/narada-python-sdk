@@ -1,14 +1,14 @@
 
 [project]
 name = "narada-pyodide"
-version = "0.0.37"
+version = "0.0.38"
 description = "Pyodide-compatible Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
-    "narada-core==0.0.12",
+    "narada-core==0.0.13",
     # Must be a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
     "packaging==24.2",
 ]

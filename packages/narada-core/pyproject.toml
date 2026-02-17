@@ -1,6 +1,6 @@
 [project]
 name = "narada-core"
-version = "0.0.12"
+version = "0.0.13"
 description = "Code shared by the `narada` and `narada-pyodide` packages."
 license = "Apache-2.0"
 readme = "README.md"
