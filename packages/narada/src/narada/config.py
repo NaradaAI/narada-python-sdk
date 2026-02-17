@@ -1,6 +1,7 @@
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 
 def _default_executable_path() -> str:
@@ -75,6 +76,7 @@ class BrowserConfig:
     extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"
     interactive: bool = True
     proxy: ProxyConfig | None = None
+    on_download_complete: Callable[[str, str, str], None] | None = None
 
     @property
     def cdp_url(self) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import subprocess
@@ -16,6 +17,12 @@ from narada_core.errors import (
     NaradaInitializationError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
+)
+from pathlib import Path
+
+from narada.cloud_downloads import (
+    CDPDownloadHandler,
+    make_default_on_download_complete_callback,
 )
 from narada_core.models import _SdkConfig
 from packaging.version import Version
@@ -73,6 +80,7 @@ class Narada:
             api_key = api_key or os.environ["NARADA_API_KEY"]
             self._auth_headers = {"x-api-key": api_key}
         self._console = Console()
+        self._pending_download_futures: list[concurrent.futures.Future] = []
 
     async def __aenter__(self) -> Narada:
         await self._validate_sdk_config()
@@ -84,6 +92,16 @@ class Narada:
     async def __aexit__(self, *args: Any) -> None:
         if self._playwright_context_manager is None:
             return
+
+        # Wait for any in-flight download transfers (from default callback) so the
+        # browser is not closed until transfers finish. Await so the event loop can
+        # run the transfer coroutines (they were scheduled via run_coroutine_threadsafe).
+        for fut in self._pending_download_futures:
+            try:
+                await asyncio.wait_for(asyncio.wrap_future(fut), timeout=300)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        self._pending_download_futures.clear()
 
         await self._playwright_context_manager.__aexit__(*args)
         self._playwright_context_manager = None
@@ -261,18 +279,39 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
-        # TODO: consider this
+        # TODO: This is a hack 
+        await browser.close()
+        browser = await self._playwright.chromium.connect_over_cdp(cdp_websocket_url, headers=cdp_auth_headers)
+        context = browser.contexts[0]
         # Get side panel page
-        # side_panel_url = create_side_panel_url(config, browser_window_id)
-        # side_panel_page = next(
-        #     (p for p in context.pages if p.url == side_panel_url), None
-        # )
-        # await self._fix_download_behavior(side_panel_page)
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        side_panel_page = next(
+            (p for p in context.pages if p.url == side_panel_url), None
+        )
+        await self._fix_download_behavior(side_panel_page)
+
+        # Set up browser-level CDP download handler to capture downloads from any tab.
+        # When no callback is provided, use a default that transfers files to local disk.
+        on_download_complete = config.on_download_complete
+        if on_download_complete is None:
+            loop = asyncio.get_running_loop()
+            base_dir = Path.cwd() / "cloud_downloads"
+            on_download_complete = make_default_on_download_complete_callback(
+                browser, loop, base_dir, self._pending_download_futures
+            )
+
+        download_handler = CDPDownloadHandler(
+            session_id=session_id,
+            on_download_complete=on_download_complete,
+        )
+        await download_handler.setup(browser)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
             session_id=session_id,
             auth_headers=self._auth_headers,
+            browser=browser,
+            download_handler=download_handler,
         )
 
         if config.interactive:

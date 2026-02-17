@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -5,7 +7,7 @@ import time
 from abc import ABC
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any, TypeVar, overload, override
+from typing import IO, TYPE_CHECKING, Any, TypeVar, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -55,6 +57,13 @@ from playwright.async_api import (
 from pydantic import BaseModel
 
 from narada.config import BrowserConfig
+from playwright.async_api import Browser
+from narada.cloud_downloads import (
+    CDPDownloadHandler,
+    DownloadInfo,
+    local_path_for_session_download,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -657,6 +666,8 @@ class CloudBrowserWindow(BaseBrowserWindow):
         session_id: str,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        browser: Browser | None = None,
+        download_handler: CDPDownloadHandler | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         if auth_headers is None:
@@ -668,18 +679,125 @@ class CloudBrowserWindow(BaseBrowserWindow):
             browser_window_id=browser_window_id,
         )
         self._session_id = session_id
+        self._browser = browser
+        self._download_handler = download_handler
 
     @property
     def cloud_browser_session_id(self) -> str:
         return self._session_id
 
+    async def wait_for_download(
+        self, *, timeout: float | None = None
+    ) -> DownloadInfo | None:
+        """Wait for the next download to complete on the remote browser."""
+        if self._download_handler is None:
+            logger.warning("Download handler not available on this window")
+            return None
+        return await self._download_handler.wait_for_download(timeout=timeout)
+
+    async def transfer_download(
+        self,
+        download: DownloadInfo,
+        local_path: str | Path,
+    ) -> Path | None:
+        """Transfer a single completed download from the remote browser to local disk.
+        Uses CDP Fetch + IO.read to stream the file in chunks over the WebSocket.
+        """
+        if self._browser is None:
+            logger.warning("Browser reference not available -- cannot transfer file")
+            return None
+
+        from narada.cloud_downloads import download_remote_file_to_local
+
+        return await download_remote_file_to_local(
+            self._browser, download.remote_path, local_path
+        )
+
+    async def transfer_all_downloads(
+        self,
+        local_dir: str | Path = "",
+        *,
+        timeout: float | None = None,
+    ) -> list[Path]:
+        """Wait for all tracked downloads, then transfer each to *local_dir*.
+
+        This is a convenience wrapper that calls :meth:`wait_for_all` on the
+        download handler and then :meth:`transfer_download` for each result.
+        Files are saved under ``local_dir / session_id / filename`` so concurrent
+        sessions do not overwrite.
+        """
+        if self._download_handler is None or self._browser is None:
+            logger.warning(
+                "Download handler / browser not available -- cannot transfer files"
+            )
+            return []
+
+        local_dir = Path(local_dir)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        completed = await self._download_handler.wait_for_all(timeout=timeout)
+
+        transferred: list[Path] = []
+        for dl in completed:
+            dest = local_path_for_session_download(local_dir, self._session_id, dl.filename)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            result = await self.transfer_download(dl, dest)
+            if result is not None:
+                transferred.append(result)
+            else:
+                logger.warning("Transfer failed for %s", dl.filename)
+
+        return transferred
+
+
     @override
-    async def close(self, *, timeout: int | None = None) -> None:
+    async def close(
+        self,
+        *,
+        timeout: int | None = None,
+        local_download_dir: str | Path | None = None,
+        download_wait_timeout: float = 60.0,
+    ) -> None:
         """Stops the cloud browser session.
 
         Unlike local browser windows where close() closes a single window, this stops the
         entire cloud session since the serverless container manages the browser lifecycle.
+
+        Before disconnecting, any downloads captured by the CDP handler are transferred
+        to *local_download_dir* (default: ``./cloud_downloads``), so file downloads
+        from the session are available locally when using the SDK without a backend
+        callback.
         """
+        if self._browser is not None and self._download_handler is not None:
+            download_dir = (
+                Path(local_download_dir)
+                if local_download_dir is not None
+                else Path.cwd() / "cloud_downloads"
+            )
+            try:
+                paths = await self.transfer_all_downloads(
+                    download_dir, timeout=download_wait_timeout
+                )
+                if paths:
+                    logger.info(
+                        "Transferred %d download(s) to %s before closing",
+                        len(paths),
+                        download_dir,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to transfer downloads before close: %s", exc
+                )
+
+        # Disconnect Playwright from the browser
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+            self._download_handler = None
+
         await _stop_cloud_browser_session(
             base_url=self._base_url,
             auth_headers=self._auth_headers,
@@ -709,7 +827,7 @@ async def _stop_cloud_browser_session(
                 f"{base_url}/cloud-browser/stop-cloud-browser-session",
                 headers=auth_headers,
                 json={"session_id": session_id},
-                timeout=aiohttp.ClientTimeout(total=timeout or 10),
+                timeout=aiohttp.ClientTimeout(total=timeout or 80),
             ) as resp:
                 if resp.ok:
                     response_data = await resp.json()
