@@ -110,7 +110,6 @@ class CDPDownloadHandler:
 
     async def setup(self, browser: Browser) -> None:
         """Attach to the browser and start listening for download events."""
-        print(f"\n\nCDPDownloadHandler.setup called")
         self._browser = browser
         self._cdp_session = await browser.new_browser_cdp_session()
 
@@ -132,7 +131,6 @@ class CDPDownloadHandler:
         )
 
     async def _on_download_begin(self, event: dict[str, Any]) -> None:
-        print(f"\n\nCDPDownloadHandler._on_download_begin called")
         guid: str = event.get("guid", "")
         filename: str = event.get("suggestedFilename", "download")
         self._downloads[guid] = {
@@ -146,7 +144,6 @@ class CDPDownloadHandler:
         guid: str = event.get("guid", "")
         state: str = event.get("state", "")
         received: int = event.get("receivedBytes", 0)
-        print(f"\n\nCDPDownloadHandler._on_download_progress called: {guid} {state} {received}")
 
         if guid in self._downloads:
             self._downloads[guid]["state"] = state
@@ -157,7 +154,6 @@ class CDPDownloadHandler:
                 self._done_events[guid].set()
 
         if state == _STATE_COMPLETED:
-            print(f"\n\nCDPDownloadHandler._on_download_progress completed: {guid}. _on_download_complete={self._on_download_complete}")
             filename = self._downloads.get(guid, {}).get("filename", guid)
             if self._on_download_complete and self._session_id:
                 loop = asyncio.get_running_loop()
@@ -173,7 +169,6 @@ class CDPDownloadHandler:
     async def wait_for_download(
         self, *, timeout: float | None = None
     ) -> DownloadInfo | None:
-        print(f"\n\nCDPDownloadHandler.wait_for_download called")
         """Wait for the next download to complete and return its info.
 
         If no download events have been received yet, this will block until one
@@ -237,7 +232,6 @@ class CDPDownloadHandler:
         Returns a list of :class:`DownloadInfo` for every download that completed
         successfully.  Downloads that were canceled or interrupted are skipped.
         """
-        print(f"\n\nCDPDownloadHandler.wait_for_all called")
         if not self._downloads:
             return []
 
@@ -290,7 +284,6 @@ async def download_remote_file_to_local(
     Returns:
         The resolved local :class:`~pathlib.Path`, or ``None`` on failure.
     """
-    print(f"\n\ndownload_remote_file_to_local called")
     local_path = Path(local_path)
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -354,7 +347,7 @@ async def download_remote_file_to_local(
         # Stream the file contents to local disk in chunks.
         stream_start = time.perf_counter()
         start_ts = time.strftime("%H:%M:%S", time.localtime())
-        logger.warning(
+        logger.info(
             "Streaming file from remote to local: %s -> %s (started at %s)",
             remote_file_path,
             local_path,
@@ -383,7 +376,7 @@ async def download_remote_file_to_local(
 
         await cdp.send("IO.close", {"handle": stream_handle})
         stream_elapsed = time.perf_counter() - stream_start
-        logger.warning(
+        logger.info(
             "Transfer complete: %s (%s bytes) in %.2fs",
             local_path,
             f"{downloaded:,}",

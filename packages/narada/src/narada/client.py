@@ -251,7 +251,6 @@ class Narada:
         login_url: str,
         cdp_auth_headers: dict[str, str],
     ) -> CloudBrowserWindow:
-        print(f"\n\ninitialize_cloud_browser_window called")
         assert self._playwright is not None
 
         # Connect to browser via CDP with authentication headers

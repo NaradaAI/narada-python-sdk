@@ -694,7 +694,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
         Returns :class:`~narada.cloud_downloads.DownloadInfo` on success, or
         ``None`` on timeout / cancellation.
         """
-        print("[cloud_browser_window] wait_for_download called")
         if self._download_handler is None:
             logger.warning("Download handler not available on this window")
             return None
@@ -747,7 +746,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
         Returns:
             List of local paths for successfully transferred files.
         """
-        print("[cloud_browser_window] transfer_all_downloads called")
         if self._download_handler is None or self._browser is None:
             logger.warning(
                 "Download handler / browser not available -- cannot transfer files"
