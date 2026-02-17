@@ -26,6 +26,11 @@ logger.setLevel(logging.INFO)
 DEFAULT_REMOTE_DOWNLOAD_DIR = "/tmp/remote_downloads"
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
 
+# When wait_for_all is called with empty _downloads, poll this long for downloads
+# to appear (avoids race where post-action transfer misses a download that
+# starts moments later).
+_WAIT_FOR_ALL_EMPTY_GRACE_SECONDS = 5.0
+
 # CDP Browser.downloadProgress state values
 _STATE_IN_PROGRESS = "inProgress"
 _STATE_COMPLETED = "completed"
@@ -172,31 +177,55 @@ class CDPDownloadHandler:
         """Wait for the next download to complete and return its info.
 
         If no download events have been received yet, this will block until one
-        arrives and finishes (or the *timeout* expires).
+        arrives and finishes (or the *timeout* expires). If a download already
+        completed before this call (e.g. post-action usage), returns that
+        completed download immediately.
 
         Returns ``None`` on timeout or if the download was canceled/interrupted.
         """
-        # Find first download that hasn't finished yet, or the most recent completed one
-        # that hasn't been consumed.
+        # Prefer an in-progress download so we wait for it; otherwise use an
+        # already-completed one (post-action usage).
         target_guid: str | None = None
+        last_completed_guid: str | None = None
         for guid, info in self._downloads.items():
             if info["state"] == _STATE_IN_PROGRESS:
                 target_guid = guid
                 break
+            if info["state"] == _STATE_COMPLETED:
+                last_completed_guid = guid
+
+        if target_guid is None and last_completed_guid is not None:
+            # At least one download already completed; return the most recent.
+            info = self._downloads[last_completed_guid]
+            return DownloadInfo(
+                guid=last_completed_guid,
+                filename=info["filename"],
+                remote_path=f"{self._remote_download_dir}/{last_completed_guid}",
+                size=info["received"],
+            )
 
         if target_guid is None:
-            # All existing downloads are already done; wait for a new one by polling.
-            # We do a simple poll loop so we can detect newly arriving downloads.
+            # No in-progress and no completed; wait for a new one by polling.
             loop = asyncio.get_running_loop()
             deadline = (loop.time() + timeout) if timeout is not None else None
             while True:
                 for guid, info in self._downloads.items():
-                    if guid not in self._done_events or not self._done_events[guid].is_set():
-                        if info["state"] == _STATE_IN_PROGRESS:
-                            target_guid = guid
-                            break
+                    if info["state"] == _STATE_IN_PROGRESS:
+                        target_guid = guid
+                        break
+                    if info["state"] == _STATE_COMPLETED:
+                        last_completed_guid = guid
                 if target_guid is not None:
                     break
+                if last_completed_guid is not None:
+                    # New completed download appeared while polling
+                    info = self._downloads[last_completed_guid]
+                    return DownloadInfo(
+                        guid=last_completed_guid,
+                        filename=info["filename"],
+                        remote_path=f"{self._remote_download_dir}/{last_completed_guid}",
+                        size=info["received"],
+                    )
                 if deadline is not None and loop.time() >= deadline:
                     return None
                 await asyncio.sleep(0.5)
@@ -231,9 +260,30 @@ class CDPDownloadHandler:
 
         Returns a list of :class:`DownloadInfo` for every download that completed
         successfully.  Downloads that were canceled or interrupted are skipped.
+
+        When no downloads are tracked yet (e.g. post-action call before
+        Browser.downloadWillBegin has fired), waits a short time for downloads
+        to appear so in-flight download events are not missed.
         """
-        if not self._downloads:
-            return []
+        loop = asyncio.get_running_loop()
+        deadline: float | None = None
+        if timeout is not None:
+            deadline = loop.time() + timeout
+        empty_wait_until: float = (
+            loop.time() + _WAIT_FOR_ALL_EMPTY_GRACE_SECONDS
+            if timeout is None
+            else deadline
+        )
+
+        # Avoid race: if _downloads is empty, wait for at least one download to
+        # appear (post-action usage where download starts moments later).
+        while not self._downloads:
+            if loop.time() >= empty_wait_until:
+                return []
+            await asyncio.sleep(0.5)
+
+        if deadline is not None:
+            timeout = max(0, deadline - loop.time())
 
         # Gather all done-events with an optional timeout.
         waiter = asyncio.gather(*(ev.wait() for ev in self._done_events.values()))

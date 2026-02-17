@@ -291,8 +291,7 @@ class Narada:
         await self._fix_download_behavior(side_panel_page)
 
         # Set up browser-level CDP download handler to capture downloads from any tab.
-        # When no callback is provided, use a default that transfers each completed
-        # download to ./cloud_downloads/<session_id>/ so concurrent sessions do not overwrite.
+        # When no callback is provided, use a default that transfers files to local disk.
         on_download_complete = config.on_download_complete
         if on_download_complete is None:
             loop = asyncio.get_running_loop()

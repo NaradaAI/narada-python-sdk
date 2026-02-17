@@ -689,11 +689,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
     async def wait_for_download(
         self, *, timeout: float | None = None
     ) -> DownloadInfo | None:
-        """Wait for the next download to complete on the remote browser.
-
-        Returns :class:`~narada.cloud_downloads.DownloadInfo` on success, or
-        ``None`` on timeout / cancellation.
-        """
+        """Wait for the next download to complete on the remote browser."""
         if self._download_handler is None:
             logger.warning("Download handler not available on this window")
             return None
@@ -705,16 +701,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
         local_path: str | Path,
     ) -> Path | None:
         """Transfer a single completed download from the remote browser to local disk.
-
         Uses CDP Fetch + IO.read to stream the file in chunks over the WebSocket.
-
-        Args:
-            download: A :class:`~narada.cloud_downloads.DownloadInfo` obtained from
-                :meth:`wait_for_download`.
-            local_path: Where to save the file locally.
-
-        Returns:
-            The resolved local path, or ``None`` on failure.
         """
         if self._browser is None:
             logger.warning("Browser reference not available -- cannot transfer file")
@@ -738,13 +725,6 @@ class CloudBrowserWindow(BaseBrowserWindow):
         download handler and then :meth:`transfer_download` for each result.
         Files are saved under ``local_dir / session_id / filename`` so concurrent
         sessions do not overwrite.
-
-        Args:
-            local_dir: Base directory to save files into. Created automatically.
-            timeout: Maximum seconds to wait for downloads to finish.
-
-        Returns:
-            List of local paths for successfully transferred files.
         """
         if self._download_handler is None or self._browser is None:
             logger.warning(
@@ -812,7 +792,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
         # Disconnect Playwright from the browser
         if self._browser is not None:
             try:
-                self._browser.close()
+                await self._browser.close()
             except Exception:
                 pass
             self._browser = None
