@@ -302,7 +302,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
 
 class Usage(TypedDict):
     actions: int
-    credits: int
+    credits: float
 
 
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):

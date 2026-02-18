@@ -22,7 +22,7 @@ _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | Non
 
 class AgentUsage(BaseModel):
     actions: int
-    credits: int
+    credits: float
 
 
 class OperatorActionTraceItem(BaseModel):
