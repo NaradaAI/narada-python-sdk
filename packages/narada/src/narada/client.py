@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -176,6 +177,23 @@ class Narada:
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
+                    if resp.status == 403:
+                        try:
+                            body = json.loads(error_text) if error_text else {}
+                            detail = (
+                                body.get("detail", body)
+                                if isinstance(body, dict)
+                                else {}
+                            )
+                            err = RuntimeError(
+                                f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                                f"Endpoint URL: {endpoint_url}"
+                            )
+                            err.status_code = resp.status  # type: ignore[attr-defined]
+                            err.detail = detail  # type: ignore[attr-defined]
+                            raise err
+                        except (ValueError, TypeError):
+                            pass
                     raise RuntimeError(
                         f"Failed to create cloud browser session: {resp.status} {error_text}\n"
                         f"Endpoint URL: {endpoint_url}"
