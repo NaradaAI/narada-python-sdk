@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from abc import ABC
+from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import IO, Any, TypeVar, overload, override
@@ -67,6 +68,15 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 class _PresignedPost(BaseModel):
     url: str
     fields: dict[str, Any]
+
+
+@dataclass
+class SessionDownloadItem:
+    """A file downloaded during a cloud browser session (path, size, presigned GET URL)."""
+
+    path: str
+    size: int
+    download_url: str
 
 
 class BaseBrowserWindow(ABC):
@@ -639,6 +649,18 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             timeout=timeout,
         )
 
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this cloud browser session (path, size, presigned GET URL per file)."""
+        if self._cloud_browser_session_id is None:
+            raise ValueError(
+                "Cloud browser session ID is required to get downloaded files"
+            )
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            session_id=self._cloud_browser_session_id,
+        )
+
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
 
@@ -687,6 +709,14 @@ class CloudBrowserWindow(BaseBrowserWindow):
             timeout=timeout,
         )
 
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this cloud browser session (path, size, presigned GET URL per file)."""
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            session_id=self._session_id,
+        )
+
     def __str__(self) -> str:
         return (
             "CloudBrowserWindow("
@@ -694,6 +724,28 @@ class CloudBrowserWindow(BaseBrowserWindow):
             f"browser_window_id={self.browser_window_id}"
             ")"
         )
+
+
+async def _get_cloud_browser_downloads(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_id: str,
+) -> list[SessionDownloadItem]:
+    """GET cloud-browser session downloads and return list of SessionDownloadItem."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"{base_url}/cloud-browser/sessions/{session_id}/downloads",
+            headers=auth_headers,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            if not resp.ok:
+                resp.raise_for_status()
+            data = await resp.json()
+    return [
+        SessionDownloadItem(path=item["path"], size=item["size"], download_url=item["download_url"])
+        for item in data
+    ]
 
 
 async def _stop_cloud_browser_session(

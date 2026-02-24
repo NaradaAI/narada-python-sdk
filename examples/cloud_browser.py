@@ -50,6 +50,10 @@ async def main() -> None:
         )
         await remote_window.close()  # This will stop the cloud session.
 
+    # Get files downloaded during the session
+    downloaded_files = await window.get_downloaded_files()
+    print(f"Downloaded files {downloaded_files}")
+
     ############################################################################
     # IMPORTANT: The cloud browser continues accruing costs until the session  #
     # is stopped or times out. To avoid unexpected costs, make sure to stop    #

@@ -261,13 +261,26 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
-        # TODO: consider this
-        # Get side panel page
-        # side_panel_url = create_side_panel_url(config, browser_window_id)
-        # side_panel_page = next(
-        #     (p for p in context.pages if p.url == side_panel_url), None
-        # )
-        # await self._fix_download_behavior(side_panel_page)
+        # Set download behavior so the extension can download files (e.g. when the agent
+        # downloads during the session). The side panel may appear shortly after init.
+        await browser.close()
+        browser = await self._playwright.chromium.connect_over_cdp(
+            cdp_websocket_url, headers=cdp_auth_headers
+        )
+        context = browser.contexts[0]
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        for _ in range(10):
+            side_panel_page = next(
+                (p for p in context.pages if p.url == side_panel_url), None
+            )
+            if side_panel_page is not None:
+                await self._fix_download_behavior(side_panel_page)
+                break
+            await asyncio.sleep(0.5)
+        else:
+            logging.debug(
+                "Side panel page not found for cloud browser; downloads may not work"
+            )
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
