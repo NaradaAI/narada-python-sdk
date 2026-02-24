@@ -743,7 +743,9 @@ async def _get_cloud_browser_downloads(
                 resp.raise_for_status()
             data = await resp.json()
     return [
-        SessionDownloadItem(path=item["path"], size=item["size"], download_url=item["download_url"])
+        SessionDownloadItem(
+            path=item["path"], size=item["size"], download_url=item["download_url"]
+        )
         for item in data
     ]
 
