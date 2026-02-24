@@ -72,9 +72,9 @@ class _PresignedPost(BaseModel):
 
 @dataclass
 class SessionDownloadItem:
-    """A file downloaded during a cloud browser session (path, size, presigned GET URL)."""
+    """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
 
-    path: str
+    file_name: str
     size: int
     download_url: str
 
@@ -650,7 +650,7 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         )
 
     async def get_downloaded_files(self) -> list[SessionDownloadItem]:
-        """Return files downloaded during this cloud browser session (path, size, presigned GET URL per file)."""
+        """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
         if self._cloud_browser_session_id is None:
             raise ValueError(
                 "Cloud browser session ID is required to get downloaded files"
@@ -710,7 +710,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
         )
 
     async def get_downloaded_files(self) -> list[SessionDownloadItem]:
-        """Return files downloaded during this cloud browser session (path, size, presigned GET URL per file)."""
+        """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
         return await _get_cloud_browser_downloads(
             base_url=self._base_url,
             auth_headers=self._auth_headers,
@@ -783,7 +783,7 @@ async def _get_cloud_browser_downloads(
         )
     return [
         SessionDownloadItem(
-            path=item["file_name"],
+            file_name=item["file_name"],
             size=item["size"],
             download_url=presigned_urls[i],
         )
