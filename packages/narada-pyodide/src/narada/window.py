@@ -387,7 +387,7 @@ class BaseBrowserWindow(ABC):
         selectors: AgenticSelectors,
         fallback_operator_query: str,
         # Larger default timeout because Operator can take a bit to run.
-        timeout: int | None = 60,
+        timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
