@@ -261,14 +261,6 @@ class Narada:
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
 
-        # TODO: consider this
-        # Get side panel page
-        # side_panel_url = create_side_panel_url(config, browser_window_id)
-        # side_panel_page = next(
-        #     (p for p in context.pages if p.url == side_panel_url), None
-        # )
-        # await self._fix_download_behavior(side_panel_page)
-
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
             session_id=session_id,
