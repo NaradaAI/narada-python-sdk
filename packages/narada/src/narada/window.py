@@ -761,8 +761,7 @@ async def _get_cloud_browser_downloads(
             headers=auth_headers,
             timeout=timeout,
         ) as resp:
-            if not resp.ok:
-                resp.raise_for_status()
+            resp.raise_for_status()
             data = await resp.json()
         files = data.get("downloaded_files") or []
         if not files:
