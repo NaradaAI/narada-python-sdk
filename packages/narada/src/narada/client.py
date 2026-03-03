@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any
 from uuid import uuid4
 
@@ -30,6 +32,7 @@ from playwright.async_api import (
 )
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
+from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
@@ -47,6 +50,28 @@ class _LaunchBrowserResult:
     browser_process_id: int
     browser_window_id: str
     side_panel_page: Page
+
+
+class ApiErrorPayload(BaseModel):
+    detail: Any | None = None
+
+    @classmethod
+    def from_error_text(cls, error_text: str | None) -> ApiErrorPayload:
+        if not error_text:
+            return cls()
+
+        try:
+            return cls.model_validate_json(error_text)
+        except ValidationError:
+            try:
+                body = json.loads(error_text)
+            except (ValueError, TypeError):
+                return cls()
+
+            if isinstance(body, dict):
+                return cls(detail=body.get("detail", body))
+
+            return cls()
 
 
 class Narada:
@@ -176,6 +201,15 @@ class Narada:
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
+                    if resp.status == HTTPStatus.FORBIDDEN:
+                        error = ApiErrorPayload.from_error_text(error_text)
+                        err = RuntimeError(
+                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                            f"Endpoint URL: {endpoint_url}"
+                        )
+                        err.status_code = resp.status  # type: ignore[attr-defined]
+                        err.detail = error.detail  # type: ignore[attr-defined]
+                        raise err
                     raise RuntimeError(
                         f"Failed to create cloud browser session: {resp.status} {error_text}\n"
                         f"Endpoint URL: {endpoint_url}"
