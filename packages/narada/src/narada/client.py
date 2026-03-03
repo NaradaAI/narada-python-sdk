@@ -56,7 +56,7 @@ class ApiErrorPayload(BaseModel):
     detail: Any | None = None
 
     @classmethod
-    def from_error_text(cls, error_text: str | None) -> "ApiErrorPayload":
+    def from_error_text(cls, error_text: str | None) -> ApiErrorPayload:
         if not error_text:
             return cls()
 
