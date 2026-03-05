@@ -140,7 +140,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -163,7 +163,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -185,7 +185,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -294,7 +294,7 @@ class BaseBrowserWindow(ABC):
         attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[None]: ...
 
@@ -310,7 +310,7 @@ class BaseBrowserWindow(ABC):
         attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -325,7 +325,7 @@ class BaseBrowserWindow(ABC):
         attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, str] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
