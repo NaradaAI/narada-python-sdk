@@ -17,7 +17,7 @@ async def main() -> None:
         response = await window.agent(
             prompt="Summarize the attached file.",
             agent=Agent.GENERALIST,
-            attachment=file,
+            attachments={"file": file},
         )
 
         print("Response:", response.model_dump_json(indent=2))
