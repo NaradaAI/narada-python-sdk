@@ -4,7 +4,17 @@ import os
 import time
 from abc import ABC
 from http import HTTPStatus
-from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Optional,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
@@ -78,6 +88,7 @@ if TYPE_CHECKING:
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+_AttachmentVariableInput: TypeAlias = dict[str, File]
 
 
 class BaseBrowserWindow(ABC):
@@ -133,6 +144,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
@@ -155,6 +167,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
@@ -176,6 +189,7 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
@@ -226,6 +240,8 @@ class BaseBrowserWindow(ABC):
             body["chatHistory"] = chat_history
         if additional_context is not None:
             body["additionalContext"] = additional_context
+        if attachments is not None and len(attachments) > 0:
+            body["attachmentVariables"] = attachments
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
         if mcp_servers is not None:
@@ -315,6 +331,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
@@ -330,6 +347,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
@@ -344,6 +362,7 @@ class BaseBrowserWindow(ABC):
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
+        attachments: _AttachmentVariableInput | None = None,
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
@@ -356,6 +375,7 @@ class BaseBrowserWindow(ABC):
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
+            attachments=attachments,
             time_zone=time_zone,
             mcp_servers=mcp_servers,
             variables=variables,
