@@ -209,6 +209,12 @@ class ObjectSetPropertiesTrace(BaseModel):
     description: str
 
 
+class ReturnTrace(BaseModel):
+    step_type: Literal["return"]
+    url: str
+    description: str
+
+
 ApaStepTrace = Annotated[
     GoToUrlTrace
     | GetUrlTrace
@@ -237,7 +243,8 @@ ApaStepTrace = Annotated[
     | WaitTrace
     | DataTableInsertRowTrace
     | DataTableUpdateCellValueTrace
-    | ObjectSetPropertiesTrace,
+    | ObjectSetPropertiesTrace
+    | ReturnTrace,
     Field(discriminator="step_type"),
 ]
 
@@ -259,11 +266,28 @@ def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
         return _ApaActionTraceAdapter.validate_python(trace_data)
 
 
+class TextOutput(BaseModel):
+    type: Literal["text"]
+    value: str
+
+
+class StructuredOutput(BaseModel):
+    type: Literal["structured"]
+    value: dict[str, Any]
+
+
+AgentOutput = Annotated[
+    TextOutput | StructuredOutput,
+    Field(discriminator="type"),
+]
+
+
 class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
     structured_output: _MaybeStructuredOutput | None
+    output: AgentOutput | None = None
     usage: AgentUsage
     action_trace: ActionTrace | None = None
 

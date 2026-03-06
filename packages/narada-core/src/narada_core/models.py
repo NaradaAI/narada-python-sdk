@@ -176,6 +176,11 @@ class ReadCsvTrace(TypedDict):
     description: str
 
 
+class ReturnTrace(TypedDict):
+    step_type: Literal["return"]
+    description: str
+
+
 class StartTrace(TypedDict):
     step_type: Literal["start"]
     url: str
@@ -280,6 +285,7 @@ ApaStepTrace = (
     | GetSimplifiedHtmlTrace
     | GetScreenshotTrace
     | RunCustomAgentTrace
+    | ReturnTrace
     | IfTrace
     | SetVariableTrace
     | WaitTrace

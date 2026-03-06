@@ -260,15 +260,16 @@ class BaseBrowserWindow(ABC):
                     if response["status"] != "pending":
                         response_content = response["response"]
                         if response_content is not None:
-                            # Populate the `structuredOutput` field. This is a client-side field
-                            # that's not directly returned by the API.
-                            if output_schema is None:
-                                response_content["structuredOutput"] = None
-                            else:
-                                structured_output = output_schema.model_validate_json(
-                                    response_content["text"]
+                            output_data = response_content.get("output")
+                            if (
+                                output_schema is not None
+                                and output_data.get("type") == "structured"
+                            ):
+                                response_content["structuredOutput"] = (
+                                    output_schema.model_validate(output_data["value"])
                                 )
-                                response_content["structuredOutput"] = structured_output
+                            else:
+                                response_content["structuredOutput"] = None
 
                         return response
 
@@ -353,6 +354,7 @@ class BaseBrowserWindow(ABC):
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
+            output=response_content["output"],
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
