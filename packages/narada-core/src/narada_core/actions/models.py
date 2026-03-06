@@ -271,18 +271,13 @@ class TextOutput(BaseModel):
     value: str
 
 
-class CustomAgentOutput(BaseModel):
-    type: Literal["custom-agent-result"]
+class StructuredOutput(BaseModel):
+    type: Literal["structured"]
     value: dict[str, Any]
 
 
-class StructuredOutput(BaseModel, Generic[_MaybeStructuredOutput]):
-    type: Literal["structured-output"]
-    value: _MaybeStructuredOutput
-
-
 AgentOutput = Annotated[
-    TextOutput | CustomAgentOutput | StructuredOutput[Any],
+    TextOutput | StructuredOutput,
     Field(discriminator="type"),
 ]
 

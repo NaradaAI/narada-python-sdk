@@ -263,7 +263,7 @@ class BaseBrowserWindow(ABC):
                             output_data = response_content.get("output")
                             if (
                                 output_schema is not None
-                                and output_data.get("type") == "structured-output"
+                                and output_data.get("type") == "structured"
                             ):
                                 response_content["structuredOutput"] = (
                                     output_schema.model_validate(output_data["value"])
