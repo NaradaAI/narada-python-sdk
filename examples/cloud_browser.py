@@ -13,15 +13,15 @@ async def main() -> None:
             session_timeout=3600,  # Optional: session timeout in seconds
         )
 
-        # Run a task in this browser window.
-        response = await window.agent(
-            prompt=(
-                'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
-                "page, then tell me who the authors are."
-            )
+    # Run a task in this browser window.
+    response = await window.agent(
+        prompt=(
+            'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
+            "page, then tell me who the authors are."
         )
+    )
 
-        print("Response:", response.model_dump_json(indent=2))
+    print("Response:", response.model_dump_json(indent=2))
 
     # The cloud session is still running after exiting the context manager.
     # You can save the session ID for later reconnection or management.
@@ -49,6 +49,10 @@ async def main() -> None:
             browser_window_id=browser_window_id,
         )
         await remote_window.close()  # This will stop the cloud session.
+
+    # Get files downloaded during the session
+    downloaded_files = await window.get_downloaded_files()
+    print(f"Downloaded files {downloaded_files}")
 
     ############################################################################
     # IMPORTANT: The cloud browser continues accruing costs until the session  #
