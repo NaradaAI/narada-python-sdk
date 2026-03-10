@@ -257,7 +257,8 @@ class BaseBrowserWindow(ABC):
             if not fetch_response.ok:
                 status = fetch_response.status
                 text = await fetch_response.text()
-                raise NaradaError(f"Failed to dispatch request: {status} {text}")
+                raise NaradaError(
+                    f"Failed to dispatch request: {status} {text}")
 
             request_id = (await fetch_response.json())["requestId"]
 
@@ -278,7 +279,8 @@ class BaseBrowserWindow(ABC):
                 if not fetch_response.ok:
                     status = fetch_response.status
                     text = await fetch_response.text()
-                    raise NaradaError(f"Failed to poll for response: {status} {text}")
+                    raise NaradaError(
+                        f"Failed to poll for response: {status} {text}")
 
                 response = await fetch_response.json()
                 response["requestId"] = request_id
@@ -294,7 +296,8 @@ class BaseBrowserWindow(ABC):
                             and output_data.get("type") == "structured"
                         ):
                             response_content["structuredOutput"] = (
-                                output_schema.model_validate(output_data["value"])
+                                output_schema.model_validate(
+                                    output_data["content"])
                             )
                         else:
                             response_content["structuredOutput"] = None
@@ -584,7 +587,8 @@ class BaseBrowserWindow(ABC):
         elif not fetch_response.ok:
             status = fetch_response.status
             text = await fetch_response.text()
-            raise NaradaError(f"Failed to run extension action: {status} {text}")
+            raise NaradaError(
+                f"Failed to run extension action: {status} {text}")
 
         resp_json = await fetch_response.json()
 
@@ -607,7 +611,8 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
         super().__init__(
             api_key=os.environ.get("NARADA_API_KEY"),
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=os.getenv("NARADA_API_BASE_URL",
+                               "https://api.narada.ai/fast/v2"),
             user_id=os.environ.get("NARADA_USER_ID"),
             env=env,
             browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
@@ -621,7 +626,8 @@ class RemoteBrowserWindow(BaseBrowserWindow):
     def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            base_url=os.getenv("NARADA_API_BASE_URL",
+                               "https://api.narada.ai/fast/v2"),
             user_id=None,
             env=None,
             browser_window_id=browser_window_id,
