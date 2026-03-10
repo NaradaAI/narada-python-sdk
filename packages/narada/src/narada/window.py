@@ -266,7 +266,7 @@ class BaseBrowserWindow(ABC):
                                 and output_data.get("type") == "structured"
                             ):
                                 response_content["structuredOutput"] = (
-                                    output_schema.model_validate(output_data["value"])
+                                    output_schema.model_validate(output_data["content"])
                                 )
                             else:
                                 response_content["structuredOutput"] = None
@@ -354,7 +354,7 @@ class BaseBrowserWindow(ABC):
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
-            output=response_content["output"],
+            output=response_content.get("output"),
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
