@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
 
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
+_StructuredOutputT = TypeVar("_StructuredOutputT")
 
 
 class AgentUsage(BaseModel):
@@ -209,6 +209,11 @@ class ObjectSetPropertiesTrace(BaseModel):
     description: str
 
 
+class OutputTrace(BaseModel):
+    step_type: Literal["output"]
+    description: str
+
+
 ApaStepTrace = Annotated[
     GoToUrlTrace
     | GetUrlTrace
@@ -237,7 +242,8 @@ ApaStepTrace = Annotated[
     | WaitTrace
     | DataTableInsertRowTrace
     | DataTableUpdateCellValueTrace
-    | ObjectSetPropertiesTrace,
+    | ObjectSetPropertiesTrace
+    | OutputTrace,
     Field(discriminator="step_type"),
 ]
 
@@ -259,11 +265,25 @@ def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
         return _ApaActionTraceAdapter.validate_python(trace_data)
 
 
-class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
+class TextOutput(BaseModel):
+    type: Literal["text"]
+    content: str
+
+
+class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
+    type: Literal["structured"]
+    content: _StructuredOutputT
+
+
+class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
-    structured_output: _MaybeStructuredOutput | None
+    structured_output: _StructuredOutputT | None
+    output: Annotated[
+        TextOutput | StructuredOutput[_StructuredOutputT],
+        Field(discriminator="type"),
+    ]
     usage: AgentUsage
     action_trace: ActionTrace | None = None
 
