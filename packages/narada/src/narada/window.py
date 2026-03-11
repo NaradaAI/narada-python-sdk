@@ -263,6 +263,7 @@ class BaseBrowserWindow(ABC):
                             output_data = response_content.get("output")
                             if (
                                 output_schema is not None
+                                and output_data is not None
                                 and output_data.get("type") == "structured"
                             ):
                                 response_content["structuredOutput"] = (
@@ -295,7 +296,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         variables: dict[str, str] | None = None,
         timeout: int = 1000,
-    ) -> AgentResponse[None]: ...
+    ) -> AgentResponse[dict[str, Any]]: ...
 
     @overload
     async def agent(
@@ -354,7 +355,7 @@ class BaseBrowserWindow(ABC):
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
-            output=response_content.get("output"),
+            output=response_content["output"],
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,

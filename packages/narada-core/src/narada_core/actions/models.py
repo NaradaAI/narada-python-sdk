@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
 
-_MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | None)
+_StructuredOutputT = TypeVar("_StructuredOutputT")
 
 
 class AgentUsage(BaseModel):
@@ -270,23 +270,20 @@ class TextOutput(BaseModel):
     content: str
 
 
-class StructuredOutput(BaseModel):
+class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
     type: Literal["structured"]
-    content: dict[str, Any]
+    content: _StructuredOutputT
 
 
-AgentOutput = Annotated[
-    TextOutput | StructuredOutput,
-    Field(discriminator="type"),
-]
-
-
-class AgentResponse(BaseModel, Generic[_MaybeStructuredOutput]):
+class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
-    structured_output: _MaybeStructuredOutput | None
-    output: AgentOutput | None = None
+    structured_output: _StructuredOutputT | None
+    output: Annotated[
+        TextOutput | StructuredOutput[_StructuredOutputT],
+        Field(discriminator="type"),
+    ]
     usage: AgentUsage
     action_trace: ActionTrace | None = None
 
