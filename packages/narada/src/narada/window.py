@@ -260,6 +260,8 @@ class BaseBrowserWindow(ABC):
                     if response["status"] != "pending":
                         response_content = response["response"]
                         if response_content is not None:
+                            # Populate the `structuredOutput` field. This is a client-side field
+                            # that's not directly returned by the API.
                             output_data = response_content.get("output")
                             if (
                                 output_schema is not None
