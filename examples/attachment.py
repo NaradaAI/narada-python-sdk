@@ -16,7 +16,7 @@ async def main() -> None:
         # Ask the agent to use the attachment.
         response = await window.agent(
             prompt="Summarize the attached file.",
-            agent=Agent.GENERALIST,
+            agent=Agent.PRODUCTIVITY,
             attachment=file,
         )
 

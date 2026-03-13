@@ -23,7 +23,7 @@ async def main() -> None:
 
         resp = await window.agent(
             prompt="What are the top 2 AI papers based on the current page?",
-            agent=Agent.GENERALIST,
+            agent=Agent.PRODUCTIVITY,
             output_schema=Papers,
         )
 

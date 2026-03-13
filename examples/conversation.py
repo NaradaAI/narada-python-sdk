@@ -11,7 +11,7 @@ async def main() -> None:
 
         resp = await window.agent(
             prompt="Pick a lucky number for me between 1 and 100",
-            agent=Agent.GENERALIST,
+            agent=Agent.PRODUCTIVITY,
             # By default, the chat history is cleared when an agent is invoked so that the agent can
             # start fresh.
             clear_chat=True,
@@ -20,7 +20,7 @@ async def main() -> None:
 
         resp = await window.agent(
             prompt="What did you pick again?",
-            agent=Agent.GENERALIST,
+            agent=Agent.PRODUCTIVITY,
             # By not clearing the chat history, we can continue the conversation.
             clear_chat=False,
         )
@@ -28,7 +28,7 @@ async def main() -> None:
 
         resp = await window.agent(
             prompt="What's double that number?",
-            agent=Agent.GENERALIST,
+            agent=Agent.PRODUCTIVITY,
             # By not clearing the chat history, we can continue the conversation.
             clear_chat=False,
         )
