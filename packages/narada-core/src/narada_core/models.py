@@ -7,13 +7,13 @@ from pydantic import BaseModel, Field
 
 
 class Agent(Enum):
-    GENERALIST = 1
+    PRODUCTIVITY = 1
     OPERATOR = 2
     CORE_AGENT = 3
 
     def prompt_prefix(self) -> str:
         match self:
-            case Agent.GENERALIST:
+            case Agent.PRODUCTIVITY:
                 return ""
             case Agent.OPERATOR:
                 return "/Operator "
@@ -99,7 +99,7 @@ class PrintTrace(TypedDict):
 class AgentTrace(TypedDict):
     step_type: Literal["agent"]
     url: str
-    agent_type: str  # e.g., 'operator', 'generalist', 'coreAgent', etc.
+    agent_type: str  # e.g., 'operator', 'productivity', 'coreAgent', etc.
     action_trace: ActionTrace
     text: str  # For non-operator agents
 
