@@ -71,6 +71,11 @@ This would then result in the following trajectory:
 
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
+## Migration note
+
+- `variables` has been renamed to `secret_variables`.
+- Use `input_variables` to pass structured values (objects/arrays) into custom APA workflows.
+
 ## Features
 
 - **Natural Language Control**: Send instructions in plain English to control browser actions

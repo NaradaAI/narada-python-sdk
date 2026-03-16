@@ -16,9 +16,10 @@ async def main() -> None:
             prompt="Search for ${paper_name} on Google and open the first arXiv paper on the results page, then open the PDF. Then download the PDF of the paper.",
             # Optionally generate a GIF of the agent's actions.
             generate_gif=True,
-            # Put sensitive information that you don't want the LLM to see in variables. These will
+            # Put sensitive information that you don't want the LLM to see in secret_variables.
+            # These will
             # be substituted at action time after the LLM has generated its output.
-            variables={"paper_name": "LLM Compiler"},
+            secret_variables={"paper_name": "LLM Compiler"},
         )
 
         print("Response:", response.model_dump_json(indent=2))
