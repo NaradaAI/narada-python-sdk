@@ -6,7 +6,7 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada_core.models import Agent, File, Response, ResponseContent
+from narada_core.models import Agent, File, InputVariables, Response, ResponseContent
 
 from narada.client import Narada
 from narada.config import BrowserConfig, ProxyConfig
@@ -21,6 +21,7 @@ __all__ = [
     "CloudBrowserWindow",
     "download_file",
     "File",
+    "InputVariables",
     "LocalBrowserWindow",
     "Narada",
     "NaradaError",

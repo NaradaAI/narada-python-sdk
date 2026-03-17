@@ -75,6 +75,15 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 - `variables` has been renamed to `secret_variables`.
 - Use `input_variables` to pass structured values (objects/arrays) into custom APA workflows.
+- To pass uploaded files through `input_variables`, use the value returned by `upload_file`:
+
+```python
+uploaded = await window.upload_file(file=f)
+await window.agent(
+    prompt="Analyze the document in {{$doc}}",
+    input_variables={"doc": uploaded},
+)
+```
 
 ## Features
 

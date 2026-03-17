@@ -43,6 +43,7 @@ from narada_core.errors import (
 from narada_core.models import (
     Agent,
     File,
+    InputVariables,
     McpServer,
     RemoteDispatchChatHistoryItem,
     Response,
@@ -137,7 +138,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -160,7 +161,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -182,7 +183,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -327,7 +328,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -343,7 +344,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -358,7 +359,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: InputVariables | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
