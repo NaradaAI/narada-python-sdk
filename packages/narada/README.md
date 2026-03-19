@@ -73,8 +73,10 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 ## Migration note
 
+For the next release (`0.1.38`):
+
 - `variables` has been renamed to `secret_variables`.
-- Use `input_variables` to pass structured values (objects/arrays) into custom APA workflows.
+- Use `input_variables` to pass structured values (objects/arrays) into custom agents.
 
 ## Features
 
