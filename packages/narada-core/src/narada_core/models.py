@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from enum import Enum, StrEnum
-from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import (
+    Annotated,
+    Generic,
+    Literal,
+    NotRequired,
+    Optional,
+    TypedDict,
+    TypeVar,
+)
 
 from pydantic import BaseModel, Field
 
@@ -187,10 +195,12 @@ class StartTrace(TypedDict):
     description: str
 
 
-class EndTrace(TypedDict):
+class EndTrace(BaseModel):
     step_type: Literal["end"]
     url: str
     description: str
+    terminate_tree: Optional[bool] = None
+    message: Optional[str] = None
 
 
 class GetFullHtmlTrace(TypedDict):

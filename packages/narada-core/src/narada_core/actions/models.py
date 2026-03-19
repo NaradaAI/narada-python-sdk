@@ -6,6 +6,7 @@ from typing import (
     Generic,
     Literal,
     NotRequired,
+    Optional,
     TypedDict,
     TypeVar,
     cast,
@@ -138,6 +139,8 @@ class EndTrace(BaseModel):
     step_type: Literal["end"]
     url: str
     description: str
+    terminate_tree: Optional[bool] = None
+    message: Optional[str] = None
 
 
 class GetFullHtmlTrace(BaseModel):
