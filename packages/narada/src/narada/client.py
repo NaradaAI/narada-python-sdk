@@ -175,6 +175,7 @@ class Narada:
         config: BrowserConfig | None = None,
         session_name: str | None = None,
         session_timeout: int | None = None,
+        require_extension: bool = True,
     ) -> CloudBrowserWindow:
         """Creates a cloud browser by calling the backend.
 
@@ -185,6 +186,8 @@ class Narada:
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         request_body = {
+            # This is currently an internal API and not ready for public use yet.
+            # "require_extension": require_extension,
             "session_name": session_name,
             "session_timeout": session_timeout,
         }
@@ -277,9 +280,7 @@ class Narada:
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
-        await initialization_page.goto(
-            login_url, wait_until="domcontentloaded", timeout=60_000
-        )
+        await initialization_page.goto(login_url)
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
@@ -289,6 +290,7 @@ class Narada:
                 browser_window_id = await self._wait_for_browser_window_id(
                     initialization_page, config
                 )
+                break
             except NaradaExtensionMissingError:
                 if attempt == max_attempts - 1:
                     raise
