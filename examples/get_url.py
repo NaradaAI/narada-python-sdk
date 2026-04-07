@@ -1,7 +1,6 @@
 import asyncio
 
 from narada import Narada
-from narada_core.actions.models import parse_action_trace
 
 
 async def main() -> None:
