@@ -186,8 +186,7 @@ class Narada:
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         request_body = {
-            # This is currently an internal API and not ready for public use yet.
-            # "require_extension": require_extension,
+            "require_extension": require_extension,
             "session_name": session_name,
             "session_timeout": session_timeout,
         }
