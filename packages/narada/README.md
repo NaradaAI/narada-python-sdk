@@ -73,10 +73,14 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 ## Migration note
 
-For the next release (`0.1.38`):
+For releases `0.1.38` and later:
 
 - `variables` has been renamed to `secret_variables`.
 - Use `input_variables` to pass structured values (objects/arrays) into custom agents.
+
+For releases `0.1.41` and later:
+
+- For file variables in the Python SDK, pass Python file objects in `input_variables`.
 
 ## Features
 
