@@ -78,10 +78,6 @@ For releases `0.1.38` and later:
 - `variables` has been renamed to `secret_variables`.
 - Use `input_variables` to pass structured values (objects/arrays) into custom agents.
 
-For releases `0.1.41` and later:
-
-- For file variables in the Python SDK, pass Python file objects in `input_variables`.
-
 ## Features
 
 - **Natural Language Control**: Send instructions in plain English to control browser actions
