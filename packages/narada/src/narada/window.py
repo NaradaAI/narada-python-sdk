@@ -5,8 +5,9 @@ import time
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
+from io import IOBase
 from pathlib import Path
-from typing import IO, Any, TypeVar, overload, override
+from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -65,6 +66,28 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
+class _InputVariableFileReference(BaseModel):
+    key: str
+    name: str
+
+
+type _JsonPrimitive = str | int | float | bool | None
+type _InputVariableValue = (
+    _JsonPrimitive
+    | IOBase
+    | list["_InputVariableValue"]
+    | dict[str, "_InputVariableValue"]
+)
+type _InputVariables = dict[str, _InputVariableValue]
+type _NormalizedInputVariableValue = (
+    _JsonPrimitive
+    | _InputVariableFileReference
+    | list["_NormalizedInputVariableValue"]
+    | dict[str, "_NormalizedInputVariableValue"]
+)
+type _NormalizedInputVariables = dict[str, _NormalizedInputVariableValue]
+
+
 class _PresignedPost(BaseModel):
     url: str
     fields: dict[str, Any]
@@ -105,6 +128,11 @@ class BaseBrowserWindow(ABC):
         The file is temporarily saved in Narada cloud and expires after 1 day. It can only be
         accessed by the user who uploaded it.
         """
+        # TODO: We will deprecate this public method in favor of automatic upload via
+        # input_variables file objects.
+        return await self._upload_file_impl(file=file)
+
+    async def _upload_file_impl(self, *, file: IO[Any]) -> File:
         # Get the base filename without directories.
         filename = Path(file.name).name
 
@@ -132,6 +160,54 @@ class BaseBrowserWindow(ABC):
 
         return File(key=object_key)
 
+    async def _normalize_input_variables(
+        self, *, input_variables: Mapping[str, Any]
+    ) -> _NormalizedInputVariables:
+        normalized: _NormalizedInputVariables = {}
+        for key, value in input_variables.items():
+            normalized[key] = await self._normalize_input_variables_value_impl(
+                input_variable_value=value
+            )
+        return normalized
+
+    async def _normalize_input_variables_value_impl(
+        self, *, input_variable_value: Any
+    ) -> _NormalizedInputVariableValue:
+        if isinstance(input_variable_value, list):
+            return [
+                await self._normalize_input_variables_value_impl(
+                    input_variable_value=item
+                )
+                for item in input_variable_value
+            ]
+
+        if self._is_uploadable_file(input_variable_value):
+            return await self._upload_input_variable_file(
+                input_variable_value=input_variable_value
+            )
+
+        if isinstance(input_variable_value, dict):
+            normalized: dict[str, _NormalizedInputVariableValue] = {}
+            for key, value in input_variable_value.items():
+                normalized[key] = await self._normalize_input_variables_value_impl(
+                    input_variable_value=value
+                )
+            return normalized
+
+        return input_variable_value
+
+    @staticmethod
+    def _is_uploadable_file(value: Any) -> TypeGuard[IO[Any]]:
+        # Keep runtime eligibility aligned with current upload_file expectations.
+        return isinstance(value, IOBase) and hasattr(value, "name")
+
+    async def _upload_input_variable_file(
+        self, *, input_variable_value: IO[Any]
+    ) -> _InputVariableFileReference:
+        filename = Path(input_variable_value.name).name
+        uploaded_file = await self._upload_file_impl(file=input_variable_value)
+        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+
     @overload
     async def dispatch_request(
         self,
@@ -149,10 +225,10 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        callback_headers: dict[str, Any] | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -173,10 +249,10 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        callback_headers: dict[str, Any] | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -196,10 +272,10 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
-        callback_headers: dict[str, Any] | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -242,7 +318,9 @@ class BaseBrowserWindow(ABC):
         if secret_variables is not None:
             body["secretVariables"] = secret_variables
         if input_variables is not None:
-            body["inputVariables"] = input_variables
+            body["inputVariables"] = await self._normalize_input_variables(
+                input_variables=input_variables
+            )
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
@@ -312,7 +390,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -329,7 +407,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -345,7 +423,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
