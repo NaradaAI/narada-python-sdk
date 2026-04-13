@@ -36,6 +36,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
+from narada.human_interaction import HumanInteractionHandler
 from narada.utils import assert_never, assert_not_none
 from narada.version import __version__
 from narada.window import (
@@ -82,6 +83,7 @@ class Narada:
     _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 
     _auth_headers: dict[str, str]
+    _human_interaction_handler: HumanInteractionHandler | None
     _console: Console
     _playwright_context_manager: PlaywrightContextManager | None = None
     _playwright: Playwright | None = None
@@ -91,12 +93,14 @@ class Narada:
         *,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         if auth_headers is not None:
             self._auth_headers = auth_headers
         else:
             api_key = api_key or os.environ["NARADA_API_KEY"]
             self._auth_headers = {"x-api-key": api_key}
+        self._human_interaction_handler = human_interaction_handler
         self._console = Console()
 
     async def __aenter__(self) -> Narada:
@@ -168,6 +172,7 @@ class Narada:
             browser_window_id=browser_window_id,
             config=config,
             context=side_panel_page.context,
+            human_interaction_handler=self._human_interaction_handler,
         )
 
     async def open_and_initialize_cloud_browser_window(
@@ -300,6 +305,7 @@ class Narada:
             browser_window_id=browser_window_id,
             session_id=session_id,
             auth_headers=self._auth_headers,
+            human_interaction_handler=self._human_interaction_handler,
         )
 
         if config.interactive:
@@ -364,6 +370,7 @@ class Narada:
             browser_window_id=browser_window_id,
             config=config,
             context=context,
+            human_interaction_handler=self._human_interaction_handler,
         )
 
     async def _launch_browser(

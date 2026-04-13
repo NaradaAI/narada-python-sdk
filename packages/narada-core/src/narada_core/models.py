@@ -262,6 +262,16 @@ class ObjectSetPropertiesTrace(TypedDict):
     description: str
 
 
+class UserApprovalTrace(TypedDict):
+    step_type: Literal["userApproval"]
+    description: str
+
+
+class PromptForUserInputTrace(TypedDict):
+    step_type: Literal["promptForUserInput"]
+    description: str
+
+
 ApaStepTrace = (
     GoToUrlTrace
     | GetUrlTrace
@@ -292,6 +302,8 @@ ApaStepTrace = (
     | DataTableInsertRowTrace
     | DataTableUpdateCellValueTrace
     | ObjectSetPropertiesTrace
+    | UserApprovalTrace
+    | PromptForUserInputTrace
 )
 
 

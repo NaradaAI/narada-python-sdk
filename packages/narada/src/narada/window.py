@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
+from typing import IO, Any, Mapping, TypeGuard, TypeVar, cast, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -51,12 +52,14 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
+from narada_core.types import DispatchInputVariableValue, InputVariables, JsonPrimitive
 from playwright.async_api import (
     BrowserContext,
 )
 from pydantic import BaseModel
 
 from narada.config import BrowserConfig
+from narada.human_interaction import HumanInteractionHandler, PromptVariableRequest
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +72,11 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 class _InputVariableFileReference(BaseModel):
     key: str
     name: str
+    mimeType: str | None = None
 
 
-type _JsonPrimitive = str | int | float | bool | None
-type _InputVariableValue = (
-    _JsonPrimitive
-    | IOBase
-    | list["_InputVariableValue"]
-    | dict[str, "_InputVariableValue"]
-)
-type _InputVariables = dict[str, _InputVariableValue]
 type _NormalizedInputVariableValue = (
-    _JsonPrimitive
+    JsonPrimitive
     | _InputVariableFileReference
     | list["_NormalizedInputVariableValue"]
     | dict[str, "_NormalizedInputVariableValue"]
@@ -106,6 +102,7 @@ class BaseBrowserWindow(ABC):
     _auth_headers: dict[str, str]
     _base_url: str
     _browser_window_id: str
+    _human_interaction_handler: HumanInteractionHandler | None
 
     def __init__(
         self,
@@ -113,10 +110,12 @@ class BaseBrowserWindow(ABC):
         auth_headers: dict[str, str],
         base_url: str,
         browser_window_id: str,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         self._auth_headers = auth_headers
         self._base_url = base_url
         self._browser_window_id = browser_window_id
+        self._human_interaction_handler = human_interaction_handler
 
     @property
     def browser_window_id(self) -> str:
@@ -161,7 +160,7 @@ class BaseBrowserWindow(ABC):
         return File(key=object_key)
 
     async def _normalize_input_variables(
-        self, *, input_variables: Mapping[str, Any]
+        self, *, input_variables: Mapping[str, DispatchInputVariableValue]
     ) -> _NormalizedInputVariables:
         normalized: _NormalizedInputVariables = {}
         for key, value in input_variables.items():
@@ -171,7 +170,7 @@ class BaseBrowserWindow(ABC):
         return normalized
 
     async def _normalize_input_variables_value_impl(
-        self, *, input_variable_value: Any
+        self, *, input_variable_value: DispatchInputVariableValue
     ) -> _NormalizedInputVariableValue:
         if isinstance(input_variable_value, list):
             return [
@@ -194,7 +193,7 @@ class BaseBrowserWindow(ABC):
                 )
             return normalized
 
-        return input_variable_value
+        return cast(_NormalizedInputVariableValue, input_variable_value)
 
     @staticmethod
     def _is_uploadable_file(value: Any) -> TypeGuard[IO[Any]]:
@@ -205,8 +204,11 @@ class BaseBrowserWindow(ABC):
         self, *, input_variable_value: IO[Any]
     ) -> _InputVariableFileReference:
         filename = Path(input_variable_value.name).name
+        mime_type = mimetypes.guess_type(filename)[0]
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
-        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+        return _InputVariableFileReference(
+            key=uploaded_file["key"], name=filename, mimeType=mime_type
+        )
 
     @overload
     async def dispatch_request(
@@ -225,7 +227,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
@@ -249,7 +251,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
@@ -272,7 +274,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
@@ -390,7 +392,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -407,7 +409,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -423,7 +425,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
+        input_variables: Mapping[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -538,6 +540,44 @@ class BaseBrowserWindow(ABC):
         """Prints a message in the Narada extension side panel chat."""
         return await self._run_extension_action(
             PrintMessageRequest(message=message), timeout=timeout
+        )
+
+    async def request_user_approval(
+        self,
+        *,
+        step_id: str,
+        prompt_message: str,
+        approve_label: str,
+        reject_label: str,
+    ) -> bool:
+        """Requests user approval via the configured human interaction handler."""
+        if self._human_interaction_handler is None:
+            raise NotImplementedError(
+                "No HumanInteractionHandler configured. Pass "
+                "`human_interaction_handler=...` to Narada(...) when creating a browser window."
+            )
+        return await self._human_interaction_handler.request_user_approval(
+            step_id=step_id,
+            prompt_message=prompt_message,
+            approve_label=approve_label,
+            reject_label=reject_label,
+        )
+
+    async def prompt_for_user_input(
+        self,
+        *,
+        step_id: str,
+        variables: list[PromptVariableRequest],
+    ) -> InputVariables:
+        """Prompts for user input via the configured human interaction handler."""
+        if self._human_interaction_handler is None:
+            raise NotImplementedError(
+                "No HumanInteractionHandler configured. Pass "
+                "`human_interaction_handler=...` to Narada(...) when creating a browser window."
+            )
+        return await self._human_interaction_handler.prompt_for_user_input(
+            step_id=step_id,
+            variables=variables,
         )
 
     async def read_google_sheet(
@@ -666,12 +706,14 @@ class LocalBrowserWindow(BaseBrowserWindow):
         browser_window_id: str,
         config: BrowserConfig,
         context: BrowserContext,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         super().__init__(
             auth_headers=auth_headers,
             base_url=base_url,
             browser_window_id=browser_window_id,
+            human_interaction_handler=human_interaction_handler,
         )
         self._browser_process_id = browser_process_id
         self._config = config
@@ -708,6 +750,7 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         cloud_browser_session_id: str | None = None,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         if auth_headers is None:
@@ -717,6 +760,7 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             auth_headers=auth_headers,
             base_url=base_url,
             browser_window_id=browser_window_id,
+            human_interaction_handler=human_interaction_handler,
         )
         self._cloud_browser_session_id = cloud_browser_session_id
 
@@ -771,6 +815,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
         session_id: str,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
         if auth_headers is None:
@@ -780,6 +825,7 @@ class CloudBrowserWindow(BaseBrowserWindow):
             auth_headers=auth_headers,
             base_url=base_url,
             browser_window_id=browser_window_id,
+            human_interaction_handler=human_interaction_handler,
         )
         self._session_id = session_id
 

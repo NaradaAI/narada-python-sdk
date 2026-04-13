@@ -48,9 +48,12 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
+from narada_core.types import DispatchInputVariableValue, InputVariables
 from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
+
+from narada.human_interaction import HumanInteractionHandler, PromptVariableRequest
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -86,6 +89,7 @@ class BaseBrowserWindow(ABC):
     _user_id: str | None
     _env: Literal["prod", "dev", None]
     _browser_window_id: str
+    _human_interaction_handler: HumanInteractionHandler | None
 
     def __init__(
         self,
@@ -95,6 +99,7 @@ class BaseBrowserWindow(ABC):
         user_id: str | None,
         env: Literal["prod", "dev", None] = "prod",
         browser_window_id: str,
+        human_interaction_handler: HumanInteractionHandler | None = None,
     ) -> None:
         if api_key is None and (user_id is None or env is None):
             raise ValueError(
@@ -106,6 +111,7 @@ class BaseBrowserWindow(ABC):
         self._user_id = user_id
         self._env = env
         self._browser_window_id = browser_window_id
+        self._human_interaction_handler = human_interaction_handler
 
     @property
     def browser_window_id(self) -> str:
@@ -137,7 +143,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -160,7 +166,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -182,7 +188,7 @@ class BaseBrowserWindow(ABC):
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -327,7 +333,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -343,7 +349,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -358,7 +364,7 @@ class BaseBrowserWindow(ABC):
         time_zone: str = "America/Los_Angeles",
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: dict[str, DispatchInputVariableValue] | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -477,6 +483,42 @@ class BaseBrowserWindow(ABC):
         """Prints a message in the Narada extension side panel chat."""
         return await self._run_extension_action(
             PrintMessageRequest(message=message), timeout=timeout
+        )
+
+    async def request_user_approval(
+        self,
+        *,
+        step_id: str,
+        prompt_message: str,
+        approve_label: str,
+        reject_label: str,
+    ) -> bool:
+        if self._human_interaction_handler is None:
+            raise NotImplementedError(
+                "No HumanInteractionHandler configured. Pass "
+                "`human_interaction_handler=...` when creating the browser window."
+            )
+        return await self._human_interaction_handler.request_user_approval(
+            step_id=step_id,
+            prompt_message=prompt_message,
+            approve_label=approve_label,
+            reject_label=reject_label,
+        )
+
+    async def prompt_for_user_input(
+        self,
+        *,
+        step_id: str,
+        variables: list[PromptVariableRequest],
+    ) -> InputVariables:
+        if self._human_interaction_handler is None:
+            raise NotImplementedError(
+                "No HumanInteractionHandler configured. Pass "
+                "`human_interaction_handler=...` when creating the browser window."
+            )
+        return await self._human_interaction_handler.prompt_for_user_input(
+            step_id=step_id,
+            variables=variables,
         )
 
     async def read_google_sheet(
@@ -610,7 +652,9 @@ class BaseBrowserWindow(ABC):
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
-    def __init__(self) -> None:
+    def __init__(
+        self, *, human_interaction_handler: HumanInteractionHandler | None = None
+    ) -> None:
         env = os.environ.get("NARADA_ENV")
         if env is not None and env not in ("prod", "dev"):
             raise ValueError(f"Invalid environment: {env!r}")
@@ -621,6 +665,7 @@ class LocalBrowserWindow(BaseBrowserWindow):
             user_id=os.environ.get("NARADA_USER_ID"),
             env=env,
             browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
+            human_interaction_handler=human_interaction_handler,
         )
 
     def __str__(self) -> str:
@@ -628,13 +673,20 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
-    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        api_key: str | None = None,
+        human_interaction_handler: HumanInteractionHandler | None = None,
+    ) -> None:
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=None,
             env=None,
             browser_window_id=browser_window_id,
+            human_interaction_handler=human_interaction_handler,
         )
 
     def __str__(self) -> str:
