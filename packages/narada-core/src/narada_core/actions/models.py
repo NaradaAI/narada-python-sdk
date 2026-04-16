@@ -214,6 +214,79 @@ class OutputTrace(BaseModel):
     description: str
 
 
+# ---------------------------------------------------------------------------
+# Python agent run trace: emitted by CustomPythonAgentRunnable for custom
+# Python agents executed in the browser Pyodide runtime. A single
+# PythonAgentRunTrace wraps the full agent's execution; its `events` list is
+# a chronologically sorted timeline of stdout / stderr / SDK call events.
+# ---------------------------------------------------------------------------
+
+
+class PythonStdoutEvent(BaseModel):
+    kind: Literal["stdout"] = "stdout"
+    ts: int
+    text: str
+
+
+class PythonStderrEvent(BaseModel):
+    kind: Literal["stderr"] = "stderr"
+    ts: int
+    text: str
+
+
+class PythonSubAgentCallEvent(BaseModel):
+    kind: Literal["subAgentCall"] = "subAgentCall"
+    ts_start: int
+    ts_end: int
+    agent_type: str
+    prompt: str
+    status: Literal["success", "error", "timeout"]
+    request_id: str | None = None
+    error_message: str | None = None
+    action_trace: ActionTrace | None = None
+
+
+class PythonExtensionActionEvent(BaseModel):
+    kind: Literal["extensionAction"] = "extensionAction"
+    ts_start: int
+    ts_end: int
+    # Matches the snake_case `name` discriminator on ExtensionActionRequest
+    # (e.g. "go_to_url", "get_screenshot"). Carried as a plain string rather
+    # than a Literal so adding a new extension action in the future does not
+    # require a parse-time migration of historical trace data.
+    action_name: str
+    request_summary: dict[str, Any]
+    result_summary: dict[str, Any] | None = None
+    status: Literal["success", "error", "timeout"]
+    error_message: str | None = None
+
+
+class PythonSideEffectEvent(BaseModel):
+    kind: Literal["sideEffect"] = "sideEffect"
+    ts: int
+    effect_type: Literal["download_file", "render_html"]
+    description: str
+
+
+PythonTraceEvent = Annotated[
+    PythonStdoutEvent
+    | PythonStderrEvent
+    | PythonSubAgentCallEvent
+    | PythonExtensionActionEvent
+    | PythonSideEffectEvent,
+    Field(discriminator="kind"),
+]
+
+
+class PythonAgentRunTrace(BaseModel):
+    step_type: Literal["pythonAgentRun"] = "pythonAgentRun"
+    url: str
+    status: Literal["success", "error", "aborted"]
+    duration_ms: int
+    events: list[PythonTraceEvent]
+    error_message: str | None = None
+
+
 ApaStepTrace = Annotated[
     GoToUrlTrace
     | GetUrlTrace
@@ -243,7 +316,8 @@ ApaStepTrace = Annotated[
     | DataTableInsertRowTrace
     | DataTableUpdateCellValueTrace
     | ObjectSetPropertiesTrace
-    | OutputTrace,
+    | OutputTrace
+    | PythonAgentRunTrace,
     Field(discriminator="step_type"),
 ]
 

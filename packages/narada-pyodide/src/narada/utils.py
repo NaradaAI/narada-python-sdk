@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from . import _trace
+
 if TYPE_CHECKING:
     # Magic functions injected by the JavaScript harness.
     def _narada_render_html(html: str) -> None: ...
@@ -18,6 +20,10 @@ def download_file(filename: str, content: str | bytes) -> None:
                  If bytes, writes in binary mode.
     """
     _narada_download_file(filename, content)
+    _trace.emit_side_effect(
+        effect_type="download_file",
+        description=f"Downloaded file: {filename}",
+    )
 
 
 def render_html(html: str) -> None:
@@ -28,3 +34,7 @@ def render_html(html: str) -> None:
         html: The HTML content to render.
     """
     _narada_render_html(html)
+    _trace.emit_side_effect(
+        effect_type="render_html",
+        description="Rendered HTML in a new tab",
+    )

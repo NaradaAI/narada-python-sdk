@@ -52,6 +52,8 @@ from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
+from . import _trace
+
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
 
@@ -192,6 +194,12 @@ class BaseBrowserWindow(ABC):
 
         The higher-level `agent` method should be preferred for most use cases.
         """
+        # Trace instrumentation: the entire method body is wrapped so that any
+        # exit (successful return, timeout, or non-timeout failure) produces a
+        # ``subAgentCall`` trace event with matching status. See `_trace.py`.
+        trace_start_ms = _trace.now_ms()
+        agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
+
         deadline = time.monotonic() + timeout
 
         headers = {"Content-Type": "application/json"}
@@ -305,6 +313,18 @@ class BaseBrowserWindow(ABC):
                         else:
                             response_content["structuredOutput"] = None
 
+                    _trace.emit_sub_agent_call(
+                        ts_start=trace_start_ms,
+                        agent_type=agent_type_str,
+                        prompt=prompt,
+                        status="success",
+                        request_id=request_id,
+                        action_trace_raw=(
+                            response_content.get("actionTrace")
+                            if response_content is not None
+                            else None
+                        ),
+                    )
                     return response
 
                 # Poll every 3 seconds.
@@ -313,7 +333,32 @@ class BaseBrowserWindow(ABC):
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="timeout",
+                error_message=f"Timed out after {timeout}s",
+            )
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+        except NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="timeout",
+                error_message=f"Timed out after {timeout}s",
+            )
+            raise
+        except Exception as err:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="error",
+                error_message=str(err),
+            )
+            raise
 
     @overload
     async def agent(
@@ -562,51 +607,85 @@ class BaseBrowserWindow(ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel | None:
-        headers = {"Content-Type": "application/json"}
-        if self._api_key is not None:
-            headers["x-api-key"] = self._api_key
-        else:
-            assert self._user_id is not None
-            assert self._env is not None
+        # Trace instrumentation: every exit path emits an ``extensionAction``
+        # trace event with a status matching the outcome. See `_trace.py`.
+        trace_start_ms = _trace.now_ms()
 
-            headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
-            headers["X-Narada-User-ID"] = self._user_id
-            headers["X-Narada-Env"] = self._env
+        try:
+            headers = {"Content-Type": "application/json"}
+            if self._api_key is not None:
+                headers["x-api-key"] = self._api_key
+            else:
+                assert self._user_id is not None
+                assert self._env is not None
 
-        body = {
-            "action": request.model_dump(),
-            "browserWindowId": self.browser_window_id,
-            "parentRunIds": _parent_run_ids(),
-        }
-        if timeout is not None:
-            body["timeout"] = timeout
+                headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
+                headers["X-Narada-User-ID"] = self._user_id
+                headers["X-Narada-Env"] = self._env
 
-        fetch_response = await pyfetch(
-            f"{self._base_url}/extension-actions",
-            method="POST",
-            headers=headers,
-            body=json.dumps(body),
-            # Don't specify `timeout` here as the (soft) timeout is handled by the server.
-        )
+            body = {
+                "action": request.model_dump(),
+                "browserWindowId": self.browser_window_id,
+                "parentRunIds": _parent_run_ids(),
+            }
+            if timeout is not None:
+                body["timeout"] = timeout
 
-        if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
-            raise NaradaTimeoutError
-        elif not fetch_response.ok:
-            status = fetch_response.status
-            text = await fetch_response.text()
-            raise NaradaError(f"Failed to run extension action: {status} {text}")
+            fetch_response = await pyfetch(
+                f"{self._base_url}/extension-actions",
+                method="POST",
+                headers=headers,
+                body=json.dumps(body),
+                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+            )
 
-        resp_json = await fetch_response.json()
+            if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
+                raise NaradaTimeoutError
+            elif not fetch_response.ok:
+                status = fetch_response.status
+                text = await fetch_response.text()
+                raise NaradaError(f"Failed to run extension action: {status} {text}")
 
-        response = ExtensionActionResponse.model_validate(resp_json)
-        if response.status == "error":
-            raise NaradaError(response.error)
+            resp_json = await fetch_response.json()
 
-        if response_model is None:
-            return None
+            response = ExtensionActionResponse.model_validate(resp_json)
+            if response.status == "error":
+                raise NaradaError(response.error)
 
-        assert response.data is not None
-        return response_model.model_validate_json(response.data)
+            if response_model is None:
+                _trace.emit_extension_action(
+                    ts_start=trace_start_ms,
+                    request=request,
+                    status="success",
+                )
+                return None
+
+            assert response.data is not None
+            parsed_response = response_model.model_validate_json(response.data)
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="success",
+                response=parsed_response,
+            )
+            return parsed_response
+
+        except NaradaTimeoutError:
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="timeout",
+                error_message="Extension action timed out",
+            )
+            raise
+        except Exception as err:
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="error",
+                error_message=str(err),
+            )
+            raise
 
 
 class LocalBrowserWindow(BaseBrowserWindow):

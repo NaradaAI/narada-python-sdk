@@ -1,14 +1,14 @@
 
 [project]
 name = "narada-pyodide"
-version = "0.0.43"
+version = "0.0.44"
 description = "Pyodide-compatible Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
-    "narada-core==0.0.17",
+    "narada-core==0.0.18",
     # Must be a supported version in https://pyodide.org/en/stable/usage/packages-in-pyodide.html
     "packaging==24.2",
 ]
@@ -23,7 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pyodide-py>=0.27.7"]
+dev = ["pyodide-py>=0.27.7", "pytest>=8.4.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/narada"]
