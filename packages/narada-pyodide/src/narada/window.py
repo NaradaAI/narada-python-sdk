@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from abc import ABC
 from http import HTTPStatus
 from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
@@ -17,6 +18,7 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
+    CriticResult,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -42,13 +44,14 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     Agent,
+    CriticConfig,
     File,
     McpServer,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
@@ -138,6 +141,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -161,6 +165,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -183,6 +188,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -239,6 +245,8 @@ class BaseBrowserWindow(ABC):
             body["secretVariables"] = secret_variables
         if input_variables is not None:
             body["inputVariables"] = input_variables
+        if critic_context is not None:
+            body["criticContext"] = critic_context
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
@@ -328,6 +336,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -344,6 +353,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -359,6 +369,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -384,6 +395,17 @@ class BaseBrowserWindow(ABC):
             else None
         )
 
+        critic_result: CriticResult | None = None
+        if critic is not None:
+            critic_result = await self._run_critic(
+                original_prompt=prompt,
+                response_content=response_content,
+                action_trace_raw=action_trace_raw,
+                critic=critic,
+                time_zone=time_zone,
+                timeout=timeout,
+            )
+
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
@@ -392,6 +414,75 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            critic_result=critic_result,
+        )
+
+    async def _run_critic(
+        self,
+        *,
+        original_prompt: str,
+        response_content: dict[str, Any],
+        action_trace_raw: list[Any] | None,
+        critic: CriticConfig,
+        time_zone: str,
+        timeout: int,
+    ) -> CriticResult:
+
+        if critic.output_schema is not None:
+            combined_fields: dict[str, Any] = {
+                name: (info.annotation, info)
+                for name, info in critic.output_schema.model_fields.items()
+            }
+        else:
+            combined_fields = {}
+        _VALIDATION_VAR = f"_narada_validation_passed_{uuid.uuid4().hex[:4]}"
+        combined_fields[_VALIDATION_VAR] = (bool, ...)
+        CriticOutputModel = create_model("CriticOutput", **combined_fields)
+
+        critic_dispatch_response = await self.dispatch_request(
+            prompt=critic.prompt,
+            agent=Agent.PRODUCTIVITY,
+            output_schema=CriticOutputModel,
+            critic_context={
+                "agentPrompt": original_prompt,
+                "agentOutput": response_content["text"],
+                "actionTrace": action_trace_raw or [],
+                "validationVariableName": _VALIDATION_VAR,
+            },
+            mcp_servers=critic.mcp_servers,
+            time_zone=time_zone,
+            timeout=timeout,
+        )
+
+        critic_content = critic_dispatch_response["response"]
+        assert critic_content is not None
+
+        combined_output = critic_content.get("structuredOutput")
+        validation_passed = (
+            bool(getattr(combined_output, _VALIDATION_VAR, False))
+            if combined_output is not None
+            else False
+        )
+
+        structured_output: BaseModel | None = None
+        if critic.output_schema is not None and combined_output is not None:
+            output_dict = combined_output.model_dump()
+            output_dict.pop(_VALIDATION_VAR, None)
+            structured_output = critic.output_schema.model_validate(output_dict)
+
+        critic_action_trace_raw = critic_content.get("actionTrace")
+        critic_action_trace = (
+            parse_action_trace(critic_action_trace_raw)
+            if critic_action_trace_raw is not None
+            else None
+        )
+
+        return CriticResult(
+            validation_passed=validation_passed,
+            text=critic_content["text"],
+            structured_output=structured_output,
+            usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
+            action_trace=critic_action_trace,
         )
 
     async def agentic_selector(

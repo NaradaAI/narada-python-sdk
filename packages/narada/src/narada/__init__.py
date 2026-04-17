@@ -6,7 +6,8 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
-from narada_core.models import Agent, File, Response, ResponseContent
+from narada_core.actions.models import CriticResult
+from narada_core.models import Agent, CriticConfig, File, Response, ResponseContent
 
 from narada.client import Narada
 from narada.config import BrowserConfig, ProxyConfig
@@ -19,6 +20,8 @@ __all__ = [
     "Agent",
     "BrowserConfig",
     "CloudBrowserWindow",
+    "CriticConfig",
+    "CriticResult",
     "download_file",
     "File",
     "LocalBrowserWindow",

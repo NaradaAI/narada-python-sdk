@@ -12,7 +12,7 @@ from typing import (
     override,
 )
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -275,6 +275,24 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
     content: _StructuredOutputT
 
 
+class CriticResult(BaseModel):
+    """Result from a critic agent that evaluated the main agent's output."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    validation_passed: bool
+    """Whether the critic determined the main agent successfully completed its task."""
+
+    text: str
+    """The critic's evaluation text."""
+
+    structured_output: Any
+    """Parsed instance of the output_schema passed in CriticConfig, or None if no schema was given."""
+
+    usage: AgentUsage
+    action_trace: ActionTrace | None = None
+
+
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     request_id: str
     status: Literal["success", "error", "input-required"]
@@ -286,6 +304,8 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: ActionTrace | None = None
+    critic_result: CriticResult | None = None
+    """Result from the critic agent, populated when a CriticConfig is passed to agent()."""
 
 
 class AgenticSelectorClickAction(TypedDict):
