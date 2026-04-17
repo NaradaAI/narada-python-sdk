@@ -12,7 +12,14 @@ from typing import (
     override,
 )
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    Field,
+    NonNegativeInt,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -245,6 +252,14 @@ class PythonSubAgentCallEvent(BaseModel):
     error_message: str | None = None
     action_trace: ActionTrace | None = None
 
+    @model_validator(mode="after")
+    def _check_ts_ordering(self) -> PythonSubAgentCallEvent:
+        if self.ts_end < self.ts_start:
+            raise ValueError(
+                f"PythonSubAgentCallEvent: ts_end ({self.ts_end}) must be >= ts_start ({self.ts_start})"
+            )
+        return self
+
 
 class PythonExtensionActionEvent(BaseModel):
     kind: Literal["extensionAction"] = "extensionAction"
@@ -259,6 +274,14 @@ class PythonExtensionActionEvent(BaseModel):
     result_summary: dict[str, Any] | None = None
     status: Literal["success", "error", "timeout"]
     error_message: str | None = None
+
+    @model_validator(mode="after")
+    def _check_ts_ordering(self) -> PythonExtensionActionEvent:
+        if self.ts_end < self.ts_start:
+            raise ValueError(
+                f"PythonExtensionActionEvent: ts_end ({self.ts_end}) must be >= ts_start ({self.ts_start})"
+            )
+        return self
 
 
 class PythonSideEffectEvent(BaseModel):
@@ -282,9 +305,13 @@ class PythonAgentRunTrace(BaseModel):
     step_type: Literal["pythonAgentRun"] = "pythonAgentRun"
     url: str
     status: Literal["success", "error", "aborted"]
-    duration_ms: int
+    duration_ms: NonNegativeInt
     events: list[PythonTraceEvent]
     error_message: str | None = None
+    # Set by the runtime when it caps the number of buffered events (see
+    # `python.worker.ts`). Informational only; the dashboard surfaces it so
+    # users know their trace is partial.
+    truncated_event_count: NonNegativeInt | None = None
 
 
 ApaStepTrace = Annotated[
@@ -332,7 +359,26 @@ _ApaActionTraceAdapter = TypeAdapter(ApaActionTrace)
 
 
 def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
-    """Parse the action trace, it will either be a list of operator action trace items or a list of APA action trace items."""
+    """Parse the action trace.
+
+    Dispatches deterministically based on the shape of the first item rather
+    than try/except-falling-through two adapters: operator items carry
+    ``action`` + ``url`` fields, APA steps carry ``step_type``. On an empty
+    list (no discriminator available) we default to APA, which is the
+    superset shape used by all custom agents.
+    """
+    if not trace_data:
+        return _ApaActionTraceAdapter.validate_python(trace_data)
+
+    first = trace_data[0]
+    if isinstance(first, dict) and "step_type" in first:
+        return _ApaActionTraceAdapter.validate_python(trace_data)
+    if isinstance(first, dict) and "action" in first and "url" in first:
+        return _OperatorActionTraceAdapter.validate_python(trace_data)
+
+    # Ambiguous shape — fall back to the previous try/except pattern so we
+    # do not regress existing callers passing Pydantic instances or other
+    # shapes the adapters already know how to coerce.
     try:
         return _OperatorActionTraceAdapter.validate_python(trace_data)
     except ValidationError:

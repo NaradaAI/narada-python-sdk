@@ -430,3 +430,168 @@ class TestPythonAgentRunTraceRoundtrip:
         assert isinstance(trace[0], PythonAgentRunTrace)
         assert trace[0].status == "error"
         assert trace[0].error_message == "ZeroDivisionError"
+
+
+# ---------------------------------------------------------------------------
+# Defensive emit: observability must never break the user's agent run
+# ---------------------------------------------------------------------------
+
+
+class TestEmitDefensive:
+    def test_non_serialisable_payload_is_stringified_not_raised(
+        self, recorded_events
+    ) -> None:
+        """A stray datetime / set / custom object in a summary should not crash
+        user code mid-run. ``default=str`` stringifies and the event still
+        reaches the harness."""
+        import datetime as _dt
+
+        _trace.emit_trace_event(
+            {
+                "kind": "stdout",
+                "ts": _dt.datetime(2026, 1, 1),  # non-serialisable in std json
+                "text": "hello",
+            }
+        )
+        # Event was recorded (ts got stringified by default=str).
+        assert len(recorded_events.events) == 1
+        assert isinstance(recorded_events.events[0]["ts"], str)
+
+    def test_harness_raising_does_not_propagate(self, monkeypatch) -> None:
+        """If the JS-injected emitter raises, we swallow and log rather than
+        propagate — tracing failures must not break the agent run."""
+
+        def _boom(_json: str) -> None:
+            raise RuntimeError("bridge down")
+
+        # `_narada_emit_trace_event` is injected by the JS harness at runtime
+        # (TYPE_CHECKING stub only in source); set without `raising` so the
+        # assignment succeeds even when the attribute isn't yet bound.
+        monkeypatch.setattr(_trace, "_narada_emit_trace_event", _boom, raising=False)
+        # Must not raise.
+        _trace.emit_trace_event({"kind": "stdout", "ts": 1, "text": "hi"})
+
+
+# ---------------------------------------------------------------------------
+# Nested action_trace stripping: cap recursion depth to one level
+# ---------------------------------------------------------------------------
+
+
+class TestStripNestedPythonEvents:
+    def test_passes_through_operator_items_unchanged(self) -> None:
+        raw = [{"url": "https://x", "action": "click Foo"}]
+        assert _trace._strip_nested_python_events(raw) == raw
+
+    def test_passes_through_non_python_apa_items_unchanged(self) -> None:
+        raw = [{"step_type": "goToUrl", "url": "https://x", "description": "..."}]
+        assert _trace._strip_nested_python_events(raw) == raw
+
+    def test_strips_events_from_nested_python_agent_run(self) -> None:
+        raw = [
+            {
+                "step_type": "pythonAgentRun",
+                "url": "",
+                "status": "success",
+                "duration_ms": 10,
+                "events": [{"kind": "stdout", "ts": 1, "text": "a"}],
+            }
+        ]
+        stripped = _trace._strip_nested_python_events(raw)
+        assert stripped is not None
+        assert stripped[0]["events"] == []
+        assert stripped[0]["truncated_event_count"] == 1
+
+    def test_none_passes_through(self) -> None:
+        assert _trace._strip_nested_python_events(None) is None
+
+    def test_integrates_with_emit_sub_agent_call(self, recorded_events) -> None:
+        _trace.emit_sub_agent_call(
+            ts_start=1,
+            agent_type="custom_python",
+            prompt="nested",
+            status="success",
+            action_trace_raw=[
+                {
+                    "step_type": "pythonAgentRun",
+                    "url": "",
+                    "status": "success",
+                    "duration_ms": 10,
+                    "events": [
+                        {"kind": "stdout", "ts": 1, "text": "a"},
+                        {"kind": "stdout", "ts": 2, "text": "b"},
+                    ],
+                }
+            ],
+        )
+        event = recorded_events.events[0]
+        inner = event["action_trace"][0]
+        assert inner["events"] == []
+        assert inner["truncated_event_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Pydantic invariants on new event models
+# ---------------------------------------------------------------------------
+
+
+class TestPythonEventInvariants:
+    def test_sub_agent_call_rejects_ts_end_before_ts_start(self) -> None:
+        from narada_core.actions.models import PythonSubAgentCallEvent
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="ts_end"):
+            PythonSubAgentCallEvent(
+                ts_start=1000,
+                ts_end=999,
+                agent_type="operator",
+                prompt="p",
+                status="success",
+            )
+
+    def test_extension_action_rejects_ts_end_before_ts_start(self) -> None:
+        from narada_core.actions.models import PythonExtensionActionEvent
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="ts_end"):
+            PythonExtensionActionEvent(
+                ts_start=1000,
+                ts_end=999,
+                action_name="get_url",
+                request_summary={},
+                status="success",
+            )
+
+    def test_python_agent_run_rejects_negative_duration(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PythonAgentRunTrace(
+                url="",
+                status="success",
+                duration_ms=-1,
+                events=[],
+            )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic parse_action_trace selection
+# ---------------------------------------------------------------------------
+
+
+class TestParseActionTraceDispatch:
+    def test_empty_list_parses_as_apa(self) -> None:
+        result = parse_action_trace([])
+        assert result == []
+
+    def test_step_type_routes_to_apa_adapter(self) -> None:
+        result = parse_action_trace(
+            [{"step_type": "goToUrl", "url": "https://x", "description": "..."}]
+        )
+        assert result[0].step_type == "goToUrl"
+
+    def test_action_plus_url_routes_to_operator_adapter(self) -> None:
+        from narada_core.actions.models import OperatorActionTraceItem
+
+        result = parse_action_trace([{"url": "https://x", "action": "click Foo"}])
+        assert isinstance(result[0], OperatorActionTraceItem)
+        assert result[0].action == "click Foo"

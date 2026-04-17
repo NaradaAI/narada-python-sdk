@@ -14,6 +14,7 @@ at those module boundaries by calling into this module.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -51,7 +52,16 @@ _MAX_MESSAGE_CHARS = 500
 _MAX_ERROR_CHARS = 1000
 _MAX_QUERY_CHARS = 200
 
+# When a sub-agent's response includes its own action trace (for example, the
+# operator's step-by-step actions), we forward that trace one level deep so
+# the dashboard can expand it. We do not forward deeper nesting — Python
+# agents that delegate into other Python agents would otherwise produce
+# exponentially-sized persisted traces.
+_MAX_NESTED_ACTION_TRACE_DEPTH = 1
+
 _ELLIPSIS = "\u2026"
+
+_logger = logging.getLogger(__name__)
 
 
 def now_ms() -> int:
@@ -84,8 +94,44 @@ def emit_trace_event(event: dict[str, Any]) -> None:
     ``PythonTraceEvent`` variants defined in ``narada_core.actions.models``.
     No validation is performed here; callers construct events directly and
     are responsible for matching the schema.
+
+    Observability must not break the thing it observes: any failure
+    serialising or forwarding the event is logged and swallowed rather than
+    propagated to user code. ``default=str`` catches stray non-serialisable
+    values (timestamps, Pydantic models, numpy scalars) by stringifying them.
     """
-    _narada_emit_trace_event(json.dumps(event))  # noqa: F821
+    try:
+        _narada_emit_trace_event(json.dumps(event, default=str))  # noqa: F821
+    except Exception:  # noqa: BLE001 — broad by design; see docstring
+        _logger.warning("trace event emission failed", exc_info=True)
+
+
+def _strip_nested_python_events(
+    raw: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Forward a nested action trace one level deep. Any ``pythonAgentRun``
+    node inside retains its outer status/duration metadata but its ``events``
+    list is dropped, preventing deep recursion from blowing up persisted
+    JSON size. A ``truncated_event_count`` field is left behind so the
+    dashboard can show that events were elided.
+    """
+    if raw is None:
+        return None
+
+    def strip(item: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            return item
+        if item.get("step_type") != "pythonAgentRun":
+            return item
+        events = item.get("events", [])
+        stripped = dict(item)
+        stripped["events"] = []
+        stripped["truncated_event_count"] = (
+            len(events) if isinstance(events, list) else 0
+        )
+        return stripped
+
+    return [strip(item) for item in raw]
 
 
 def summarize_request(request: ExtensionActionRequest) -> dict[str, Any]:
@@ -197,7 +243,7 @@ def emit_sub_agent_call(
     if error_message is not None:
         event["error_message"] = truncate_error(error_message)
     if action_trace_raw is not None:
-        event["action_trace"] = action_trace_raw
+        event["action_trace"] = _strip_nested_python_events(action_trace_raw)
     emit_trace_event(event)
 
 

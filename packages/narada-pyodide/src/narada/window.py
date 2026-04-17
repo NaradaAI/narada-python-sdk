@@ -332,7 +332,7 @@ class BaseBrowserWindow(ABC):
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE):
             _trace.emit_sub_agent_call(
                 ts_start=trace_start_ms,
                 agent_type=agent_type_str,
@@ -341,15 +341,6 @@ class BaseBrowserWindow(ABC):
                 error_message=f"Timed out after {timeout}s",
             )
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
-        except NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE:
-            _trace.emit_sub_agent_call(
-                ts_start=trace_start_ms,
-                agent_type=agent_type_str,
-                prompt=prompt,
-                status="timeout",
-                error_message=f"Timed out after {timeout}s",
-            )
-            raise
         except Exception as err:
             _trace.emit_sub_agent_call(
                 ts_start=trace_start_ms,
