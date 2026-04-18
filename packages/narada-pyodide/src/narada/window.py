@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import time
-import uuid
 from abc import ABC
 from http import HTTPStatus
 from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
@@ -36,6 +35,7 @@ from narada_core.actions.models import (
     RecordedClick,
     WriteGoogleSheetRequest,
     parse_action_trace,
+    run_critic,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -51,7 +51,7 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
@@ -397,7 +397,8 @@ class BaseBrowserWindow(ABC):
 
         critic_result: CriticResult | None = None
         if critic is not None:
-            critic_result = await self._run_critic(
+            critic_result = await run_critic(
+                dispatch_request=self.dispatch_request,
                 original_prompt=prompt,
                 response_content=response_content,
                 action_trace_raw=action_trace_raw,
@@ -415,74 +416,6 @@ class BaseBrowserWindow(ABC):
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
             critic_result=critic_result,
-        )
-
-    async def _run_critic(
-        self,
-        *,
-        original_prompt: str,
-        response_content: dict[str, Any],
-        action_trace_raw: list[Any] | None,
-        critic: CriticConfig,
-        time_zone: str,
-        timeout: int,
-    ) -> CriticResult:
-
-        if critic.output_schema is not None:
-            combined_fields: dict[str, Any] = {
-                name: (info.annotation, info)
-                for name, info in critic.output_schema.model_fields.items()
-            }
-        else:
-            combined_fields = {}
-        _VALIDATION_VAR = f"_narada_validation_passed_{uuid.uuid4().hex[:4]}"
-        combined_fields[_VALIDATION_VAR] = (bool, ...)
-        CriticOutputModel = create_model("CriticOutput", **combined_fields)
-
-        critic_dispatch_response = await self.dispatch_request(
-            prompt=critic.prompt,
-            agent=Agent.PRODUCTIVITY,
-            output_schema=CriticOutputModel,
-            critic_context={
-                "agentPrompt": original_prompt,
-                "agentOutput": response_content["text"],
-                "actionTrace": action_trace_raw or [],
-                "validationVariableName": _VALIDATION_VAR,
-            },
-            mcp_servers=critic.mcp_servers,
-            time_zone=time_zone,
-            timeout=timeout,
-        )
-
-        critic_content = critic_dispatch_response["response"]
-        assert critic_content is not None
-
-        combined_output = critic_content.get("structuredOutput")
-        validation_passed = (
-            bool(getattr(combined_output, _VALIDATION_VAR, False))
-            if combined_output is not None
-            else False
-        )
-
-        structured_output: BaseModel | None = None
-        if critic.output_schema is not None and combined_output is not None:
-            output_dict = combined_output.model_dump()
-            output_dict.pop(_VALIDATION_VAR, None)
-            structured_output = critic.output_schema.model_validate(output_dict)
-
-        critic_action_trace_raw = critic_content.get("actionTrace")
-        critic_action_trace = (
-            parse_action_trace(critic_action_trace_raw)
-            if critic_action_trace_raw is not None
-            else None
-        )
-
-        return CriticResult(
-            validation_passed=validation_passed,
-            text=critic_content["text"],
-            structured_output=structured_output,
-            usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
-            action_trace=critic_action_trace,
         )
 
     async def agentic_selector(
