@@ -16,7 +16,14 @@ from typing import (
 )
 
 from narada_core.models import Agent, CriticConfig
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    create_model,
+)
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
