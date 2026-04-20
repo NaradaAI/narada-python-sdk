@@ -578,6 +578,35 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class PromptForUserInputVariable(BaseModel):
+    name: str
+    type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
+    required: bool
+    enum_values: list[str] | None = None
+
+
+class PromptForUserInputRequest(BaseModel):
+    name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
+    step_id: str
+    variables: list[PromptForUserInputVariable]
+
+
+class PromptForUserInputResponse(BaseModel):
+    values_by_name: dict[str, Any]
+
+
+class UserApprovalRequest(BaseModel):
+    name: Literal["user_approval"] = "user_approval"
+    step_id: str
+    prompt_message: str
+    approve_label: str
+    reject_label: str
+
+
+class UserApprovalResponse(BaseModel):
+    approved: bool
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
     | AgenticMouseActionRequest
@@ -590,10 +619,12 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
     | GetUrlRequest
+    | PromptForUserInputRequest
+    | UserApprovalRequest
 )
 
 
 class ExtensionActionResponse(BaseModel):
-    status: Literal["success", "error"]
+    status: Literal["success", "error", "aborted"]
     error: str | None = None
     data: str | None = None
