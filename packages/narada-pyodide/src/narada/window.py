@@ -29,9 +29,14 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
+    PromptForUserInputRequest,
+    PromptForUserInputResponse,
+    PromptForUserInputVariable,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    UserApprovalRequest,
+    UserApprovalResponse,
     WriteGoogleSheetRequest,
     parse_action_trace,
 )
@@ -39,6 +44,7 @@ from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
     NaradaError,
     NaradaTimeoutError,
+    UserAbortedError,
 )
 from narada_core.models import (
     Agent,
@@ -479,6 +485,43 @@ class BaseBrowserWindow(ABC):
             PrintMessageRequest(message=message), timeout=timeout
         )
 
+    async def prompt_for_user_input(
+        self,
+        *,
+        step_id: str,
+        variables: list[PromptForUserInputVariable],
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Prompts the user for one or more input values in the extension UI."""
+        result = await self._run_extension_action(
+            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputResponse,
+            timeout=timeout,
+        )
+        return result.values_by_name
+
+    async def user_approval(
+        self,
+        *,
+        step_id: str,
+        prompt_message: str,
+        approve_label: str,
+        reject_label: str,
+        timeout: int | None = None,
+    ) -> bool:
+        """Prompts the user to approve or reject in the extension UI."""
+        result = await self._run_extension_action(
+            UserApprovalRequest(
+                step_id=step_id,
+                prompt_message=prompt_message,
+                approve_label=approve_label,
+                reject_label=reject_label,
+            ),
+            UserApprovalResponse,
+            timeout=timeout,
+        )
+        return result.approved
+
     async def read_google_sheet(
         self,
         *,
@@ -601,6 +644,8 @@ class BaseBrowserWindow(ABC):
         response = ExtensionActionResponse.model_validate(resp_json)
         if response.status == "error":
             raise NaradaError(response.error)
+        if response.status == "aborted":
+            raise UserAbortedError
 
         if response_model is None:
             return None

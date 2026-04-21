@@ -5,6 +5,7 @@ from narada_core.errors import (
     NaradaInitializationError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
+    UserAbortedError,
 )
 from narada_core.models import Agent, File, Response, ResponseContent
 
@@ -34,4 +35,5 @@ __all__ = [
     "render_html",
     "Response",
     "ResponseContent",
+    "UserAbortedError",
 ]
