@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path("/Users/zizheng/Projects/narada-python-sdk")
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
@@ -212,14 +213,11 @@ async def test_open_and_initialize_cloud_browser_window_raises_when_version_is_u
     narada_pkg, client_module, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     monkeypatch.setattr(client_module, "__version__", "unknown")
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(InvalidVersion) as exc_info:
         async with narada_pkg.Narada(api_key="test-api-key"):
             pass
 
-    assert (
-        "narada-pyodide version metadata is unavailable or invalid ('unknown')"
-        in str(exc_info.value)
-    )
+    assert "Invalid version: 'unknown'" in str(exc_info.value)
     assert pyfetch.await_count == 1
 
 
@@ -246,6 +244,36 @@ async def test_cloud_browser_window_close_stops_cloud_session(
         "Content-Type": "application/json",
     }
     assert json.loads(call.kwargs["body"]) == {"session_id": "session-123"}
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="hello from cloud browser")
+
+    assert response["status"] == "success"
+    post_call = pyfetch.await_args_list[0]
+    assert post_call.args[0].endswith("/remote-dispatch")
+    assert post_call.kwargs["method"] == "POST"
+    payload = json.loads(post_call.kwargs["body"])
+    assert payload["browserWindowId"] == "browser-window-123"
+    assert payload["prompt"] == "/Operator hello from cloud browser"
+    assert "parentRunIds" not in payload
 
 
 @pytest.mark.asyncio
@@ -304,6 +332,7 @@ async def test_remote_browser_window_without_cloud_session_keeps_extension_actio
         return_value=_FakeResponse(json_data={"status": "success", "data": None})
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
 
     window = window_module.RemoteBrowserWindow(
         browser_window_id="browser-window-123",
@@ -318,3 +347,37 @@ async def test_remote_browser_window_without_cloud_session_keeps_extension_actio
     payload = json.loads(call.kwargs["body"])
     assert payload["browserWindowId"] == "browser-window-123"
     assert payload["action"]["name"] == "close_window"
+    assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
+    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-1"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+            _FakeResponse(json_data={"requestId": "req-2"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = window_module.LocalBrowserWindow()
+
+    window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
+    first_response = await window.dispatch_request(prompt="first prompt")
+
+    window_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
+    second_response = await window.dispatch_request(prompt="second prompt")
+
+    assert first_response["status"] == "success"
+    assert second_response["status"] == "success"
+
+    first_post = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
+    assert first_post["parentRunIds"] == ["run-a"]
+    assert second_post["parentRunIds"] == ["run-b", "run-c"]
