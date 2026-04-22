@@ -172,7 +172,9 @@ async def test_cloud_browser_window_get_downloaded_files_returns_presigned_urls(
                     ]
                 }
             ),
-            _FakeResponse(json_data={"presigned_url": "https://example.com/report.pdf"}),
+            _FakeResponse(
+                json_data={"presigned_url": "https://example.com/report.pdf"}
+            ),
         ]
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
