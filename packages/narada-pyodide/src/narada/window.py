@@ -93,6 +93,35 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
+def _normalize_narada_env(env: str | None) -> Literal["prod", "dev", None]:
+    if env is not None and env not in ("prod", "dev"):
+        raise ValueError(f"Invalid environment: {env!r}")
+    return cast(Literal["prod", "dev", None], env)
+
+
+async def _build_auth_headers(
+    *,
+    api_key: str | None,
+    user_id: str | None,
+    env: Literal["prod", "dev", None],
+) -> dict[str, str]:
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+
+    if api_key is not None:
+        headers["x-api-key"] = api_key
+        return headers
+
+    if user_id is None or env is None:
+        raise ValueError(
+            "Either `api_key` or all of `user_id` and `env` must be provided"
+        )
+
+    headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
+    headers["X-Narada-User-ID"] = user_id
+    headers["X-Narada-Env"] = env
+    return headers
+
+
 @dataclass
 class SessionDownloadItem:
     """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
@@ -133,24 +162,12 @@ class BaseBrowserWindow(ABC):
     def browser_window_id(self) -> str:
         return self._browser_window_id
 
-    async def _get_auth_headers(
-        self, *, include_content_type: bool = False
-    ) -> dict[str, str]:
-        headers: dict[str, str] = {}
-        if include_content_type:
-            headers["Content-Type"] = "application/json"
-
-        if self._api_key is not None:
-            headers["x-api-key"] = self._api_key
-            return headers
-
-        assert self._user_id is not None
-        assert self._env is not None
-
-        headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
-        headers["X-Narada-User-ID"] = self._user_id
-        headers["X-Narada-Env"] = self._env
-        return headers
+    async def _get_auth_headers(self) -> dict[str, str]:
+        return await _build_auth_headers(
+            api_key=self._api_key,
+            user_id=self._user_id,
+            env=self._env,
+        )
 
     async def upload_file(self, *, file: IO) -> File:
         """Uploads a file that can be used as an attachment in a subsequent `agent` request.
@@ -241,7 +258,7 @@ class BaseBrowserWindow(ABC):
 
         deadline = time.monotonic() + timeout
 
-        headers = await self._get_auth_headers(include_content_type=True)
+        headers = await self._get_auth_headers()
 
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
@@ -689,7 +706,7 @@ class BaseBrowserWindow(ABC):
         trace_start_ms = _trace.now_ms()
 
         try:
-            headers = await self._get_auth_headers(include_content_type=True)
+            headers = await self._get_auth_headers()
 
             body = {
                 "action": request.model_dump(),
@@ -760,15 +777,11 @@ class BaseBrowserWindow(ABC):
 
 class LocalBrowserWindow(BaseBrowserWindow):
     def __init__(self) -> None:
-        env = os.environ.get("NARADA_ENV")
-        if env is not None and env not in ("prod", "dev"):
-            raise ValueError(f"Invalid environment: {env!r}")
-
         super().__init__(
             api_key=os.environ.get("NARADA_API_KEY"),
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
             user_id=os.environ.get("NARADA_USER_ID"),
-            env=env,
+            env=_normalize_narada_env(os.environ.get("NARADA_ENV")),
             browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
         )
 
@@ -783,12 +796,14 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         browser_window_id: str,
         cloud_browser_session_id: str | None = None,
         api_key: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
     ) -> None:
         super().__init__(
-            api_key=api_key or os.environ["NARADA_API_KEY"],
+            api_key=api_key or os.environ.get("NARADA_API_KEY"),
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
-            user_id=None,
-            env=None,
+            user_id=user_id or os.environ.get("NARADA_USER_ID"),
+            env=_normalize_narada_env(env or os.environ.get("NARADA_ENV")),
             browser_window_id=browser_window_id,
         )
         self._cloud_browser_session_id = cloud_browser_session_id
@@ -833,12 +848,14 @@ class CloudBrowserWindow(BaseBrowserWindow):
         browser_window_id: str,
         session_id: str,
         api_key: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
     ) -> None:
         super().__init__(
-            api_key=api_key or os.environ["NARADA_API_KEY"],
+            api_key=api_key or os.environ.get("NARADA_API_KEY"),
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
-            user_id=None,
-            env=None,
+            user_id=user_id or os.environ.get("NARADA_USER_ID"),
+            env=_normalize_narada_env(env or os.environ.get("NARADA_ENV")),
             browser_window_id=browser_window_id,
         )
         self._session_id = session_id

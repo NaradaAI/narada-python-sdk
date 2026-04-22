@@ -84,6 +84,7 @@ def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMoc
     client_module = importlib.import_module("narada.client")
     window_module = importlib.import_module("narada.window")
     window_module._narada_parent_run_ids = _FakeJsProxy([])
+    window_module._narada_get_id_token = AsyncMock(return_value="frontend-id-token")
     return narada_pkg, client_module, window_module
 
 
@@ -128,6 +129,98 @@ async def test_open_and_initialize_cloud_browser_window_maps_response(
         "session_timeout": 321,
         "require_extension": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NARADA_API_KEY", raising=False)
+    monkeypatch.setenv("NARADA_USER_ID", "user-123")
+    monkeypatch.setenv("NARADA_ENV", "dev")
+
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(
+                json_data={
+                    "packages": {"narada-pyodide": {"min_required_version": "0.0.1"}}
+                }
+            ),
+            _FakeResponse(
+                json_data={
+                    "session_id": "session-456",
+                    "session_name": "demo",
+                    "browser_window_id": "browser-window-456",
+                }
+            ),
+            _FakeResponse(json_data={"success": True}),
+        ]
+    )
+    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    async with narada_pkg.Narada() as client:
+        window = await client.open_and_initialize_cloud_browser_window(
+            session_name="demo",
+            session_timeout=321,
+            require_extension=True,
+        )
+
+    assert isinstance(window, narada_pkg.CloudBrowserWindow)
+    assert window.browser_window_id == "browser-window-456"
+    assert window.cloud_browser_session_id == "session-456"
+
+    sdk_config_call, create_call = pyfetch.await_args_list
+    assert sdk_config_call.args[0].endswith("/sdk/config")
+    assert sdk_config_call.kwargs["headers"] == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer frontend-id-token",
+        "X-Narada-User-ID": "user-123",
+        "X-Narada-Env": "dev",
+    }
+    assert create_call.args[0].endswith(
+        "/cloud-browser/create-and-initialize-cloud-browser-session"
+    )
+    assert create_call.kwargs["headers"] == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer frontend-id-token",
+        "X-Narada-User-ID": "user-123",
+        "X-Narada-Env": "dev",
+    }
+
+    await window.close()
+    stop_call = pyfetch.await_args_list[-1]
+    assert stop_call.args[0].endswith("/cloud-browser/stop-cloud-browser-session")
+    assert stop_call.kwargs["headers"] == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer frontend-id-token",
+        "X-Narada-User-ID": "user-123",
+        "X-Narada-Env": "dev",
+    }
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_raises_when_version_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "packages": {"narada-pyodide": {"min_required_version": "999.0.0"}}
+            }
+        )
+    )
+    narada_pkg, client_module, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    monkeypatch.setattr(client_module, "__version__", "unknown")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        async with narada_pkg.Narada(api_key="test-api-key"):
+            pass
+
+    assert (
+        "narada-pyodide version metadata is unavailable or invalid ('unknown')"
+        in str(exc_info.value)
+    )
+    assert pyfetch.await_count == 1
 
 
 @pytest.mark.asyncio
