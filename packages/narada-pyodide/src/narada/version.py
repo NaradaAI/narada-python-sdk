@@ -1,7 +1,7 @@
 import importlib.metadata
 
 try:
-    __version__ = importlib.metadata.version("narada")
+    __version__ = importlib.metadata.version("narada-pyodide")
 except Exception:
-    # Fallback version if package metadata is not available
+    # Fallback sentinel. Validation treats this as a fatal release issue.
     __version__ = "unknown"
