@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -312,7 +312,7 @@ wheels = [
 
 [[package]]
 name = "narada"
-version = "0.1.42"
+version = "0.1.43"
 source = { editable = "packages/narada" }
 dependencies = [
     { name = "aiohttp" },
@@ -345,7 +345,7 @@ dev = [
 
 [[package]]
 name = "narada-core"
-version = "0.0.17"
+version = "0.0.18"
 source = { editable = "packages/narada-core" }
 dependencies = [
     { name = "pydantic" },
@@ -356,7 +356,7 @@ requires-dist = [{ name = "pydantic", specifier = "==2.12.5" }]
 
 [[package]]
 name = "narada-pyodide"
-version = "0.0.43"
+version = "0.0.44"
 source = { editable = "packages/narada-pyodide" }
 dependencies = [
     { name = "narada-core" },
@@ -367,6 +367,8 @@ dependencies = [
 dev = [
     { name = "pyodide-py", version = "0.27.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "pyodide-py", version = "0.28.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -376,7 +378,11 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pyodide-py", specifier = ">=0.27.7" }]
+dev = [
+    { name = "pyodide-py", specifier = ">=0.27.7" },
+    { name = "pytest", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+]
 
 [[package]]
 name = "packaging"
