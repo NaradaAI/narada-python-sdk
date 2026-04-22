@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 import os
 import time
 from abc import ABC
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
+from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
@@ -29,9 +32,14 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
+    PromptForUserInputRequest,
+    PromptForUserInputResponse,
+    PromptForUserInputVariable,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    UserApprovalRequest,
+    UserApprovalResponse,
     WriteGoogleSheetRequest,
     parse_action_trace,
 )
@@ -39,6 +47,7 @@ from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
     NaradaError,
     NaradaTimeoutError,
+    UserAbortedError,
 )
 from narada_core.models import (
     Agent,
@@ -56,6 +65,8 @@ from . import _trace
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
+
+logger = logging.getLogger(__name__)
 
 _cached_parent_run_ids: list[str] | None = None
 
@@ -80,6 +91,15 @@ if TYPE_CHECKING:
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+
+@dataclass
+class SessionDownloadItem:
+    """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
+
+    file_name: str
+    size: int
+    download_url: str
 
 
 class BaseBrowserWindow(ABC):
@@ -112,6 +132,25 @@ class BaseBrowserWindow(ABC):
     @property
     def browser_window_id(self) -> str:
         return self._browser_window_id
+
+    async def _get_auth_headers(
+        self, *, include_content_type: bool = False
+    ) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if include_content_type:
+            headers["Content-Type"] = "application/json"
+
+        if self._api_key is not None:
+            headers["x-api-key"] = self._api_key
+            return headers
+
+        assert self._user_id is not None
+        assert self._env is not None
+
+        headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
+        headers["X-Narada-User-ID"] = self._user_id
+        headers["X-Narada-Env"] = self._env
+        return headers
 
     async def upload_file(self, *, file: IO) -> File:
         """Uploads a file that can be used as an attachment in a subsequent `agent` request.
@@ -202,16 +241,7 @@ class BaseBrowserWindow(ABC):
 
         deadline = time.monotonic() + timeout
 
-        headers = {"Content-Type": "application/json"}
-        if self._api_key is not None:
-            headers["x-api-key"] = self._api_key
-        else:
-            assert self._user_id is not None
-            assert self._env is not None
-
-            headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
-            headers["X-Narada-User-ID"] = self._user_id
-            headers["X-Narada-Env"] = self._env
+        headers = await self._get_auth_headers(include_content_type=True)
 
         agent_prefix = (
             agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
@@ -313,12 +343,22 @@ class BaseBrowserWindow(ABC):
                         else:
                             response_content["structuredOutput"] = None
 
+                    trace_status: _trace.SubAgentCallStatus = (
+                        "error" if response["status"] == "error" else "success"
+                    )
+                    trace_error: str | None = (
+                        response_content.get("text")
+                        if response["status"] == "error"
+                        and response_content is not None
+                        else None
+                    )
                     _trace.emit_sub_agent_call(
                         ts_start=trace_start_ms,
                         agent_type=agent_type_str,
                         prompt=prompt,
-                        status="success",
+                        status=trace_status,
                         request_id=request_id,
+                        error_message=trace_error,
                         action_trace_raw=(
                             response_content.get("actionTrace")
                             if response_content is not None
@@ -332,7 +372,16 @@ class BaseBrowserWindow(ABC):
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
-        except (asyncio.TimeoutError, NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE):
+        except NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="timeout",
+                error_message=f"Timed out after {timeout}s",
+            )
+            raise
+        except asyncio.TimeoutError:
             _trace.emit_sub_agent_call(
                 ts_start=trace_start_ms,
                 agent_type=agent_type_str,
@@ -515,6 +564,43 @@ class BaseBrowserWindow(ABC):
             PrintMessageRequest(message=message), timeout=timeout
         )
 
+    async def prompt_for_user_input(
+        self,
+        *,
+        step_id: str,
+        variables: list[PromptForUserInputVariable],
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Prompts the user for one or more input values in the extension UI."""
+        result = await self._run_extension_action(
+            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputResponse,
+            timeout=timeout,
+        )
+        return result.values_by_name
+
+    async def user_approval(
+        self,
+        *,
+        step_id: str,
+        prompt_message: str,
+        approve_label: str,
+        reject_label: str,
+        timeout: int | None = None,
+    ) -> bool:
+        """Prompts the user to approve or reject in the extension UI."""
+        result = await self._run_extension_action(
+            UserApprovalRequest(
+                step_id=step_id,
+                prompt_message=prompt_message,
+                approve_label=approve_label,
+                reject_label=reject_label,
+            ),
+            UserApprovalResponse,
+            timeout=timeout,
+        )
+        return result.approved
+
     async def read_google_sheet(
         self,
         *,
@@ -603,16 +689,7 @@ class BaseBrowserWindow(ABC):
         trace_start_ms = _trace.now_ms()
 
         try:
-            headers = {"Content-Type": "application/json"}
-            if self._api_key is not None:
-                headers["x-api-key"] = self._api_key
-            else:
-                assert self._user_id is not None
-                assert self._env is not None
-
-                headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
-                headers["X-Narada-User-ID"] = self._user_id
-                headers["X-Narada-Env"] = self._env
+            headers = await self._get_auth_headers(include_content_type=True)
 
             body = {
                 "action": request.model_dump(),
@@ -642,6 +719,8 @@ class BaseBrowserWindow(ABC):
             response = ExtensionActionResponse.model_validate(resp_json)
             if response.status == "error":
                 raise NaradaError(response.error)
+            if response.status == "aborted":
+                raise UserAbortedError
 
             if response_model is None:
                 _trace.emit_extension_action(
@@ -698,7 +777,13 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
-    def __init__(self, *, browser_window_id: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        cloud_browser_session_id: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
         super().__init__(
             api_key=api_key or os.environ["NARADA_API_KEY"],
             base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
@@ -706,6 +791,192 @@ class RemoteBrowserWindow(BaseBrowserWindow):
             env=None,
             browser_window_id=browser_window_id,
         )
+        self._cloud_browser_session_id = cloud_browser_session_id
+
+    @property
+    def cloud_browser_session_id(self) -> str | None:
+        return self._cloud_browser_session_id
+
+    async def close(self, *, timeout: int | None = None) -> None:
+        """Closes the browser window or stops the backing cloud session."""
+        if self._cloud_browser_session_id is None:
+            return await super().close(timeout=timeout)
+
+        await _stop_cloud_browser_session(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self._cloud_browser_session_id,
+            timeout=timeout,
+        )
+
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
+        if self._cloud_browser_session_id is None:
+            raise ValueError(
+                "Cloud browser session ID is required to get downloaded files"
+            )
+
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self._cloud_browser_session_id,
+        )
 
     def __str__(self) -> str:
         return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+
+
+class CloudBrowserWindow(BaseBrowserWindow):
+    def __init__(
+        self,
+        *,
+        browser_window_id: str,
+        session_id: str,
+        api_key: str | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key or os.environ["NARADA_API_KEY"],
+            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
+            user_id=None,
+            env=None,
+            browser_window_id=browser_window_id,
+        )
+        self._session_id = session_id
+
+    @property
+    def cloud_browser_session_id(self) -> str:
+        return self._session_id
+
+    async def close(self, *, timeout: int | None = None) -> None:
+        """Stops the cloud browser session."""
+        await _stop_cloud_browser_session(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self._session_id,
+            timeout=timeout,
+        )
+
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self._session_id,
+        )
+
+    def __str__(self) -> str:
+        return (
+            "CloudBrowserWindow("
+            f"cloud_browser_session_id={self._session_id}, "
+            f"browser_window_id={self.browser_window_id}"
+            ")"
+        )
+
+
+def _build_cloud_browser_url(
+    base_url: str, path: str, *, params: dict[str, str] | None = None
+) -> str:
+    if not params:
+        return f"{base_url}{path}"
+    return f"{base_url}{path}?{urlencode(params)}"
+
+
+async def _fetch_presigned_download_url(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_id: str,
+    key: str,
+) -> str:
+    fetch_response = await pyfetch(
+        _build_cloud_browser_url(
+            base_url,
+            "/cloud-browser/replay/download-url",
+            params={"session_id": session_id, "key": key},
+        ),
+        headers=auth_headers,
+    )
+    if not fetch_response.ok:
+        raise NaradaError(
+            "Failed to fetch cloud browser download URL: "
+            f"{fetch_response.status} {await fetch_response.text()}"
+        )
+    data = await fetch_response.json()
+    return data["presigned_url"]
+
+
+async def _get_cloud_browser_downloads(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_id: str,
+) -> list[SessionDownloadItem]:
+    fetch_response = await pyfetch(
+        _build_cloud_browser_url(
+            base_url,
+            "/cloud-browser/replay/downloads",
+            params={"session_id": session_id},
+        ),
+        headers=auth_headers,
+    )
+    if not fetch_response.ok:
+        raise NaradaError(
+            "Failed to fetch cloud browser downloads: "
+            f"{fetch_response.status} {await fetch_response.text()}"
+        )
+
+    data = await fetch_response.json()
+    files = data.get("downloaded_files") or []
+    if not files:
+        return []
+
+    presigned_urls = await asyncio.gather(
+        *[
+            _fetch_presigned_download_url(
+                base_url=base_url,
+                auth_headers=auth_headers,
+                session_id=session_id,
+                key=item["key"],
+            )
+            for item in files
+        ]
+    )
+    return [
+        SessionDownloadItem(
+            file_name=item["file_name"],
+            size=item["size"],
+            download_url=presigned_urls[index],
+        )
+        for index, item in enumerate(files)
+    ]
+
+
+async def _stop_cloud_browser_session(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_id: str,
+    timeout: int | None = None,
+) -> None:
+    try:
+        fetch_response = await pyfetch(
+            f"{base_url}/cloud-browser/stop-cloud-browser-session",
+            method="POST",
+            headers={**auth_headers, "Content-Type": "application/json"},
+            body=json.dumps({"session_id": session_id}),
+        )
+        if not fetch_response.ok:
+            logger.warning(
+                "Failed to stop session %s: %s", session_id, fetch_response.status
+            )
+            return
+
+        response_data = await fetch_response.json()
+        if not response_data.get("success"):
+            logger.warning(
+                "Failed to stop session %s: %s",
+                session_id,
+                response_data.get("message"),
+            )
+    except Exception as e:
+        logger.warning("Error calling stop session endpoint: %s", e)

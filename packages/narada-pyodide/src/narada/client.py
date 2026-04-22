@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -9,6 +10,7 @@ from packaging.version import Version
 from pyodide.http import pyfetch
 
 from narada.version import __version__
+from narada.window import CloudBrowserWindow
 
 
 class Narada:
@@ -52,3 +54,43 @@ class Narada:
                 f"narada-pyodide<={__version__} is not supported. Please reload the page to "
                 f"upgrade to version {package_config.min_required_version} or higher."
             )
+
+    async def open_and_initialize_cloud_browser_window(
+        self,
+        *,
+        session_name: str | None = None,
+        session_timeout: int | None = None,
+        require_extension: bool = True,
+    ) -> CloudBrowserWindow:
+        base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
+        endpoint_url = (
+            f"{base_url}/cloud-browser/create-and-initialize-cloud-browser-session"
+        )
+        request_body = {
+            "session_name": session_name,
+            "session_timeout": session_timeout,
+            "require_extension": require_extension,
+        }
+
+        resp = await pyfetch(
+            endpoint_url,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self._api_key,
+            },
+            body=json.dumps(request_body),
+        )
+        if not resp.ok:
+            raise RuntimeError(
+                "Failed to create and initialize cloud browser session: "
+                f"{resp.status} {await resp.text()}\n"
+                f"Endpoint URL: {endpoint_url}"
+            )
+
+        response_data = await resp.json()
+        return CloudBrowserWindow(
+            browser_window_id=response_data["browser_window_id"],
+            session_id=response_data["session_id"],
+            api_key=self._api_key,
+        )
