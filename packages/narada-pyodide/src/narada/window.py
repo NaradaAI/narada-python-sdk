@@ -6,7 +6,17 @@ import time
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Optional,
+    TypeVar,
+    cast,
+    overload,
+    override,
+)
 from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
@@ -68,19 +78,16 @@ from . import _trace
 
 logger = logging.getLogger(__name__)
 
-_cached_parent_run_ids: list[str] | None = None
-
 
 def _parent_run_ids() -> list[str]:
     # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the JavaScript harness.
     # Before we can use it as a regular Python list, we need to call `.to_py()` on it.
-    global _cached_parent_run_ids
-    if _cached_parent_run_ids is None:
-        _cached_parent_run_ids = cast(
+    return list(
+        cast(
             JsProxy,
             _narada_parent_run_ids,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
         ).to_py()
-    return _cached_parent_run_ids
+    )
 
 
 if TYPE_CHECKING:
@@ -161,6 +168,16 @@ class BaseBrowserWindow(ABC):
     @property
     def browser_window_id(self) -> str:
         return self._browser_window_id
+
+    def _current_parent_run_ids(self) -> list[str] | None:
+        """Returns the runnable stack to forward with SDK requests.
+
+        Only requests targeting the current browser window should inherit the current runnable
+        stack. Remote/cloud browser windows execute in a different frontend instance with an
+        independent RunnableEngine, so forwarding parent run IDs would make that frontend treat the
+        request as a child runnable of a stack frame it does not have.
+        """
+        return None
 
     async def _get_auth_headers(self) -> dict[str, str]:
         return await _build_auth_headers(
@@ -267,8 +284,10 @@ class BaseBrowserWindow(ABC):
             "prompt": agent_prefix + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
-            "parentRunIds": _parent_run_ids(),
         }
+        parent_run_ids = self._current_parent_run_ids()
+        if parent_run_ids:
+            body["parentRunIds"] = parent_run_ids
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:
@@ -711,8 +730,10 @@ class BaseBrowserWindow(ABC):
             body = {
                 "action": request.model_dump(),
                 "browserWindowId": self.browser_window_id,
-                "parentRunIds": _parent_run_ids(),
             }
+            parent_run_ids = self._current_parent_run_ids()
+            if parent_run_ids:
+                body["parentRunIds"] = parent_run_ids
             if timeout is not None:
                 body["timeout"] = timeout
 
@@ -787,6 +808,10 @@ class LocalBrowserWindow(BaseBrowserWindow):
 
     def __str__(self) -> str:
         return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
+
+    @override
+    def _current_parent_run_ids(self) -> list[str] | None:
+        return _parent_run_ids()
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
