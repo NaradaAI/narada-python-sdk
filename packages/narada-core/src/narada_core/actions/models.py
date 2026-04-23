@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import uuid
 from typing import (
     Annotated,
     Any,
-    Awaitable,
-    Callable,
     Generic,
     Literal,
     NotRequired,
@@ -15,14 +12,11 @@ from typing import (
     override,
 )
 
-from narada_core.models import Agent, CriticConfig
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     TypeAdapter,
     ValidationError,
-    create_model,
 )
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
@@ -289,8 +283,6 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 class CriticResult(BaseModel):
     """Result from a critic agent that evaluated the main agent's output."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     validation_passed: bool
     """Whether the critic determined the main agent successfully completed its task."""
 
@@ -302,74 +294,6 @@ class CriticResult(BaseModel):
 
     usage: AgentUsage
     action_trace: ActionTrace | None = None
-
-
-async def run_critic(
-    *,
-    dispatch_request: Callable[..., Awaitable[Any]],
-    original_prompt: str,
-    response_content: dict[str, Any],
-    action_trace_raw: list[Any] | None,
-    critic: CriticConfig,
-    time_zone: str,
-    timeout: int,
-) -> CriticResult:
-    if critic.output_schema is not None:
-        combined_fields: dict[str, Any] = {
-            name: (info.annotation, info)
-            for name, info in critic.output_schema.model_fields.items()
-        }
-    else:
-        combined_fields = {}
-    _VALIDATION_VAR = f"narada_validation_passed_{uuid.uuid4().hex[:4]}"
-    combined_fields[_VALIDATION_VAR] = (bool, ...)
-    CriticOutputModel = create_model("CriticOutput", **combined_fields)
-
-    critic_dispatch_response = await dispatch_request(
-        prompt=critic.prompt,
-        agent=Agent.PRODUCTIVITY,
-        output_schema=CriticOutputModel,
-        critic_context={
-            "agentPrompt": original_prompt,
-            "agentOutput": response_content["text"],
-            "actionTrace": action_trace_raw or [],
-            "validationVariableName": _VALIDATION_VAR,
-        },
-        mcp_servers=critic.mcp_servers,
-        time_zone=time_zone,
-        timeout=timeout,
-    )
-
-    critic_content = critic_dispatch_response["response"]
-    assert critic_content is not None
-
-    combined_output = critic_content.get("structuredOutput")
-    validation_passed = (
-        bool(getattr(combined_output, _VALIDATION_VAR, False))
-        if combined_output is not None
-        else False
-    )
-
-    structured_output: BaseModel | None = None
-    if critic.output_schema is not None and combined_output is not None:
-        output_dict = combined_output.model_dump()
-        output_dict.pop(_VALIDATION_VAR, None)
-        structured_output = critic.output_schema.model_validate(output_dict)
-
-    critic_action_trace_raw = critic_content.get("actionTrace")
-    critic_action_trace = (
-        parse_action_trace(critic_action_trace_raw)
-        if critic_action_trace_raw is not None
-        else None
-    )
-
-    return CriticResult(
-        validation_passed=validation_passed,
-        text=critic_content["text"],
-        structured_output=structured_output,
-        usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
-        action_trace=critic_action_trace,
-    )
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):

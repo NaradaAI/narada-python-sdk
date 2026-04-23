@@ -7,6 +7,7 @@ from http import HTTPStatus
 from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload
 
 from js import AbortController, setTimeout  # type: ignore
+from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
@@ -35,7 +36,6 @@ from narada_core.actions.models import (
     RecordedClick,
     WriteGoogleSheetRequest,
     parse_action_trace,
-    run_critic,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,

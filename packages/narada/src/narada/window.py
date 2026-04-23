@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import time
-import uuid
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
 
 import aiohttp
+from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
@@ -39,7 +39,6 @@ from narada_core.actions.models import (
     RecordedClick,
     WriteGoogleSheetRequest,
     parse_action_trace,
-    run_critic,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
