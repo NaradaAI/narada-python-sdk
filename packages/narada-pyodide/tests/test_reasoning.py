@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from narada_core.models import Agent, ReasoningEffort
 
 
 def _clear_modules() -> None:
@@ -141,8 +142,6 @@ class TestReasoningBodyWiring:
         reimported_window: tuple[ModuleType, AsyncMock, list[dict[str, Any]]],
     ) -> None:
         window_module, _pyfetch, posted_bodies = reimported_window
-        from narada_core.models import Agent, ReasoningEffort
-
         window = _make_window(window_module)
         await window.dispatch_request(
             prompt="solve this",
@@ -158,8 +157,6 @@ class TestReasoningBodyWiring:
         reimported_window: tuple[ModuleType, AsyncMock, list[dict[str, Any]]],
     ) -> None:
         window_module, _pyfetch, posted_bodies = reimported_window
-        from narada_core.models import Agent
-
         window = _make_window(window_module)
         await window.dispatch_request(
             prompt="solve this",
@@ -175,8 +172,6 @@ class TestReasoningBodyWiring:
         reimported_window: tuple[ModuleType, AsyncMock, list[dict[str, Any]]],
     ) -> None:
         window_module, _pyfetch, posted_bodies = reimported_window
-        from narada_core.models import Agent, ReasoningEffort
-
         window = _make_window(window_module)
 
         for level in (
@@ -207,8 +202,6 @@ class TestReasoningRuntimeValidation:
         reimported_window: tuple[ModuleType, AsyncMock, list[dict[str, Any]]],
     ) -> None:
         window_module, _pyfetch, _posted = reimported_window
-        from narada_core.models import Agent, ReasoningEffort
-
         window = _make_window(window_module)
         with pytest.raises(ValueError, match="agent=Agent.CORE_AGENT"):
             await window.dispatch_request(
@@ -225,8 +218,6 @@ class TestReasoningRuntimeValidation:
         # String-form bypasses the type-checker overload, so the runtime check
         # is the only safety net here.
         window_module, _pyfetch, _posted = reimported_window
-        from narada_core.models import ReasoningEffort
-
         window = _make_window(window_module)
         with pytest.raises(ValueError, match="agent=Agent.CORE_AGENT"):
             await window.dispatch_request(
@@ -242,8 +233,6 @@ class TestReasoningRuntimeValidation:
     ) -> None:
         # The same constraint must hold on the higher-level `agent()` method.
         window_module, _pyfetch, _posted = reimported_window
-        from narada_core.models import Agent, ReasoningEffort
-
         window = _make_window(window_module)
         with pytest.raises(ValueError, match="agent=Agent.CORE_AGENT"):
             await window.agent(
@@ -260,8 +249,6 @@ class TestReasoningEffortEnum:
         # The backend declares `reasoningMode: Literal["none", "low",
         # "medium", "high"] | None`. If we drift, requests will start failing
         # validation server-side.
-        from narada_core.models import ReasoningEffort
-
         assert ReasoningEffort.NONE.value == "none"
         assert ReasoningEffort.LOW.value == "low"
         assert ReasoningEffort.MEDIUM.value == "medium"
@@ -270,8 +257,6 @@ class TestReasoningEffortEnum:
     def test_str_enum_serializes_inline(self) -> None:
         # `StrEnum` values double as `str`, which is what `json.dumps` writes
         # without any custom encoder.
-        from narada_core.models import ReasoningEffort
-
         assert json.dumps({"reasoningMode": ReasoningEffort.MEDIUM.value}) == (
             '{"reasoningMode": "medium"}'
         )
