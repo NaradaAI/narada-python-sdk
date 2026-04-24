@@ -104,8 +104,20 @@ class ReadGoogleSheetTrace(BaseModel):
     description: str
 
 
+class ReadExcelSheetTrace(BaseModel):
+    step_type: Literal["readExcelSheet"]
+    url: str
+    description: str
+
+
 class WriteGoogleSheetTrace(BaseModel):
     step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteExcelSheetTrace(BaseModel):
+    step_type: Literal["writeExcelSheet"]
     url: str
     description: str
 
@@ -227,7 +239,9 @@ ApaStepTrace = Annotated[
     | PressKeysTrace
     | ReadCsvTrace
     | ReadGoogleSheetTrace
+    | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
+    | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
     | ObjectExportAsJsonTrace
     | PythonTrace
@@ -536,10 +550,29 @@ class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
 
 
+class ReadExcelSheetRequest(BaseModel):
+    name: Literal["read_excel_sheet"] = "read_excel_sheet"
+    workbook_url: str
+    range: str
+    microsoft_account_email: str
+
+
+class ReadExcelSheetResponse(BaseModel):
+    values: list[list[str]]
+
+
 class WriteGoogleSheetRequest(BaseModel):
     name: Literal["write_google_sheet"] = "write_google_sheet"
     spreadsheet_id: str
     range: str
+    values: list[list[str]]
+
+
+class WriteExcelSheetRequest(BaseModel):
+    name: Literal["write_excel_sheet"] = "write_excel_sheet"
+    workbook_url: str
+    range: str
+    microsoft_account_email: str
     values: list[list[str]]
 
 
@@ -614,7 +647,9 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
+    | ReadExcelSheetRequest
     | WriteGoogleSheetRequest
+    | WriteExcelSheetRequest
     | GetFullHtmlRequest
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
