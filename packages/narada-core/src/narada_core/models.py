@@ -21,6 +21,20 @@ class Agent(Enum):
                 return "/coreAgent "
 
 
+class ReasoningEffort(StrEnum):
+    """Amount of reasoning the Core Agent applies before responding.
+
+    Maps 1:1 to OpenAI's ``reasoning.effort`` parameter. Only honored when the
+    invoked agent is :py:attr:`Agent.CORE_AGENT`; the SDK enforces this both at
+    type-check time (via ``@overload``) and at runtime (with a ``ValueError``).
+    """
+
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class UserResourceCredentials(TypedDict, total=False):
     salesforce: dict[str, str]
     jira: dict[str, str]
