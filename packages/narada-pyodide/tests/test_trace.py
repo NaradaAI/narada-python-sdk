@@ -473,60 +473,38 @@ class TestEmitDefensive:
 
 
 # ---------------------------------------------------------------------------
-# Nested action_trace stripping: cap recursion depth to one level
+# Nested action_trace forwarding: SDK forwards events as-is; size enforcement
+# is the frontend's responsibility (MAX_NESTED_ACTION_TRACE_BYTES in
+# python.worker.ts and the workflow-run-detail consumer caps).
 # ---------------------------------------------------------------------------
 
 
-class TestStripNestedPythonEvents:
-    def test_passes_through_operator_items_unchanged(self) -> None:
-        raw = [{"url": "https://x", "action": "click Foo"}]
-        assert _trace._strip_nested_python_events(raw) == raw
-
-    def test_passes_through_non_python_apa_items_unchanged(self) -> None:
-        raw = [{"step_type": "goToUrl", "url": "https://x", "description": "..."}]
-        assert _trace._strip_nested_python_events(raw) == raw
-
-    def test_strips_events_from_nested_python_agent_run(self) -> None:
+class TestNestedActionTraceForwarding:
+    def test_forwards_nested_python_events_unchanged(self, recorded_events) -> None:
         raw = [
             {
                 "step_type": "pythonAgentRun",
                 "url": "",
                 "status": "success",
                 "duration_ms": 10,
-                "events": [{"kind": "stdout", "ts": 1, "text": "a"}],
+                "events": [
+                    {"kind": "stdout", "ts": 1, "text": "a"},
+                    {"kind": "stdout", "ts": 2, "text": "b"},
+                ],
             }
         ]
-        stripped = _trace._strip_nested_python_events(raw)
-        assert stripped is not None
-        assert stripped[0]["events"] == []
-        assert stripped[0]["truncated_event_count"] == 1
-
-    def test_none_passes_through(self) -> None:
-        assert _trace._strip_nested_python_events(None) is None
-
-    def test_integrates_with_emit_sub_agent_call(self, recorded_events) -> None:
         _trace.emit_sub_agent_call(
             ts_start=1,
             agent_type="custom_python",
             prompt="nested",
             status="success",
-            action_trace_raw=[
-                {
-                    "step_type": "pythonAgentRun",
-                    "url": "",
-                    "status": "success",
-                    "duration_ms": 10,
-                    "events": [
-                        {"kind": "stdout", "ts": 1, "text": "a"},
-                        {"kind": "stdout", "ts": 2, "text": "b"},
-                    ],
-                }
-            ],
+            action_trace_raw=raw,
         )
         event = recorded_events.events[0]
         inner = event["action_trace"][0]
-        assert inner["events"] == []
-        assert inner["truncated_event_count"] == 2
+        # Events are forwarded as-is; the SDK no longer strips them.
+        assert inner["events"] == raw[0]["events"]
+        assert "truncated_event_count" not in inner
 
 
 # ---------------------------------------------------------------------------
