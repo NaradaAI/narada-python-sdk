@@ -30,3 +30,7 @@ class NaradaExtensionUnauthenticatedError(NaradaError):
 
 class NaradaInitializationError(NaradaError):
     pass
+
+
+class UserAbortedError(Exception):
+    pass

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
@@ -7,7 +8,17 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
+from typing import (
+    IO,
+    Any,
+    Literal,
+    Mapping,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    overload,
+    override,
+)
 
 import aiohttp
 from narada_core.actions.critic import run_critic
@@ -34,9 +45,14 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     PrintMessageRequest,
+    PromptForUserInputRequest,
+    PromptForUserInputResponse,
+    PromptForUserInputVariable,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    UserApprovalRequest,
+    UserApprovalResponse,
     WriteGoogleSheetRequest,
     parse_action_trace,
 )
@@ -44,6 +60,7 @@ from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
     NaradaError,
     NaradaTimeoutError,
+    UserAbortedError,
 )
 from narada_core.models import (
     Agent,
@@ -69,9 +86,11 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class _InputVariableFileReference(BaseModel):
-    key: str
-    name: str
+class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
 
 
 type _JsonPrimitive = str | int | float | bool | None
@@ -209,7 +228,13 @@ class BaseBrowserWindow(ABC):
     ) -> _InputVariableFileReference:
         filename = Path(input_variable_value.name).name
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
-        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return {
+            "source": "remoteDispatchUpload",
+            "id": uploaded_file["key"],
+            "filename": filename,
+            "mimeType": mime_type,
+        }
 
     @overload
     async def dispatch_request(
@@ -564,6 +589,43 @@ class BaseBrowserWindow(ABC):
             PrintMessageRequest(message=message), timeout=timeout
         )
 
+    async def prompt_for_user_input(
+        self,
+        *,
+        step_id: str,
+        variables: list[PromptForUserInputVariable],
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Prompts the user for one or more input values in the extension UI."""
+        result = await self._run_extension_action(
+            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputResponse,
+            timeout=timeout,
+        )
+        return result.values_by_name
+
+    async def user_approval(
+        self,
+        *,
+        step_id: str,
+        prompt_message: str,
+        approve_label: str,
+        reject_label: str,
+        timeout: int | None = None,
+    ) -> bool:
+        """Prompts the user to approve or reject in the extension UI."""
+        result = await self._run_extension_action(
+            UserApprovalRequest(
+                step_id=step_id,
+                prompt_message=prompt_message,
+                approve_label=approve_label,
+                reject_label=reject_label,
+            ),
+            UserApprovalResponse,
+            timeout=timeout,
+        )
+        return result.approved
+
     async def read_google_sheet(
         self,
         *,
@@ -669,6 +731,8 @@ class BaseBrowserWindow(ABC):
         response = ExtensionActionResponse.model_validate(resp_json)
         if response.status == "error":
             raise NaradaError(response.error)
+        if response.status == "aborted":
+            raise UserAbortedError
 
         if response_model is None:
             return None

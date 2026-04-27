@@ -5,6 +5,7 @@ from narada_core.errors import (
     NaradaInitializationError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
+    UserAbortedError,
 )
 from narada_core.actions.models import CriticResult
 from narada_core.models import Agent, CriticConfig, File, Response, ResponseContent
@@ -37,4 +38,5 @@ __all__ = [
     "render_html",
     "Response",
     "ResponseContent",
+    "UserAbortedError",
 ]
