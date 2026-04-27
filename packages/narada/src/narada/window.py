@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
@@ -7,7 +8,17 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
+from typing import (
+    IO,
+    Any,
+    Literal,
+    Mapping,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    overload,
+    override,
+)
 
 import aiohttp
 from narada_core.actions.models import (
@@ -72,9 +83,11 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class _InputVariableFileReference(BaseModel):
-    key: str
-    name: str
+class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
 
 
 type _JsonPrimitive = str | int | float | bool | None
@@ -212,7 +225,13 @@ class BaseBrowserWindow(ABC):
     ) -> _InputVariableFileReference:
         filename = Path(input_variable_value.name).name
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
-        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return {
+            "source": "remoteDispatchUpload",
+            "id": uploaded_file["key"],
+            "filename": filename,
+            "mimeType": mime_type,
+        }
 
     @overload
     async def dispatch_request(
