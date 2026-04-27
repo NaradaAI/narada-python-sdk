@@ -294,6 +294,7 @@ async def test_cloud_browser_window_dispatch_request_preserves_current_file_vari
         api_key="test-api-key",
     )
     file_variable = {
+        "source": "agentStudioAttachment",
         "id": "file-123",
         "filename": "report.pdf",
         "mimeType": "application/pdf",

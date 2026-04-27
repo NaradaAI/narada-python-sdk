@@ -31,6 +31,7 @@ async def test_input_variable_files_normalize_to_current_file_variable_shape(
     assert upload_calls == [file_obj]
     assert normalized == {
         "doc": {
+            "source": "remoteDispatchUpload",
             "id": "user-user-123/20260426000000000000-report.txt",
             "filename": "report.txt",
             "mimeType": "text/plain",

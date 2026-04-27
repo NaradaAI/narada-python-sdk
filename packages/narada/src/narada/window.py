@@ -8,7 +8,17 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Mapping, TypedDict, TypeGuard, TypeVar, overload, override
+from typing import (
+    IO,
+    Any,
+    Literal,
+    Mapping,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    overload,
+    override,
+)
 
 import aiohttp
 from narada_core.actions.models import (
@@ -74,6 +84,7 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
 class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
     id: str
     filename: str
     mimeType: str
@@ -216,6 +227,7 @@ class BaseBrowserWindow(ABC):
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         return {
+            "source": "remoteDispatchUpload",
             "id": uploaded_file["key"],
             "filename": filename,
             "mimeType": mime_type,
