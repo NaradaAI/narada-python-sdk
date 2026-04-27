@@ -9,11 +9,14 @@ from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
 )
-from narada_core.models import Agent, File, Response, ResponseContent
+from narada_core.actions.models import CriticResult
+from narada_core.models import Agent, CriticConfig, File, Response, ResponseContent
 
 __all__ = [
     "__version__",
     "Agent",
+    "CriticConfig",
+    "CriticResult",
     "download_file",
     "File",
     "LocalBrowserWindow",
