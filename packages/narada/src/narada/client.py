@@ -283,11 +283,11 @@ class Narada:
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
-        max_attempts = 5
+        max_attempts = 10
         for attempt in range(max_attempts):
             try:
                 browser_window_id = await self._wait_for_browser_window_id(
-                    initialization_page, config, timeout=8_000,
+                    initialization_page, config, timeout=4_000,
                 )
                 break
             except NaradaExtensionMissingError:
@@ -298,8 +298,10 @@ class Narada:
             except NaradaTimeoutError:
                 if attempt == max_attempts - 1:
                     raise
-                initialization_page.reload()
+                # If browser window ID is not found, reload the page and try again
+                await initialization_page.reload()
                 await asyncio.sleep(1)
+
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
