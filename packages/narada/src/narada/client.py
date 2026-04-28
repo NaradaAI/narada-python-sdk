@@ -302,7 +302,6 @@ class Narada:
                     raise
                 # If browser window ID is not found, reload the page and try again
                 await initialization_page.reload()
-                await asyncio.sleep(1)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
