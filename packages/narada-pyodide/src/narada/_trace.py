@@ -106,34 +106,6 @@ def emit_trace_event(event: dict[str, Any]) -> None:
         _logger.warning("trace event emission failed", exc_info=True)
 
 
-def _strip_nested_python_events(
-    raw: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    """Forward a nested action trace one level deep. Any ``pythonAgentRun``
-    node inside retains its outer status/duration metadata but its ``events``
-    list is dropped, preventing deep recursion from blowing up persisted
-    JSON size. A ``truncated_event_count`` field is left behind so the
-    dashboard can show that events were elided.
-    """
-    if raw is None:
-        return None
-
-    def strip(item: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(item, dict):
-            return item
-        if item.get("step_type") != "pythonAgentRun":
-            return item
-        events = item.get("events", [])
-        stripped = dict(item)
-        stripped["events"] = []
-        stripped["truncated_event_count"] = (
-            len(events) if isinstance(events, list) else 0
-        )
-        return stripped
-
-    return [strip(item) for item in raw]
-
-
 def summarize_request(request: ExtensionActionRequest) -> dict[str, Any]:
     """Produce a bounded-size summary of an extension action request for
     display in the observability dashboard. Large payloads (sheet row values,
@@ -243,7 +215,12 @@ def emit_sub_agent_call(
     if error_message is not None:
         event["error_message"] = truncate_error(error_message)
     if action_trace_raw is not None:
-        event["action_trace"] = _strip_nested_python_events(action_trace_raw)
+        # Forward the nested action trace as-is. Size/depth enforcement is the
+        # frontend's responsibility (`MAX_NESTED_ACTION_TRACE_BYTES` in
+        # python.worker.ts, plus the workflow-run-detail consumer caps).
+        # Stripping events here is redundant and prevents the dashboard from
+        # rendering small inline nested traces inline in CollapsibleNestedTrace.
+        event["action_trace"] = action_trace_raw
     emit_trace_event(event)
 
 
