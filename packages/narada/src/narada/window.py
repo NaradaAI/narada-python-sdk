@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Mapping, TypeGuard, TypeVar, overload, override
+from typing import IO, Any, Literal, Mapping, TypeGuard, TypeVar, overload, override
 
 import aiohttp
 from narada_core.actions.models import (
@@ -40,6 +40,8 @@ from narada_core.actions.models import (
     RecordedClick,
     UserApprovalRequest,
     UserApprovalResponse,
+    WaitForElementRequest,
+    WaitForElementResponse,
     WriteGoogleSheetRequest,
     parse_action_trace,
 )
@@ -531,6 +533,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
+
+    async def wait_for_element(
+        self,
+        *,
+        selectors: AgenticSelectors,
+        state: Literal["visible", "hidden"],
+        timeout: int,
+    ) -> bool:
+        """Waits for an element matching the given selectors to reach the specified state.
+
+        Returns True if the element was found, False if no selector matched before timeout.
+        """
+        result = await self._run_extension_action(
+            WaitForElementRequest(selectors=selectors, state=state, timeout=timeout),
+            WaitForElementResponse,
+            timeout=timeout // 1000 + 30,
+        )
+        if result is None:
+            return False
+        return result.found
 
     async def get_url(self, *, timeout: int | None = None) -> GetUrlResponse:
         """Gets the URL of the current active page."""
