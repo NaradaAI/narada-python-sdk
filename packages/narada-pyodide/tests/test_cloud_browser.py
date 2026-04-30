@@ -277,6 +277,41 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    file_variable = {
+        "source": "agentStudioAttachment",
+        "id": "file-123",
+        "filename": "report.pdf",
+        "mimeType": "application/pdf",
+        "itemId": "workflow-123",
+    }
+
+    response = await window.dispatch_request(
+        prompt="summarize {{ $doc }}",
+        input_variables={"doc": file_variable},
+    )
+
+    assert response["status"] == "success"
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["inputVariables"] == {"doc": file_variable}
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_window_get_downloaded_files_returns_presigned_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

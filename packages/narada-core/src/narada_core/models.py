@@ -166,8 +166,20 @@ class ReadGoogleSheetTrace(TypedDict):
     description: str
 
 
+class ReadExcelSheetTrace(TypedDict):
+    step_type: Literal["readExcelSheet"]
+    url: str
+    description: str
+
+
 class WriteGoogleSheetTrace(TypedDict):
     step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteExcelSheetTrace(TypedDict):
+    step_type: Literal["writeExcelSheet"]
     url: str
     description: str
 
@@ -289,7 +301,9 @@ ApaStepTrace = (
     | PressKeysTrace
     | ReadCsvTrace
     | ReadGoogleSheetTrace
+    | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
+    | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
     | ObjectExportAsJsonTrace
     | PythonTrace

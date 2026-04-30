@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
@@ -7,7 +8,17 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Literal, Mapping, TypeGuard, TypeVar, overload, override
+from typing import (
+    IO,
+    Any,
+    Literal,
+    Mapping,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    overload,
+    override,
+)
 
 import aiohttp
 from narada_core.actions.models import (
@@ -35,13 +46,15 @@ from narada_core.actions.models import (
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
+    ReadExcelSheetRequest,
+    ReadExcelSheetResponse,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
     UserApprovalRequest,
     UserApprovalResponse,
+    WriteExcelSheetRequest,
     WriteGoogleSheetRequest,
-    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -58,6 +71,7 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
+from narada_core.tracing.model import parse_action_trace
 from playwright.async_api import (
     BrowserContext,
 )
@@ -73,9 +87,11 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class _InputVariableFileReference(BaseModel):
-    key: str
-    name: str
+class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
 
 
 type _JsonPrimitive = str | int | float | bool | None
@@ -213,7 +229,13 @@ class BaseBrowserWindow(ABC):
     ) -> _InputVariableFileReference:
         filename = Path(input_variable_value.name).name
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
-        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return {
+            "source": "remoteDispatchUpload",
+            "id": uploaded_file["key"],
+            "filename": filename,
+            "mimeType": mime_type,
+        }
 
     # `reasoning` is only valid with the Core Agent; these two overloads make
     # that constraint type-checkable. Generic-agent calls fall through to the
@@ -733,6 +755,25 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
+    async def read_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        timeout: int | None = None,
+    ) -> ReadExcelSheetResponse:
+        """Reads a range of cells from a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            ReadExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+            ),
+            ReadExcelSheetResponse,
+            timeout=timeout,
+        )
+
     async def write_google_sheet(
         self,
         *,
@@ -745,6 +786,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            timeout=timeout,
+        )
+
+    async def write_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> None:
+        """Writes a range of cells to a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            WriteExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+                values=values,
             ),
             timeout=timeout,
         )
