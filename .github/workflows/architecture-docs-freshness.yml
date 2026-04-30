@@ -27,29 +27,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          ENFORCE=true
           SKIP_REASON=""
           PR_HEAD_REPOSITORY="${PR_HEAD_REPOSITORY:-$REPOSITORY}"
 
           if [ "$EVENT_NAME" = "pull_request" ]; then
             if [ "$PR_HEAD_REPOSITORY" != "$REPOSITORY" ]; then
-              ENFORCE=false
               SKIP_REASON="fork pull_request runs do not receive ARCHITECTURE_DOCS_READ_PAT"
             elif [ "$ACTOR" = "dependabot[bot]" ]; then
-              ENFORCE=false
               SKIP_REASON="Dependabot pull_request runs do not receive normal Actions secrets"
+            else
+              SKIP_REASON="ARCHITECTURE_DOCS_READ_PAT is not configured for this repository yet"
             fi
+          else
+            SKIP_REASON="ARCHITECTURE_DOCS_READ_PAT is not configured for this repository yet"
           fi
 
           if [ -z "${GH_TOKEN:-}" ]; then
-            if [ "$ENFORCE" = "true" ]; then
-              echo "::error::ARCHITECTURE_DOCS_READ_PAT is required to enforce architecture-docs freshness."
-              echo "Configure a fine-grained PAT with read access to NaradaAI/architecture-docs."
-              exit 1
-            fi
-
             echo "::warning::Skipping architecture-docs freshness check: $SKIP_REASON."
-            echo "Trusted same-repo branches require ARCHITECTURE_DOCS_READ_PAT and fail closed when it is missing."
+            echo "This workflow enforces freshness only in runs that receive ARCHITECTURE_DOCS_READ_PAT."
+            echo "Configure a fine-grained PAT with read access to NaradaAI/architecture-docs to enable enforcement."
             exit 0
           fi
 
