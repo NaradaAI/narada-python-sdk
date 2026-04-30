@@ -2,6 +2,14 @@
 
 `narada-python-sdk` is Narada's public Python SDK — a uv workspace with three packages (`narada`, `narada-core`, `narada-pyodide`) that lets external callers drive Narada agents programmatically. It's one of three sibling repos in the Narada system; shared cross-repo architecture lives in [`architecture-docs/`](./architecture-docs/) (a git submodule).
 
+## Bootstrap shared docs
+
+If `architecture-docs/CLAUDE.md` is missing, initialize the shared docs before following the links below:
+
+```bash
+git submodule update --init architecture-docs
+```
+
 ## Before changing code, read
 
 - [`architecture-docs/CLAUDE.md`](./architecture-docs/CLAUDE.md) — rules for AI coding agents (read **first**)

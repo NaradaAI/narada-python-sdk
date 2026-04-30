@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   check-submodule-current:
     runs-on: ubuntu-latest
@@ -17,13 +20,36 @@ jobs:
       - name: Compare pinned submodule SHA against architecture-docs/main
         env:
           GH_TOKEN: ${{ secrets.ARCHITECTURE_DOCS_READ_PAT }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
 
+          ENFORCE=true
+          SKIP_REASON=""
+          PR_HEAD_REPOSITORY="${PR_HEAD_REPOSITORY:-$REPOSITORY}"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ "$PR_HEAD_REPOSITORY" != "$REPOSITORY" ]; then
+              ENFORCE=false
+              SKIP_REASON="fork pull_request runs do not receive ARCHITECTURE_DOCS_READ_PAT"
+            elif [ "$ACTOR" = "dependabot[bot]" ]; then
+              ENFORCE=false
+              SKIP_REASON="Dependabot pull_request runs do not receive normal Actions secrets"
+            fi
+          fi
+
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::ARCHITECTURE_DOCS_READ_PAT secret is not configured. Skipping freshness check."
-            echo "  Configure a fine-grained PAT with read access to NaradaAI/architecture-docs"
-            echo "  and add it as the secret ARCHITECTURE_DOCS_READ_PAT in this repo."
+            if [ "$ENFORCE" = "true" ]; then
+              echo "::error::ARCHITECTURE_DOCS_READ_PAT is required to enforce architecture-docs freshness."
+              echo "Configure a fine-grained PAT with read access to NaradaAI/architecture-docs."
+              exit 1
+            fi
+
+            echo "::warning::Skipping architecture-docs freshness check: $SKIP_REASON."
+            echo "Trusted same-repo branches require ARCHITECTURE_DOCS_READ_PAT and fail closed when it is missing."
             exit 0
           fi
 
