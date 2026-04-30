@@ -21,6 +21,18 @@ class Agent(Enum):
                 return "/coreAgent "
 
 
+class ReasoningEffort(StrEnum):
+    """Controls how much reasoning the Core Agent uses before responding.
+
+    Only `Agent.CORE_AGENT` supports this option; other agents raise `ValueError`.
+    """
+
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class UserResourceCredentials(TypedDict, total=False):
     salesforce: dict[str, str]
     jira: dict[str, str]

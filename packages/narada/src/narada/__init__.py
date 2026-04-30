@@ -7,7 +7,7 @@ from narada_core.errors import (
     NaradaUnsupportedBrowserError,
     UserAbortedError,
 )
-from narada_core.models import Agent, File, Response, ResponseContent
+from narada_core.models import Agent, File, ReasoningEffort, Response, ResponseContent
 
 from narada.client import Narada
 from narada.config import BrowserConfig, ProxyConfig
@@ -31,6 +31,7 @@ __all__ = [
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
     "ProxyConfig",
+    "ReasoningEffort",
     "RemoteBrowserWindow",
     "render_html",
     "Response",
