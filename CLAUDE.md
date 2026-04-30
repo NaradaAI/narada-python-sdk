@@ -21,11 +21,11 @@ git submodule update --init architecture-docs
 
 ## When to update the docs
 
-When you change a public type, add a new SDK action, change the wire shape between SDK and backend, or change the parity rule between `narada` and `narada-pyodide` — update `architecture-docs/python-sdk.md` (and `api-contracts.md` if a wire shape moved) **in the same PR**. The full trigger list is in `architecture-docs/CLAUDE.md` §3.
+When you change a public type, add a new SDK action, change the wire shape between SDK and backend, or change the parity rule between `narada` and `narada-pyodide` — open the relevant docs change in `NaradaAI/architecture-docs` first. Merge that docs PR to `architecture-docs/main`, then bump this repo's `architecture-docs` submodule pointer in the code PR. The full trigger list is in `architecture-docs/CLAUDE.md` §3.
 
 ## Updating the submodule pointer
 
-Merge shared documentation changes into `architecture-docs/main` first, then bump this repo's submodule pointer. CI enforces exact equality with `architecture-docs/main`.
+Merge shared documentation changes into `architecture-docs/main` first, then bump this repo's submodule pointer. CI fails PRs that change the `architecture-docs` pointer to anything other than `architecture-docs/main`, and it fails pushes to `main` when the pointer is stale. Unrelated PRs whose pointer is unchanged only receive a freshness warning if `architecture-docs/main` has moved.
 
 ```bash
 git submodule update --remote architecture-docs
@@ -33,4 +33,4 @@ git add architecture-docs
 git commit -m "Bump architecture-docs"
 ```
 
-CI runs a freshness check (`.github/workflows/architecture-docs-freshness.yml`) that fails when the submodule pointer falls behind `architecture-docs/main`.
+CI runs a freshness check (`.github/workflows/architecture-docs-freshness.yml`) that enforces this paired-PR workflow without blocking unrelated PRs when only `architecture-docs/main` changed.

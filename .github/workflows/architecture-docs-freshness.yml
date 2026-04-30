@@ -24,6 +24,7 @@ jobs:
           ACTOR: ${{ github.actor }}
           REPOSITORY: ${{ github.repository }}
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
 
@@ -64,8 +65,33 @@ jobs:
           echo "Pinned: $PINNED"
           echo "Latest: $REMOTE"
 
+          POINTER_CHANGED=false
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -n "${BASE_SHA:-}" ]; then
+              if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+                BASE_PINNED=$(git ls-tree "$BASE_SHA" architecture-docs | awk '{print $3}')
+                echo "Base: ${BASE_PINNED:-none}"
+                if [ "$PINNED" != "$BASE_PINNED" ]; then
+                  POINTER_CHANGED=true
+                fi
+              else
+                echo "::warning::Unable to fetch pull request base commit; treating the architecture-docs pointer as changed."
+                POINTER_CHANGED=true
+              fi
+            else
+              echo "::warning::Unable to determine pull request base SHA; treating the architecture-docs pointer as changed."
+              POINTER_CHANGED=true
+            fi
+          fi
+
           if [ "$PINNED" = "$REMOTE" ]; then
             echo "architecture-docs submodule is at main HEAD."
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$POINTER_CHANGED" = "false" ]; then
+            echo "::warning::architecture-docs submodule is stale, but this pull request does not change the pointer."
+            echo "Freshness is enforced when a pull request changes architecture-docs and on pushes to main."
             exit 0
           fi
 
