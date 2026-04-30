@@ -25,6 +25,8 @@ When you change a public type, add a new SDK action, change the wire shape betwe
 
 ## Updating the submodule pointer
 
+Merge shared documentation changes into `architecture-docs/main` first, then bump this repo's submodule pointer. CI enforces exact equality with `architecture-docs/main`.
+
 ```bash
 git submodule update --remote architecture-docs
 git add architecture-docs

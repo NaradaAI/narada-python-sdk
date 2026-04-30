@@ -1,4 +1,4 @@
 [submodule "architecture-docs"]
 	path = architecture-docs
-	url = git@github.com:NaradaAI/architecture-docs.git
+	url = ../../NaradaAI/architecture-docs.git
 	branch = main
