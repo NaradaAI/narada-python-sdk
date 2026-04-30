@@ -91,8 +91,20 @@ class ReadGoogleSheetTrace(BaseModel):
     description: str
 
 
+class ReadExcelSheetTrace(BaseModel):
+    step_type: Literal["readExcelSheet"]
+    url: str
+    description: str
+
+
 class WriteGoogleSheetTrace(BaseModel):
     step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteExcelSheetTrace(BaseModel):
+    step_type: Literal["writeExcelSheet"]
     url: str
     description: str
 
@@ -303,7 +315,9 @@ ApaStepTrace = Annotated[
     | PressKeysTrace
     | ReadCsvTrace
     | ReadGoogleSheetTrace
+    | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
+    | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
     | ObjectExportAsJsonTrace
     | PythonTrace
@@ -358,4 +372,3 @@ def parse_action_trace(trace_data: list[dict[str, Any] | Any]) -> ActionTrace:
         return _OperatorActionTraceAdapter.validate_python(trace_data)
     except ValidationError:
         return _ApaActionTraceAdapter.validate_python(trace_data)
-

@@ -301,10 +301,29 @@ class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
 
 
+class ReadExcelSheetRequest(BaseModel):
+    name: Literal["read_excel_sheet"] = "read_excel_sheet"
+    workbook_url: str
+    range: str
+    microsoft_account_email: str
+
+
+class ReadExcelSheetResponse(BaseModel):
+    values: list[list[str]]
+
+
 class WriteGoogleSheetRequest(BaseModel):
     name: Literal["write_google_sheet"] = "write_google_sheet"
     spreadsheet_id: str
     range: str
+    values: list[list[str]]
+
+
+class WriteExcelSheetRequest(BaseModel):
+    name: Literal["write_excel_sheet"] = "write_excel_sheet"
+    workbook_url: str
+    range: str
+    microsoft_account_email: str
     values: list[list[str]]
 
 
@@ -379,7 +398,9 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
+    | ReadExcelSheetRequest
     | WriteGoogleSheetRequest
+    | WriteExcelSheetRequest
     | GetFullHtmlRequest
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest

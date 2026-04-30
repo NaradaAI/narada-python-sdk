@@ -45,11 +45,14 @@ from narada_core.actions.models import (
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
+    ReadExcelSheetRequest,
+    ReadExcelSheetResponse,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
     UserApprovalRequest,
     UserApprovalResponse,
+    WriteExcelSheetRequest,
     WriteGoogleSheetRequest,
 )
 from narada_core.errors import (
@@ -651,6 +654,25 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
+    async def read_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        timeout: int | None = None,
+    ) -> ReadExcelSheetResponse:
+        """Reads a range of cells from a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            ReadExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+            ),
+            ReadExcelSheetResponse,
+            timeout=timeout,
+        )
+
     async def write_google_sheet(
         self,
         *,
@@ -663,6 +685,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            timeout=timeout,
+        )
+
+    async def write_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> None:
+        """Writes a range of cells to a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            WriteExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+                values=values,
             ),
             timeout=timeout,
         )
