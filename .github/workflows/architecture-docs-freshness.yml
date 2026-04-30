@@ -1,0 +1,57 @@
+name: architecture-docs freshness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check-submodule-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Compare pinned submodule SHA against architecture-docs/main
+        env:
+          GH_TOKEN: ${{ secrets.ARCHITECTURE_DOCS_READ_PAT }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::ARCHITECTURE_DOCS_READ_PAT secret is not configured. Skipping freshness check."
+            echo "  Configure a fine-grained PAT with read access to NaradaAI/architecture-docs"
+            echo "  and add it as the secret ARCHITECTURE_DOCS_READ_PAT in this repo."
+            exit 0
+          fi
+
+          PINNED=$(git ls-tree HEAD architecture-docs | awk '{print $3}')
+          if [ -z "$PINNED" ]; then
+            echo "::error::No architecture-docs submodule pointer found in this commit."
+            exit 1
+          fi
+
+          REMOTE=$(gh api repos/NaradaAI/architecture-docs/git/refs/heads/main --jq '.object.sha')
+          if [ -z "$REMOTE" ]; then
+            echo "::error::Failed to read architecture-docs/main HEAD via gh api. Check the PAT scope."
+            exit 1
+          fi
+
+          echo "Pinned: $PINNED"
+          echo "Latest: $REMOTE"
+
+          if [ "$PINNED" = "$REMOTE" ]; then
+            echo "architecture-docs submodule is at main HEAD."
+            exit 0
+          fi
+
+          echo "::error::architecture-docs submodule is stale."
+          echo ""
+          echo "To bump the pointer:"
+          echo "  git submodule update --remote architecture-docs"
+          echo "  git add architecture-docs"
+          echo "  git commit -m 'Bump architecture-docs'"
+          echo "  git push"
+          exit 1
