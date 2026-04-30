@@ -19,49 +19,6 @@ from pydantic import (
 
 from narada_core.tracing import model as tracing_model
 
-ActionTrace = tracing_model.ActionTrace
-AgentTrace = tracing_model.AgentTrace
-AgenticMouseActionTrace = tracing_model.AgenticMouseActionTrace
-AgenticSelectorTrace = tracing_model.AgenticSelectorTrace
-ApaActionTrace = tracing_model.ApaActionTrace
-ApaStepTrace = tracing_model.ApaStepTrace
-DataTableExportAsCsvTrace = tracing_model.DataTableExportAsCsvTrace
-DataTableInsertRowTrace = tracing_model.DataTableInsertRowTrace
-DataTableUpdateCellValueTrace = tracing_model.DataTableUpdateCellValueTrace
-EndTrace = tracing_model.EndTrace
-ForLoopTrace = tracing_model.ForLoopTrace
-GetFullHtmlTrace = tracing_model.GetFullHtmlTrace
-GetScreenshotTrace = tracing_model.GetScreenshotTrace
-GetSimplifiedHtmlTrace = tracing_model.GetSimplifiedHtmlTrace
-GetUrlTrace = tracing_model.GetUrlTrace
-GoToUrlTrace = tracing_model.GoToUrlTrace
-IfTrace = tracing_model.IfTrace
-ObjectExportAsJsonTrace = tracing_model.ObjectExportAsJsonTrace
-ObjectSetPropertiesTrace = tracing_model.ObjectSetPropertiesTrace
-OperatorActionTrace = tracing_model.OperatorActionTrace
-OperatorActionTraceItem = tracing_model.OperatorActionTraceItem
-OutputTrace = tracing_model.OutputTrace
-PressKeysTrace = tracing_model.PressKeysTrace
-PrintTrace = tracing_model.PrintTrace
-PythonAgentRunTrace = tracing_model.PythonAgentRunTrace
-PythonExtensionActionEvent = tracing_model.PythonExtensionActionEvent
-PythonSideEffectEvent = tracing_model.PythonSideEffectEvent
-PythonStderrEvent = tracing_model.PythonStderrEvent
-PythonStdoutEvent = tracing_model.PythonStdoutEvent
-PythonSubAgentCallEvent = tracing_model.PythonSubAgentCallEvent
-PythonTrace = tracing_model.PythonTrace
-PythonTraceEvent = tracing_model.PythonTraceEvent
-ReadCsvTrace = tracing_model.ReadCsvTrace
-ReadGoogleSheetTrace = tracing_model.ReadGoogleSheetTrace
-RunCustomAgentTrace = tracing_model.RunCustomAgentTrace
-SetVariableTrace = tracing_model.SetVariableTrace
-StartTrace = tracing_model.StartTrace
-WaitForElementTrace = tracing_model.WaitForElementTrace
-WaitTrace = tracing_model.WaitTrace
-WhileLoopTrace = tracing_model.WhileLoopTrace
-WriteGoogleSheetTrace = tracing_model.WriteGoogleSheetTrace
-parse_action_trace = tracing_model.parse_action_trace
-
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
 
@@ -93,7 +50,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
         Field(discriminator="type"),
     ]
     usage: AgentUsage
-    action_trace: ActionTrace | None = None
+    action_trace: tracing_model.ActionTrace | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):
