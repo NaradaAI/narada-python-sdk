@@ -308,10 +308,6 @@ class PythonAgentRunTrace(BaseModel):
     duration_ms: NonNegativeInt
     events: list[PythonTraceEvent]
     error_message: str | None = None
-    # Set by the runtime when it caps the number of buffered events (see
-    # `python.worker.ts`). Informational only; the dashboard surfaces it so
-    # users know their trace is partial.
-    truncated_event_count: NonNegativeInt | None = None
 
 
 ApaStepTrace = Annotated[
