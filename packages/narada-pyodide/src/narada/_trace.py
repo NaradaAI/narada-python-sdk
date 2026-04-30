@@ -40,7 +40,7 @@ def emit_trace_event(event: dict[str, Any]) -> None:
     """Forward a single trace event to the JavaScript harness.
 
     The event must be JSON-serialisable and shaped as one of the
-    ``PythonTraceEvent`` variants defined in ``narada_core.actions.models``.
+    ``PythonTraceEvent`` variants defined in ``narada_core.tracing.model``.
     No validation is performed here; callers construct events directly and
     are responsible for matching the schema.
 
@@ -69,7 +69,7 @@ def dump_model(model: BaseModel) -> dict[str, Any]:
 # Event emitters
 #
 # Each emitter builds a JSON-serialisable event shaped to match one of the
-# ``PythonTraceEvent`` Pydantic variants in ``narada_core.actions.models``
+# ``PythonTraceEvent`` Pydantic variants in ``narada_core.tracing.model``
 # and forwards it to the JavaScript harness. Optional fields are included
 # only when non-None so the JSON stays compact.
 # ---------------------------------------------------------------------------

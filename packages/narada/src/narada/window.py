@@ -41,7 +41,6 @@ from narada_core.actions.models import (
     UserApprovalRequest,
     UserApprovalResponse,
     WriteGoogleSheetRequest,
-    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -57,6 +56,7 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
+from narada_core.tracing.model import parse_action_trace
 from playwright.async_api import (
     BrowserContext,
 )
