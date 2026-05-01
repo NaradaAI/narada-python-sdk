@@ -58,9 +58,9 @@ jobs:
 
           REMOTE=$(gh api repos/NaradaAI/architecture-docs/git/refs/heads/main --jq '.object.sha' 2>/dev/null || true)
           if [ -z "$REMOTE" ]; then
-            echo "::warning::Unable to read architecture-docs/main with the available token; continuing without enforcing freshness."
-            echo "Configure ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN with read access to NaradaAI/architecture-docs to enable enforcement."
-            exit 0
+            echo "::error::Failed to read architecture-docs/main with the configured token."
+            echo "Check that ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN has read access to NaradaAI/architecture-docs."
+            exit 1
           fi
 
           echo "Pinned: $PINNED"
