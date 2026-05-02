@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
@@ -7,7 +8,17 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from io import IOBase
 from pathlib import Path
-from typing import IO, Any, Literal, Mapping, TypeGuard, TypeVar, overload, override
+from typing import (
+    IO,
+    Any,
+    Literal,
+    Mapping,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    overload,
+    override,
+)
 
 import aiohttp
 from narada_core.actions.models import (
@@ -35,6 +46,8 @@ from narada_core.actions.models import (
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
+    ReadExcelSheetRequest,
+    ReadExcelSheetResponse,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
@@ -42,8 +55,8 @@ from narada_core.actions.models import (
     UserApprovalResponse,
     WaitForElementRequest,
     WaitForElementResponse,
+    WriteExcelSheetRequest,
     WriteGoogleSheetRequest,
-    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -55,10 +68,12 @@ from narada_core.models import (
     Agent,
     File,
     McpServer,
+    ReasoningEffort,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
 )
+from narada_core.tracing.model import parse_action_trace
 from playwright.async_api import (
     BrowserContext,
 )
@@ -74,9 +89,11 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-class _InputVariableFileReference(BaseModel):
-    key: str
-    name: str
+class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
 
 
 type _JsonPrimitive = str | int | float | bool | None
@@ -214,7 +231,66 @@ class BaseBrowserWindow(ABC):
     ) -> _InputVariableFileReference:
         filename = Path(input_variable_value.name).name
         uploaded_file = await self._upload_file_impl(file=input_variable_value)
-        return _InputVariableFileReference(key=uploaded_file["key"], name=filename)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return {
+            "source": "remoteDispatchUpload",
+            "id": uploaded_file["key"],
+            "filename": filename,
+            "mimeType": mime_type,
+        }
+
+    # `reasoning` is only valid with the Core Agent; these two overloads make
+    # that constraint type-checkable. Generic-agent calls fall through to the
+    # general overloads below, which do not accept a `reasoning` argument.
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        attachment: File | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> Response[None]: ...
+
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        attachment: File | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> Response[_StructuredOutput]: ...
 
     @overload
     async def dispatch_request(
@@ -269,6 +345,7 @@ class BaseBrowserWindow(ABC):
         *,
         prompt: str,
         agent: Agent | str = Agent.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -290,6 +367,14 @@ class BaseBrowserWindow(ABC):
 
         The higher-level `agent` method should be preferred for most use cases.
         """
+        # The overloads enforce this at type-check time when callers use
+        # ``Agent.CORE_AGENT``; the runtime check covers string-form agents
+        # (``agent="..."``) and callers without a type checker.
+        if reasoning is not None and agent is not Agent.CORE_AGENT:
+            raise ValueError(
+                "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
+                f"(got agent={agent!r})"
+            )
         deadline = time.monotonic() + timeout
 
         agent_prefix = (
@@ -335,6 +420,8 @@ class BaseBrowserWindow(ABC):
             body["callbackSecret"] = callback_secret
         if callback_headers is not None:
             body["callbackHeaders"] = callback_headers
+        if reasoning is not None:
+            body["reasoningMode"] = reasoning.value
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -385,6 +472,44 @@ class BaseBrowserWindow(ABC):
         except asyncio.TimeoutError:
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
+    # `reasoning` is only valid with the Core Agent. See `dispatch_request`
+    # above for the rationale; the same overload pattern is mirrored here.
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        attachment: File | None = None,
+        time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> AgentResponse[dict[str, Any]]: ...
+
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        attachment: File | None = None,
+        time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> AgentResponse[_StructuredOutput]: ...
+
     @overload
     async def agent(
         self,
@@ -424,6 +549,7 @@ class BaseBrowserWindow(ABC):
         *,
         prompt: str,
         agent: Agent | str = Agent.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -435,19 +561,51 @@ class BaseBrowserWindow(ABC):
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
-        remote_dispatch_response = await self.dispatch_request(
-            prompt=prompt,
-            agent=agent,
-            clear_chat=clear_chat,
-            generate_gif=generate_gif,
-            output_schema=output_schema,
-            attachment=attachment,
-            time_zone=time_zone,
-            mcp_servers=mcp_servers,
-            secret_variables=secret_variables,
-            input_variables=input_variables,
-            timeout=timeout,
-        )
+        # Branch on `reasoning` so each call site binds a single, typed overload
+        # of `dispatch_request`. The validation also lives in `dispatch_request`
+        # itself (defense in depth + reachable when callers go straight to the
+        # low-level API), so the redundancy here is intentional.
+        if reasoning is None:
+            remote_dispatch_response = await self.dispatch_request(
+                prompt=prompt,
+                agent=agent,
+                clear_chat=clear_chat,
+                generate_gif=generate_gif,
+                output_schema=output_schema,
+                attachment=attachment,
+                time_zone=time_zone,
+                mcp_servers=mcp_servers,
+                secret_variables=secret_variables,
+                input_variables=input_variables,
+                timeout=timeout,
+            )
+        else:
+            if agent is not Agent.CORE_AGENT:
+                raise ValueError(
+                    "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
+                    f"(got agent={agent!r})"
+                )
+            # The CORE_AGENT-specific overloads of `dispatch_request` split on
+            # a narrower `output_schema` discriminator (None vs `type[T]`),
+            # which the impl's `type[BaseModel] | None` union doesn't cleanly
+            # narrow into without further branching. The public `agent()`
+            # overloads above already give callers correct return-type
+            # narrowing, so the internal forward call bypasses overload
+            # disambiguation on this single dimension.
+            remote_dispatch_response = await self.dispatch_request(  # pyright: ignore[reportCallIssue]
+                prompt=prompt,
+                agent=agent,
+                reasoning=reasoning,
+                clear_chat=clear_chat,
+                generate_gif=generate_gif,
+                output_schema=output_schema,  # pyright: ignore[reportArgumentType]
+                attachment=attachment,
+                time_zone=time_zone,
+                mcp_servers=mcp_servers,
+                secret_variables=secret_variables,
+                input_variables=input_variables,
+                timeout=timeout,
+            )
         response_content = remote_dispatch_response["response"]
         assert response_content is not None
 
@@ -619,6 +777,25 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
+    async def read_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        timeout: int | None = None,
+    ) -> ReadExcelSheetResponse:
+        """Reads a range of cells from a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            ReadExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+            ),
+            ReadExcelSheetResponse,
+            timeout=timeout,
+        )
+
     async def write_google_sheet(
         self,
         *,
@@ -631,6 +808,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            timeout=timeout,
+        )
+
+    async def write_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> None:
+        """Writes a range of cells to a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            WriteExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+                values=values,
             ),
             timeout=timeout,
         )

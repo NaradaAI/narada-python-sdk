@@ -21,6 +21,18 @@ class Agent(Enum):
                 return "/coreAgent "
 
 
+class ReasoningEffort(StrEnum):
+    """Controls how much reasoning the Core Agent uses before responding.
+
+    Only `Agent.CORE_AGENT` supports this option; other agents raise `ValueError`.
+    """
+
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class UserResourceCredentials(TypedDict, total=False):
     salesforce: dict[str, str]
     jira: dict[str, str]
@@ -152,8 +164,20 @@ class ReadGoogleSheetTrace(TypedDict):
     description: str
 
 
+class ReadExcelSheetTrace(TypedDict):
+    step_type: Literal["readExcelSheet"]
+    url: str
+    description: str
+
+
 class WriteGoogleSheetTrace(TypedDict):
     step_type: Literal["writeGoogleSheet"]
+    url: str
+    description: str
+
+
+class WriteExcelSheetTrace(TypedDict):
+    step_type: Literal["writeExcelSheet"]
     url: str
     description: str
 
@@ -275,7 +299,9 @@ ApaStepTrace = (
     | PressKeysTrace
     | ReadCsvTrace
     | ReadGoogleSheetTrace
+    | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
+    | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
     | ObjectExportAsJsonTrace
     | PythonTrace

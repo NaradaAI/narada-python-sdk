@@ -1,0 +1,106 @@
+name: architecture-docs freshness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-submodule-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Compare pinned submodule SHA against architecture-docs/main
+        env:
+          GH_TOKEN: ${{ secrets.ARCHITECTURE_DOCS_READ_PAT || secrets.ALL_REPO_CHECKOUT_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          SKIP_REASON=""
+          PR_HEAD_REPOSITORY="${PR_HEAD_REPOSITORY:-$REPOSITORY}"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ "$PR_HEAD_REPOSITORY" != "$REPOSITORY" ]; then
+              SKIP_REASON="fork pull_request runs do not receive repository secrets"
+            elif [ "$ACTOR" = "dependabot[bot]" ]; then
+              SKIP_REASON="Dependabot pull_request runs do not receive normal Actions secrets"
+            else
+              SKIP_REASON="ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN is not configured for this repository yet"
+            fi
+          else
+            SKIP_REASON="ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN is not configured for this repository yet"
+          fi
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::Skipping architecture-docs freshness check: $SKIP_REASON."
+            echo "This workflow enforces freshness only in runs that receive ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN."
+            echo "Configure one of those tokens with read access to NaradaAI/architecture-docs to enable enforcement."
+            exit 0
+          fi
+
+          PINNED=$(git ls-tree HEAD architecture-docs | awk '{print $3}')
+          if [ -z "$PINNED" ]; then
+            echo "::error::No architecture-docs submodule pointer found in this commit."
+            exit 1
+          fi
+
+          REMOTE=$(gh api repos/NaradaAI/architecture-docs/git/refs/heads/main --jq '.object.sha' 2>/dev/null || true)
+          if [ -z "$REMOTE" ]; then
+            echo "::error::Failed to read architecture-docs/main with the configured token."
+            echo "Check that ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN has read access to NaradaAI/architecture-docs."
+            exit 1
+          fi
+
+          echo "Pinned: $PINNED"
+          echo "Latest: $REMOTE"
+
+          POINTER_CHANGED=false
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -n "${BASE_SHA:-}" ]; then
+              if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+                BASE_PINNED=$(git ls-tree "$BASE_SHA" architecture-docs | awk '{print $3}')
+                echo "Base: ${BASE_PINNED:-none}"
+                if [ "$PINNED" != "$BASE_PINNED" ]; then
+                  POINTER_CHANGED=true
+                fi
+              else
+                echo "::warning::Unable to fetch pull request base commit; treating the architecture-docs pointer as changed."
+                POINTER_CHANGED=true
+              fi
+            else
+              echo "::warning::Unable to determine pull request base SHA; treating the architecture-docs pointer as changed."
+              POINTER_CHANGED=true
+            fi
+          fi
+
+          if [ "$PINNED" = "$REMOTE" ]; then
+            echo "architecture-docs submodule is at main HEAD."
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$POINTER_CHANGED" = "false" ]; then
+            echo "::warning::architecture-docs submodule is stale, but this pull request does not change the pointer."
+            echo "Freshness is enforced when a pull request changes architecture-docs and on pushes to main."
+            exit 0
+          fi
+
+          echo "::error::architecture-docs submodule is stale."
+          echo ""
+          echo "To bump the pointer:"
+          echo "  git submodule update --remote architecture-docs"
+          echo "  git add architecture-docs"
+          echo "  git commit -m 'Bump architecture-docs'"
+          echo "  git push"
+          exit 1
