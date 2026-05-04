@@ -5,7 +5,8 @@ from typing import Any, Awaitable, Callable
 from narada_core.models import Agent, CriticConfig
 from pydantic import BaseModel, create_model
 
-from narada_core.actions.models import AgentUsage, CriticResult, parse_action_trace
+from narada_core.actions.models import AgentUsage, CriticResult
+from narada_core.tracing.model import parse_action_trace
 
 _VALIDATION_VAR = "narada_validation_passed"
 _DEFAULT_CRITIC_PROMPT = (
@@ -76,7 +77,6 @@ async def run_critic(
 
     return CriticResult(
         validation_passed=validation_passed,
-        text=critic_content["text"],
         structured_output=structured_output,
         usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
         action_trace=critic_action_trace,

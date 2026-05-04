@@ -15,8 +15,6 @@ from typing import (
 from pydantic import (
     BaseModel,
     Field,
-    TypeAdapter,
-    ValidationError,
 )
 
 from narada_core.tracing import model as tracing_model
@@ -47,9 +45,6 @@ class CriticResult(BaseModel):
 
     validation_passed: bool
     """Whether the critic determined the main agent successfully completed its task."""
-
-    text: str
-    """The critic's evaluation text."""
 
     structured_output: Any
     """Parsed instance of the output_schema passed in CriticConfig, or None if no schema was given."""
