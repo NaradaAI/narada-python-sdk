@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from . import _trace
+
 if TYPE_CHECKING:
     # Magic functions injected by the JavaScript harness.
     def _narada_render_html(html: str) -> None: ...
@@ -17,7 +19,20 @@ def download_file(filename: str, content: str | bytes) -> None:
         content: The content to write. If str, writes in text mode (UTF-8).
                  If bytes, writes in binary mode.
     """
-    _narada_download_file(filename, content)
+    try:
+        _narada_download_file(filename, content)
+    except Exception as err:
+        # Record that the attempt happened and failed, then re-raise so user
+        # code still sees the exception.
+        _trace.emit_side_effect(
+            effect_type="download_file",
+            description=f"Failed to download file {filename}: {err}",
+        )
+        raise
+    _trace.emit_side_effect(
+        effect_type="download_file",
+        description=f"Downloaded file: {filename}",
+    )
 
 
 def render_html(html: str) -> None:
@@ -27,4 +42,15 @@ def render_html(html: str) -> None:
     Args:
         html: The HTML content to render.
     """
-    _narada_render_html(html)
+    try:
+        _narada_render_html(html)
+    except Exception as err:
+        _trace.emit_side_effect(
+            effect_type="render_html",
+            description=f"Failed to render HTML: {err}",
+        )
+        raise
+    _trace.emit_side_effect(
+        effect_type="render_html",
+        description="Rendered HTML in a new tab",
+    )

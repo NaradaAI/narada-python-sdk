@@ -47,13 +47,15 @@ from narada_core.actions.models import (
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
+    ReadExcelSheetRequest,
+    ReadExcelSheetResponse,
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
     UserApprovalRequest,
     UserApprovalResponse,
+    WriteExcelSheetRequest,
     WriteGoogleSheetRequest,
-    parse_action_trace,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -66,13 +68,17 @@ from narada_core.models import (
     CriticConfig,
     File,
     McpServer,
+    ReasoningEffort,
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
 )
+from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
+
+from . import _trace
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -197,6 +203,57 @@ class BaseBrowserWindow(ABC):
             "Uploading files is not supported in the browser environment"
         )
 
+    # `reasoning` is only valid with the Core Agent; these two overloads make
+    # that constraint type-checkable. Generic-agent calls fall through to the
+    # general overloads below, which do not accept a `reasoning` argument.
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: dict[str, Any] | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        callback_headers: dict[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> Response[None]: ...
+
+    @overload
+    async def dispatch_request(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: dict[str, Any] | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        callback_headers: dict[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> Response[_StructuredOutput]: ...
+
     @overload
     async def dispatch_request(
         self,
@@ -250,6 +307,7 @@ class BaseBrowserWindow(ABC):
         *,
         prompt: str,
         agent: Agent | str = Agent.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -271,6 +329,20 @@ class BaseBrowserWindow(ABC):
 
         The higher-level `agent` method should be preferred for most use cases.
         """
+        # The overloads enforce this at type-check time when callers use
+        # ``Agent.CORE_AGENT``; the runtime check covers string-form agents
+        # (``agent="..."``) and callers without a type checker.
+        if reasoning is not None and agent is not Agent.CORE_AGENT:
+            raise ValueError(
+                "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
+                f"(got agent={agent!r})"
+            )
+        # Trace instrumentation: the entire method body is wrapped so that any
+        # exit (successful return, timeout, or non-timeout failure) produces a
+        # ``subAgentCall`` trace event with matching status. See `_trace.py`.
+        trace_start_ms = _trace.now_ms()
+        agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
+
         deadline = time.monotonic() + timeout
 
         headers = await self._get_auth_headers()
@@ -319,6 +391,8 @@ class BaseBrowserWindow(ABC):
             body["callbackSecret"] = callback_secret
         if callback_headers is not None:
             body["callbackHeaders"] = callback_headers
+        if reasoning is not None:
+            body["reasoningMode"] = reasoning.value
 
         try:
             controller = AbortController.new()
@@ -379,6 +453,28 @@ class BaseBrowserWindow(ABC):
                         else:
                             response_content["structuredOutput"] = None
 
+                    trace_status: _trace.SubAgentCallStatus = (
+                        "error" if response["status"] == "error" else "success"
+                    )
+                    trace_error: str | None = (
+                        response_content.get("text")
+                        if response["status"] == "error"
+                        and response_content is not None
+                        else None
+                    )
+                    _trace.emit_sub_agent_call(
+                        ts_start=trace_start_ms,
+                        agent_type=agent_type_str,
+                        prompt=prompt,
+                        status=trace_status,
+                        request_id=request_id,
+                        error_message=trace_error,
+                        action_trace_raw=(
+                            response_content.get("actionTrace")
+                            if response_content is not None
+                            else None
+                        ),
+                    )
                     return response
 
                 # Poll every 3 seconds.
@@ -386,8 +482,69 @@ class BaseBrowserWindow(ABC):
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
+        except NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="timeout",
+                error_message=f"Timed out after {timeout}s",
+            )
+            raise
         except asyncio.TimeoutError:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="timeout",
+                error_message=f"Timed out after {timeout}s",
+            )
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+        except Exception as err:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="error",
+                error_message=str(err),
+            )
+            raise
+
+    # `reasoning` is only valid with the Core Agent. See `dispatch_request`
+    # above for the rationale; the same overload pattern is mirrored here.
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: None = None,
+        time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: dict[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> AgentResponse[dict[str, Any]]: ...
+
+    @overload
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: Literal[Agent.CORE_AGENT],
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[_StructuredOutput],
+        time_zone: str = "America/Los_Angeles",
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: dict[str, Any] | None = None,
+        timeout: int = 1000,
+    ) -> AgentResponse[_StructuredOutput]: ...
 
     @overload
     async def agent(
@@ -428,6 +585,7 @@ class BaseBrowserWindow(ABC):
         *,
         prompt: str,
         agent: Agent | str = Agent.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -439,18 +597,49 @@ class BaseBrowserWindow(ABC):
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
-        remote_dispatch_response = await self.dispatch_request(
-            prompt=prompt,
-            agent=agent,
-            clear_chat=clear_chat,
-            generate_gif=generate_gif,
-            output_schema=output_schema,
-            time_zone=time_zone,
-            mcp_servers=mcp_servers,
-            secret_variables=secret_variables,
-            input_variables=input_variables,
-            timeout=timeout,
-        )
+        # Branch on `reasoning` so each call site binds a single, typed overload
+        # of `dispatch_request`. The validation also lives in `dispatch_request`
+        # itself (defense in depth + reachable when callers go straight to the
+        # low-level API), so the redundancy here is intentional.
+        if reasoning is None:
+            remote_dispatch_response = await self.dispatch_request(
+                prompt=prompt,
+                agent=agent,
+                clear_chat=clear_chat,
+                generate_gif=generate_gif,
+                output_schema=output_schema,
+                time_zone=time_zone,
+                mcp_servers=mcp_servers,
+                secret_variables=secret_variables,
+                input_variables=input_variables,
+                timeout=timeout,
+            )
+        else:
+            if agent is not Agent.CORE_AGENT:
+                raise ValueError(
+                    "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
+                    f"(got agent={agent!r})"
+                )
+            # The CORE_AGENT-specific overloads of `dispatch_request` split on
+            # a narrower `output_schema` discriminator (None vs `type[T]`),
+            # which the impl's `type[BaseModel] | None` union doesn't cleanly
+            # narrow into without further branching. The public `agent()`
+            # overloads above already give callers correct return-type
+            # narrowing, so the internal forward call bypasses overload
+            # disambiguation on this single dimension.
+            remote_dispatch_response = await self.dispatch_request(  # pyright: ignore[reportCallIssue]
+                prompt=prompt,
+                agent=agent,
+                reasoning=reasoning,
+                clear_chat=clear_chat,
+                generate_gif=generate_gif,
+                output_schema=output_schema,  # pyright: ignore[reportArgumentType]
+                time_zone=time_zone,
+                mcp_servers=mcp_servers,
+                secret_variables=secret_variables,
+                input_variables=input_variables,
+                timeout=timeout,
+            )
         response_content = remote_dispatch_response["response"]
         assert response_content is not None
 
@@ -620,6 +809,25 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
 
+    async def read_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        timeout: int | None = None,
+    ) -> ReadExcelSheetResponse:
+        """Reads a range of cells from a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            ReadExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+            ),
+            ReadExcelSheetResponse,
+            timeout=timeout,
+        )
+
     async def write_google_sheet(
         self,
         *,
@@ -632,6 +840,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             WriteGoogleSheetRequest(
                 spreadsheet_id=spreadsheet_id, range=range, values=values
+            ),
+            timeout=timeout,
+        )
+
+    async def write_excel_sheet(
+        self,
+        *,
+        workbook_url: str,
+        range: str,
+        microsoft_account_email: str,
+        values: list[list[str]],
+        timeout: int | None = None,
+    ) -> None:
+        """Writes a range of cells to a Microsoft Excel workbook."""
+        return await self._run_extension_action(
+            WriteExcelSheetRequest(
+                workbook_url=workbook_url,
+                range=range,
+                microsoft_account_email=microsoft_account_email,
+                values=values,
             ),
             timeout=timeout,
         )
@@ -689,46 +917,80 @@ class BaseBrowserWindow(ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel | None:
-        headers = await self._get_auth_headers()
+        # Trace instrumentation: every exit path emits an ``extensionAction``
+        # trace event with a status matching the outcome. See `_trace.py`.
+        trace_start_ms = _trace.now_ms()
 
-        body = {
-            "action": request.model_dump(),
-            "browserWindowId": self.browser_window_id,
-        }
-        parent_run_ids = self._current_parent_run_ids()
-        if parent_run_ids:
-            body["parentRunIds"] = parent_run_ids
-        if timeout is not None:
-            body["timeout"] = timeout
+        try:
+            headers = await self._get_auth_headers()
 
-        fetch_response = await pyfetch(
-            f"{self._base_url}/extension-actions",
-            method="POST",
-            headers=headers,
-            body=json.dumps(body),
-            # Don't specify `timeout` here as the (soft) timeout is handled by the server.
-        )
+            body = {
+                "action": request.model_dump(),
+                "browserWindowId": self.browser_window_id,
+            }
+            parent_run_ids = self._current_parent_run_ids()
+            if parent_run_ids:
+                body["parentRunIds"] = parent_run_ids
+            if timeout is not None:
+                body["timeout"] = timeout
 
-        if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
-            raise NaradaTimeoutError
-        elif not fetch_response.ok:
-            status = fetch_response.status
-            text = await fetch_response.text()
-            raise NaradaError(f"Failed to run extension action: {status} {text}")
+            fetch_response = await pyfetch(
+                f"{self._base_url}/extension-actions",
+                method="POST",
+                headers=headers,
+                body=json.dumps(body),
+                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+            )
 
-        resp_json = await fetch_response.json()
+            if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
+                raise NaradaTimeoutError
+            elif not fetch_response.ok:
+                status = fetch_response.status
+                text = await fetch_response.text()
+                raise NaradaError(f"Failed to run extension action: {status} {text}")
 
-        response = ExtensionActionResponse.model_validate(resp_json)
-        if response.status == "error":
-            raise NaradaError(response.error)
-        if response.status == "aborted":
-            raise UserAbortedError
+            resp_json = await fetch_response.json()
 
-        if response_model is None:
-            return None
+            response = ExtensionActionResponse.model_validate(resp_json)
+            if response.status == "error":
+                raise NaradaError(response.error)
+            if response.status == "aborted":
+                raise UserAbortedError
 
-        assert response.data is not None
-        return response_model.model_validate_json(response.data)
+            if response_model is None:
+                _trace.emit_extension_action(
+                    ts_start=trace_start_ms,
+                    request=request,
+                    status="success",
+                )
+                return None
+
+            assert response.data is not None
+            parsed_response = response_model.model_validate_json(response.data)
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="success",
+                response=parsed_response,
+            )
+            return parsed_response
+
+        except NaradaTimeoutError:
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="timeout",
+                error_message="Extension action timed out",
+            )
+            raise
+        except Exception as err:
+            _trace.emit_extension_action(
+                ts_start=trace_start_ms,
+                request=request,
+                status="error",
+                error_message=str(err),
+            )
+            raise
 
 
 class LocalBrowserWindow(BaseBrowserWindow):
