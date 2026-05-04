@@ -20,6 +20,7 @@ from typing import (
 from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
+from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
@@ -30,6 +31,7 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
+    CriticResult,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -63,6 +65,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     Agent,
+    CriticConfig,
     File,
     McpServer,
     ReasoningEffort,
@@ -268,6 +271,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -291,6 +295,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -314,6 +319,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -377,6 +383,8 @@ class BaseBrowserWindow(ABC):
             body["secretVariables"] = secret_variables
         if input_variables is not None:
             body["inputVariables"] = input_variables
+        if critic_context is not None:
+            body["criticContext"] = critic_context
         if callback_url is not None:
             body["callbackUrl"] = callback_url
         if callback_secret is not None:
@@ -551,6 +559,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -567,6 +576,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -583,6 +593,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
@@ -639,6 +650,18 @@ class BaseBrowserWindow(ABC):
             else None
         )
 
+        critic_result: CriticResult | None = None
+        if critic is not None:
+            critic_result = await run_critic(
+                dispatch_request=self.dispatch_request,
+                original_prompt=prompt,
+                response_content=response_content,
+                action_trace_raw=action_trace_raw,
+                critic=critic,
+                time_zone=time_zone,
+                timeout=timeout,
+            )
+
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
@@ -647,6 +670,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            critic_result=critic_result,
         )
 
     async def agentic_selector(

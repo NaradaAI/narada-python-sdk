@@ -77,6 +77,12 @@ class McpServer(BaseModel):
     selectedTools: list[str] | None = None
 
 
+class CriticConfig(TypedDict, total=False):
+    prompt: str
+    output_schema: type[BaseModel]
+    mcp_servers: list[McpServer]
+
+
 class RemoteDispatchChatHistoryItem(TypedDict):
     role: Literal["user", "assistant"]
     content: str

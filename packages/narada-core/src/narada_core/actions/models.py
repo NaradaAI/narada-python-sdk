@@ -40,6 +40,13 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
     content: _StructuredOutputT
 
 
+class CriticResult(BaseModel):
+    validation_passed: bool
+    structured_output: Any
+    usage: AgentUsage
+    action_trace: tracing_model.ActionTrace | None = None
+
+
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     request_id: str
     status: Literal["success", "error", "input-required"]
@@ -51,6 +58,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    critic_result: CriticResult | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):
