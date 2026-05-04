@@ -41,14 +41,8 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 
 
 class CriticResult(BaseModel):
-    """Result from a critic agent that evaluated the main agent's output."""
-
     validation_passed: bool
-    """Whether the critic determined the main agent successfully completed its task."""
-
     structured_output: Any
-    """Parsed instance of the output_schema passed in CriticConfig, or None if no schema was given."""
-
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
 
