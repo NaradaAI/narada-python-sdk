@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum, StrEnum
 from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class Agent(Enum):
@@ -65,29 +65,10 @@ class McpServer(BaseModel):
     selectedTools: list[str] | None = None
 
 
-class CriticConfig(BaseModel):
-    """Configuration for a critic agent that evaluates a main agent's output.
-
-    When passed to `agent()`, the critic runs after the main agent completes and
-    evaluates whether the task was successfully performed, setting a boolean
-    variable to indicate pass or fail.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    prompt: str = (
-        "Using your context about the actions and outcome of the previous agent, "
-        "determine whether its task was completed successfully."
-    )
-    """Instructions for the critic on how to evaluate the main agent's output."""
-
-    output_schema: type[BaseModel] | None = None
-    """Optional Pydantic model defining additional structured fields for the critic to populate
-    alongside the boolean validation variable. The validation variable should not be included
-    here — it is always added automatically."""
-
-    mcp_servers: list[McpServer] | None = None
-    """Optional MCP servers available to the critic agent."""
+class CriticConfig(TypedDict, total=False):
+    prompt: str
+    output_schema: type[BaseModel]
+    mcp_servers: list[McpServer]
 
 
 class RemoteDispatchChatHistoryItem(TypedDict):

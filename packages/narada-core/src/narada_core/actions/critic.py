@@ -8,6 +8,10 @@ from pydantic import BaseModel, create_model
 from narada_core.actions.models import AgentUsage, CriticResult, parse_action_trace
 
 _VALIDATION_VAR = "narada_validation_passed"
+_DEFAULT_CRITIC_PROMPT = (
+    "Using your context about the actions and outcome of the previous agent, "
+    "determine whether its task was completed successfully."
+)
 
 
 async def run_critic(
@@ -20,10 +24,11 @@ async def run_critic(
     time_zone: str,
     timeout: int,
 ) -> CriticResult:
-    if critic.output_schema is not None:
+    output_schema = critic.get("output_schema")
+    if output_schema is not None:
         combined_fields: dict[str, Any] = {
             name: (info.annotation, info)
-            for name, info in critic.output_schema.model_fields.items()
+            for name, info in output_schema.model_fields.items()
         }
     else:
         combined_fields = {}
@@ -31,7 +36,7 @@ async def run_critic(
     CriticOutputModel = create_model("CriticOutput", **combined_fields)
 
     critic_dispatch_response = await dispatch_request(
-        prompt=critic.prompt,
+        prompt=critic.get("prompt", _DEFAULT_CRITIC_PROMPT),
         agent=Agent.PRODUCTIVITY,
         output_schema=CriticOutputModel,
         critic_context={
@@ -40,7 +45,7 @@ async def run_critic(
             "actionTrace": action_trace_raw or [],
             "validationVariableName": _VALIDATION_VAR,
         },
-        mcp_servers=critic.mcp_servers,
+        mcp_servers=critic.get("mcp_servers"),
         time_zone=time_zone,
         timeout=timeout,
     )
@@ -57,10 +62,10 @@ async def run_critic(
     )
 
     structured_output: BaseModel | None = None
-    if critic.output_schema is not None and combined_output is not None:
+    if output_schema is not None and combined_output is not None:
         output_dict = combined_output.model_dump()
         output_dict.pop(_VALIDATION_VAR, None)
-        structured_output = critic.output_schema.model_validate(output_dict)
+        structured_output = output_schema.model_validate(output_dict)
 
     critic_action_trace_raw = critic_content.get("actionTrace")
     critic_action_trace = (
