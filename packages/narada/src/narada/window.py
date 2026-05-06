@@ -148,6 +148,17 @@ class BaseBrowserWindow(ABC):
     def browser_window_id(self) -> str:
         return self._browser_window_id
 
+    @property
+    def cloud_browser_session_id(self) -> str | None:
+        """Cloud browser session backing this window, if any.
+
+        `dispatch_request` includes this value in remote-dispatch requests so backend
+        observability can link a client-mode run to an existing SDK-owned cloud browser. Plain
+        local windows are not cloud-backed and return `None`; cloud-backed subclasses override this
+        property with their session ID.
+        """
+        return None
+
     async def upload_file(self, *, file: IO) -> File:
         """Uploads a file that can be used as an attachment in a subsequent `agent` request.
 
@@ -389,6 +400,9 @@ class BaseBrowserWindow(ABC):
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
+        cloud_browser_session_id = self.cloud_browser_session_id
+        if cloud_browser_session_id is not None:
+            body["cloudBrowserSessionId"] = cloud_browser_session_id
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:

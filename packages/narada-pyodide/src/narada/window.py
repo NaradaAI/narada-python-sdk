@@ -176,6 +176,17 @@ class BaseBrowserWindow(ABC):
     def browser_window_id(self) -> str:
         return self._browser_window_id
 
+    @property
+    def cloud_browser_session_id(self) -> str | None:
+        """Cloud browser session backing this window, if any.
+
+        `dispatch_request` includes this value in remote-dispatch requests so backend
+        observability can link a client-mode run to an existing SDK-owned cloud browser. Plain
+        local windows are not cloud-backed and return `None`; cloud-backed subclasses override this
+        property with their session ID.
+        """
+        return None
+
     def _current_parent_run_ids(self) -> list[str] | None:
         """Returns the runnable stack to forward with SDK requests.
 
@@ -358,6 +369,9 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
+        cloud_browser_session_id = self.cloud_browser_session_id
+        if cloud_browser_session_id is not None:
+            body["cloudBrowserSessionId"] = cloud_browser_session_id
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:

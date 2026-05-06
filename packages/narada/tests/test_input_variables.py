@@ -1,7 +1,7 @@
 from io import BytesIO
 
 import pytest
-from narada.window import BaseBrowserWindow
+from narada.window import BaseBrowserWindow, CloudBrowserWindow, RemoteBrowserWindow
 
 
 @pytest.mark.asyncio
@@ -37,3 +37,19 @@ async def test_input_variable_files_normalize_to_current_file_variable_shape(
             "mimeType": "text/plain",
         }
     }
+
+
+def test_cloud_browser_windows_expose_session_id_for_remote_dispatch() -> None:
+    cloud_window = CloudBrowserWindow(
+        auth_headers={},
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+    )
+    remote_window = RemoteBrowserWindow(
+        auth_headers={},
+        browser_window_id="browser-window-456",
+        cloud_browser_session_id="session-456",
+    )
+
+    assert cloud_window.cloud_browser_session_id == "session-123"
+    assert remote_window.cloud_browser_session_id == "session-456"

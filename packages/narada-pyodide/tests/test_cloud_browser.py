@@ -272,6 +272,7 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert post_call.kwargs["method"] == "POST"
     payload = json.loads(post_call.kwargs["body"])
     assert payload["browserWindowId"] == "browser-window-123"
+    assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
 
