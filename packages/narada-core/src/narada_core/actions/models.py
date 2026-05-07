@@ -200,6 +200,26 @@ class AgenticSelectorResponse(BaseModel):
     value: str | None
 
 
+class WaitForElementRequest(BaseModel):
+    name: Literal["wait_for_element"] = "wait_for_element"
+    selectors: AgenticSelectors
+    state: Literal["visible", "hidden"]
+    timeout: int  # milliseconds
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "selectors": _dump_agentic_selectors(self.selectors),
+            "state": self.state,
+            "timeout": self.timeout,
+        }
+
+
+class WaitForElementResponse(BaseModel):
+    found: bool
+
+
 class Viewport(TypedDict):
     width: int
     height: int
@@ -404,6 +424,7 @@ type ExtensionActionRequest = (
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
+    | WaitForElementRequest
     | PrintMessageRequest
     | ReadGoogleSheetRequest
     | ReadExcelSheetRequest
