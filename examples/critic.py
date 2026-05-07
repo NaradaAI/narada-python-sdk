@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import Narada, CriticConfig
+from narada import CriticConfig, Narada
 from pydantic import BaseModel, Field
 
 

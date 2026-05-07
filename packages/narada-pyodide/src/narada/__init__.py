@@ -1,8 +1,8 @@
+from narada_core.actions.models import CriticResult
 from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
 )
-from narada_core.actions.models import CriticResult
 from narada_core.models import (
     Agent,
     CriticConfig,

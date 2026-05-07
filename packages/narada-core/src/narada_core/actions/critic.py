@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from narada_core.models import Agent, CriticConfig
 from pydantic import BaseModel, create_model
 
 from narada_core.actions.models import AgentUsage, CriticResult
+from narada_core.models import Agent, CriticConfig
 from narada_core.tracing.model import parse_action_trace
 
 _VALIDATION_VAR = "narada_validation_passed"
