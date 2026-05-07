@@ -106,6 +106,18 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
+_TRACE_AGENT_TYPE_BY_AGENT = {
+    Agent.PRODUCTIVITY: "generalist",
+    Agent.OPERATOR: "operator",
+    Agent.CORE_AGENT: "coreAgent",
+}
+
+
+def _agent_type_for_trace(agent: Agent | str) -> str:
+    if isinstance(agent, Agent):
+        return _TRACE_AGENT_TYPE_BY_AGENT[agent]
+    return str(agent)
+
 
 def _normalize_narada_env(env: str | None) -> Literal["prod", "dev", None]:
     if env is not None and env not in ("prod", "dev"):
@@ -352,7 +364,7 @@ class BaseBrowserWindow(ABC):
         # exit (successful return, timeout, or non-timeout failure) produces a
         # ``subAgentCall`` trace event with matching status. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
-        agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
+        agent_type_str = _agent_type_for_trace(agent)
 
         deadline = time.monotonic() + timeout
 
