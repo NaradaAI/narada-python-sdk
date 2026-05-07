@@ -89,24 +89,33 @@ class Narada:
             "require_extension": require_extension,
         }
 
-        for _ in range(1, 4):
-            resp = await pyfetch(
-                endpoint_url,
-                method="POST",
-                headers=headers,
-                body=json.dumps(request_body),
-            )
-            if resp.ok:
-                break
+        response = None
+        for _ in range(3):
+            # Due to unknown network issues, sometimes create-and-initialize-cloud-browser-session API call fails.
+            try:
+                response = await pyfetch(
+                    endpoint_url,
+                    method="POST",
+                    headers=headers,
+                    body=json.dumps(request_body),
+                )
+                if response.ok:
+                    break
+            except Exception:
+                continue
 
-        if not resp.ok:
+        if response is None or not response.ok:
+            resp_status = response.status if response is not None else "unknown status"
+            resp_text = (
+                await response.text() if response is not None else "unknown error"
+            )
             raise RuntimeError(
                 "Failed to create and initialize cloud browser session after 3 attempts: "
-                f"{resp.status} {await resp.text()}\n"
+                f"{resp_status}: {resp_text}\n"
                 f"Endpoint URL: {endpoint_url}"
             )
 
-        response_data = await resp.json()
+        response_data = await response.json()
         return CloudBrowserWindow(
             browser_window_id=response_data["browser_window_id"],
             session_id=response_data["session_id"],

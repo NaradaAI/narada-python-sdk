@@ -1,3 +1,4 @@
+from narada_core.actions.models import CriticResult
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -7,7 +8,6 @@ from narada_core.errors import (
     NaradaUnsupportedBrowserError,
     UserAbortedError,
 )
-from narada_core.actions.models import CriticResult
 from narada_core.models import (
     Agent,
     CriticConfig,
