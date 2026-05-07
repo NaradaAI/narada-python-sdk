@@ -273,18 +273,18 @@ class Narada:
         pw = self._playwright
         assert pw is not None
 
-        async def connect_over_cdp() -> Browser:
-            return await pw.chromium.connect_over_cdp(
+        async def connect_over_cdp() -> tuple[Browser, Page]:
+            browser = await pw.chromium.connect_over_cdp(
                 cdp_websocket_url, headers=cdp_auth_headers
             )
+            initialization_page = browser.contexts[0].pages[0]
+            return browser, initialization_page
 
         # Connect to browser via CDP with authentication headers
-        browser = await connect_over_cdp()
+        browser, initialization_page = await connect_over_cdp()
 
-        # Navigate to login URL (provided by backend with custom token)
-        context = browser.contexts[0]
-        initialization_page = context.pages[0]
-
+        # Navigate to login URL (provided by backend with custom token).
+        #
         # This `goto` action can occasionally timeout for unknown reasons. To mitigate this, we
         # wrap it in a retry loop.
         max_attempts = 3
@@ -297,7 +297,7 @@ class Narada:
                     raise
                 logging.info("Retrying navigation to login URL...")
                 await browser.close()
-                browser = await connect_over_cdp()
+                browser, initialization_page = await connect_over_cdp()
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
