@@ -279,7 +279,7 @@ class Narada:
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
-        await initialization_page.goto(login_url)
+        await initialization_page.goto(login_url, timeout=15_000)
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
