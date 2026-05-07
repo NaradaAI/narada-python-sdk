@@ -89,15 +89,19 @@ class Narada:
             "require_extension": require_extension,
         }
 
-        resp = await pyfetch(
-            endpoint_url,
-            method="POST",
-            headers=headers,
-            body=json.dumps(request_body),
-        )
+        for _ in range(1, 4):
+            resp = await pyfetch(
+                endpoint_url,
+                method="POST",
+                headers=headers,
+                body=json.dumps(request_body),
+            )
+            if resp.ok:
+                break
+
         if not resp.ok:
             raise RuntimeError(
-                "Failed to create and initialize cloud browser session: "
+                "Failed to create and initialize cloud browser session after 3 attempts: "
                 f"{resp.status} {await resp.text()}\n"
                 f"Endpoint URL: {endpoint_url}"
             )
