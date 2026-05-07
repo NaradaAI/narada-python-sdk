@@ -170,6 +170,7 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    children: ActionTrace | None = None
 
 
 class IfTrace(BaseModel):
