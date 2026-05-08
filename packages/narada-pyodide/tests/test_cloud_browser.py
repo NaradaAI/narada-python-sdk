@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from packaging.version import InvalidVersion
 
-PROJECT_ROOT = Path("/Users/zizheng/Projects/narada-python-sdk")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
 CORE_SRC = PROJECT_ROOT / "packages" / "narada-core" / "src"
 
@@ -275,6 +275,115 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_window_trace_uses_string_agent_type_for_builtin_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        window_module._trace,
+        "_narada_emit_trace_event",
+        lambda event_json: emitted_events.append(json.loads(event_json)),
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    await window.dispatch_request(prompt="hello from cloud browser")
+
+    trace_event = emitted_events[0]
+    assert trace_event["kind"] == "subAgentCall"
+    assert trace_event["agent_type"] == "operator"
+
+
+def test_parse_action_trace_accepts_historical_numeric_sub_agent_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=AsyncMock())
+
+    trace = window_module.parse_action_trace(
+        [
+            {
+                "step_type": "pythonAgentRun",
+                "url": "",
+                "status": "success",
+                "duration_ms": 10,
+                "events": [
+                    {
+                        "kind": "subAgentCall",
+                        "ts_start": 1,
+                        "ts_end": 2,
+                        "agent_type": 2,
+                        "prompt": "legacy operator call",
+                        "status": "success",
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert trace[0].events[0].agent_type == "2"
+
+
+def test_parse_action_trace_accepts_historical_numeric_nested_sub_agent_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=AsyncMock())
+
+    trace = window_module.parse_action_trace(
+        [
+            {
+                "step_type": "pythonAgentRun",
+                "url": "",
+                "status": "success",
+                "duration_ms": 10,
+                "events": [
+                    {
+                        "kind": "subAgentCall",
+                        "ts_start": 1,
+                        "ts_end": 2,
+                        "agent_type": "/$USER/childWorkflow",
+                        "prompt": "child workflow call",
+                        "status": "success",
+                        "action_trace": [
+                            {
+                                "step_type": "pythonAgentRun",
+                                "url": "",
+                                "status": "success",
+                                "duration_ms": 5,
+                                "events": [
+                                    {
+                                        "kind": "subAgentCall",
+                                        "ts_start": 3,
+                                        "ts_end": 4,
+                                        "agent_type": 2,
+                                        "prompt": "nested operator call",
+                                        "status": "success",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    nested_trace = trace[0].events[0].action_trace
+    assert nested_trace is not None
+    assert nested_trace[0].events[0].agent_type == "2"
 
 
 @pytest.mark.asyncio

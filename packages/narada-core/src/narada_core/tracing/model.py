@@ -8,6 +8,7 @@ from pydantic import (
     NonNegativeInt,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -243,6 +244,11 @@ class PythonSubAgentCallEvent(BaseModel):
     request_id: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
+
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _coerce_agent_type(cls, agent_type: Any) -> str:
+        return str(agent_type)
 
     @model_validator(mode="after")
     def _check_ts_ordering(self) -> PythonSubAgentCallEvent:
