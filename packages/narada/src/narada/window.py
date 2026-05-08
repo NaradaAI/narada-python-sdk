@@ -467,7 +467,7 @@ class BaseBrowserWindow(ABC):
 
                     response["requestId"] = request_id
 
-                    if response["status"] != "pending":
+                    if response["completedAt"] is not None:
                         response_content = response["response"]
                         if response_content is not None:
                             # Populate the `structuredOutput` field. This is a client-side field
@@ -927,6 +927,12 @@ class BaseBrowserWindow(ABC):
             "action": request.model_dump(),
             "browserWindowId": self.browser_window_id,
         }
+        remote_dispatch_request_id = os.environ.get("NARADA_REMOTE_DISPATCH_REQUEST_ID")
+        if remote_dispatch_request_id is not None:
+            body["requestId"] = remote_dispatch_request_id
+        remote_dispatch_api_key_id = os.environ.get("NARADA_REMOTE_DISPATCH_API_KEY_ID")
+        if remote_dispatch_api_key_id is not None:
+            body["apiKeyId"] = remote_dispatch_api_key_id
         if timeout is not None:
             body["timeout"] = timeout
 
