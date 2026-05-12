@@ -279,7 +279,7 @@ class Narada:
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
-        await initialization_page.goto(login_url, timeout=20_000)
+        await initialization_page.goto(login_url, timeout=15_000)
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
@@ -289,7 +289,7 @@ class Narada:
                 browser_window_id = await self._wait_for_browser_window_id(
                     initialization_page,
                     config,
-                    timeout=10_000,
+                    timeout=30_000,
                 )
                 break
             except NaradaExtensionMissingError:
@@ -302,7 +302,7 @@ class Narada:
                     raise
                 # If browser window ID is not found, reload the page and try again
                 # try to go to the login URL again (with customToken query param)
-                await initialization_page.goto(login_url, timeout=20_000)
+                await initialization_page.goto(login_url, timeout=15_000)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
