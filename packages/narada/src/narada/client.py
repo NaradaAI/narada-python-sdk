@@ -297,11 +297,17 @@ class Narada:
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
+            except NaradaExtensionUnauthenticatedError:
+                if attempt == max_attempts - 1:
+                    raise
+                logging.info("Waiting for Narada extension to authenticate...")
+                await initialization_page.goto(login_url, timeout=15_000)
             except NaradaTimeoutError:
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
-                await initialization_page.reload()
+                # try to go to the login URL again (with customToken query param)
+                await initialization_page.goto(login_url, timeout=15_000)
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
