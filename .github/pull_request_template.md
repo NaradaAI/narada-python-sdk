@@ -1,8 +1,6 @@
 ## Summary
 
-
 ## Testing
-
 
 ## Codex sibling refs
 
