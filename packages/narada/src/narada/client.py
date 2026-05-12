@@ -297,11 +297,6 @@ class Narada:
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaExtensionUnauthenticatedError:
-                if attempt == max_attempts - 1:
-                    raise
-                logging.info("Waiting for Narada extension to authenticate...")
-                await initialization_page.goto(login_url, timeout=20_000)
             except NaradaTimeoutError:
                 if attempt == max_attempts - 1:
                     raise
