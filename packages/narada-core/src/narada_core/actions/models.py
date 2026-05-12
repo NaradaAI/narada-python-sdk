@@ -419,8 +419,30 @@ class UserApprovalResponse(BaseModel):
     approved: bool
 
 
+class RecordedKeyModifiers(TypedDict, total=False):
+    ctrl: bool
+    shift: bool
+    alt: bool
+    meta: bool
+
+
+class DispatchKeyEventItem(BaseModel):
+    type: Literal["keyDown", "keyUp", "press"] = "keyDown"  # noqa: A003
+    code: str
+    key: str | None = None
+    modifiers: RecordedKeyModifiers | None = None
+
+
+class DispatchKeyEventRequest(BaseModel):
+    """Wire payload: key events for the extension to replay via ``debuggerPress``."""
+
+    name: Literal["dispatch_key_event"] = "dispatch_key_event"
+    events: list[DispatchKeyEventItem]
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | DispatchKeyEventRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest

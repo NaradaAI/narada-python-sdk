@@ -11,7 +11,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
+    Mapping,
     Optional,
+    Sequence,
     TypeVar,
     cast,
     overload,
@@ -32,6 +34,8 @@ from narada_core.actions.models import (
     AgentUsage,
     CloseWindowRequest,
     CriticResult,
+    DispatchKeyEventItem,
+    DispatchKeyEventRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -695,6 +699,7 @@ class BaseBrowserWindow(ABC):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        nth_match: Optional[str] = None,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
@@ -715,6 +720,7 @@ class BaseBrowserWindow(ABC):
                 action=action,
                 selectors=selectors,
                 fallback_operator_query=fallback_operator_query,
+                nth_match=nth_match,
             ),
             response_model,
             timeout=timeout,
@@ -724,6 +730,41 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def dispatch_key_event(
+        self,
+        *,
+        events: Sequence[DispatchKeyEventItem | Mapping[str, Any]],
+        timeout: int | None = 60,
+    ) -> None:
+        """Send keyboard events on the active tab (Chrome debugger).
+
+        Each item uses ``type`` of ``\"keyDown\"``, ``\"keyUp\"``, or ``\"press\"``.
+        ``code`` is required per item; ``key`` and ``modifiers`` are optional.
+
+        Items may be :class:`DispatchKeyEventItem` instances or plain mappings (e.g. dicts from
+        ``json.loads``) with the same keys::
+
+            await window.dispatch_key_event(events=[
+                {"type": "keyDown", "code": "KeyA", "key": "a"},
+                {"type": "keyUp", "code": "KeyA", "key": "a"},
+            ])
+        """
+
+        if not events:
+            raise ValueError("dispatch_key_event requires a non-empty events= sequence")
+
+        normalized: list[DispatchKeyEventItem] = [
+            event
+            if isinstance(event, DispatchKeyEventItem)
+            else DispatchKeyEventItem.model_validate(event)
+            for event in events
+        ]
+
+        await self._run_extension_action(
+            DispatchKeyEventRequest(events=normalized),
+            timeout=timeout,
+        )
 
     async def agentic_mouse_action(
         self,

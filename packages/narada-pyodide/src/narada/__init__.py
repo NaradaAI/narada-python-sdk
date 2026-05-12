@@ -1,4 +1,4 @@
-from narada_core.actions.models import CriticResult
+from narada_core.actions.models import CriticResult, DispatchKeyEventItem
 from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
@@ -27,6 +27,7 @@ __all__ = [
     "CloudBrowserWindow",
     "CriticConfig",
     "CriticResult",
+    "DispatchKeyEventItem",
     "download_file",
     "File",
     "LocalBrowserWindow",
