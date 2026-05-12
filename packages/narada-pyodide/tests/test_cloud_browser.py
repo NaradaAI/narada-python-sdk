@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from packaging.version import InvalidVersion
 
-PROJECT_ROOT = Path("/Users/zizheng/Projects/narada-python-sdk")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
 CORE_SRC = PROJECT_ROOT / "packages" / "narada-core" / "src"
 
@@ -275,6 +275,43 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(
+        prompt="hello from cloud browser",
+        agent=narada_pkg.Agent.OPERATOR,
+    )
+
+    assert response["status"] == "success"
+    assert json.loads(pyfetch.await_args_list[0].kwargs["body"])["prompt"] == (
+        "/Operator hello from cloud browser"
+    )
+    assert len(emitted_events) == 1
+    assert json.loads(emitted_events[0])["agent_type"] == "operator"
 
 
 @pytest.mark.asyncio
