@@ -15,6 +15,7 @@ from typing import (
 from pydantic import (
     BaseModel,
     Field,
+    RootModel,
 )
 
 from narada_core.tracing import model as tracing_model
@@ -387,6 +388,17 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class CallCustomAgentByPathRequest(BaseModel):
+    name: Literal["call_custom_agent_by_path"] = "call_custom_agent_by_path"
+    agent_path: str
+    prompt: str
+    input_variables: dict[str, Any] = Field(default_factory=dict)
+
+
+class CallCustomAgentByPathResponse(RootModel[dict[str, Any]]):
+    pass
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
     step_id: str
@@ -414,6 +426,7 @@ type ExtensionActionRequest = (
     | GetScreenshotRequest
     | GetUrlRequest
     | PromptForUserInputRequest
+    | CallCustomAgentByPathRequest
     | UserApprovalRequest
 )
 
@@ -422,3 +435,4 @@ class ExtensionActionResponse(BaseModel):
     status: Literal["success", "error", "aborted"]
     error: str | None = None
     data: str | None = None
+    workflowTrace: dict[str, Any] | None = None

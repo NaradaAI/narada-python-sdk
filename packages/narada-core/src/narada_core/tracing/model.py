@@ -277,6 +277,11 @@ class PythonExtensionActionEvent(BaseModel):
         return self
 
 
+class PythonSubWorkflowEvent(BaseModel):
+    kind: Literal["subWorkflow"] = "subWorkflow"
+    workflowTrace: dict[str, Any]
+
+
 class PythonSideEffectEvent(BaseModel):
     kind: Literal["sideEffect"] = "sideEffect"
     ts: int
@@ -289,6 +294,7 @@ PythonTraceEvent = Annotated[
     | PythonStderrEvent
     | PythonSubAgentCallEvent
     | PythonExtensionActionEvent
+    | PythonSubWorkflowEvent
     | PythonSideEffectEvent,
     Field(discriminator="kind"),
 ]

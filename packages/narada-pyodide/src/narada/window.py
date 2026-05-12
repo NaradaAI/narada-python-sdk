@@ -30,6 +30,8 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    CallCustomAgentByPathRequest,
+    CallCustomAgentByPathResponse,
     CloseWindowRequest,
     CriticResult,
     ExtensionActionRequest,
@@ -95,6 +97,20 @@ def _parent_run_ids() -> list[str]:
             _narada_parent_run_ids,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
         ).to_py()
     )
+
+
+def _request_id() -> str | None:
+    # `_narada_request_id` is a plain string injected by the JavaScript harness that identifies
+    # the currently-running parent runnable's request. The SDK forwards it on extension-action
+    # requests so the spawned child runnable inherits the same request ID instead of the
+    # frontend handler minting a new one and orphaning the child run.
+    try:
+        value = _narada_request_id  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    except NameError:
+        return None
+    if value is None:
+        return None
+    return str(value)
 
 
 if TYPE_CHECKING:
@@ -194,6 +210,16 @@ class BaseBrowserWindow(ABC):
         stack. Remote/cloud browser windows execute in a different frontend instance with an
         independent RunnableEngine, so forwarding parent run IDs would make that frontend treat the
         request as a child runnable of a stack frame it does not have.
+        """
+        return None
+
+    def _current_request_id(self) -> str | None:
+        """Returns the parent runnable's request ID to forward on extension-action requests.
+
+        Mirrors `_current_parent_run_ids` — only requests targeting the current browser window
+        should inherit it. Without this, extension-action dispatches that spawn a child runnable
+        (e.g. `call_run_custom_agent_tool`) end up with a fresh request ID and the child run
+        is not linked to the parent in observability.
         """
         return None
 
@@ -354,6 +380,51 @@ class BaseBrowserWindow(ABC):
         trace_start_ms = _trace.now_ms()
         agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
 
+        parent_run_ids = self._current_parent_run_ids()
+        request_id = self._current_request_id()
+        if (
+            isinstance(agent, str)
+            and agent.startswith("/")
+            and parent_run_ids
+            and request_id is not None
+        ):
+            result = await self._run_extension_action(
+                CallCustomAgentByPathRequest(
+                    agent_path=agent,
+                    prompt=prompt,
+                    input_variables=input_variables or {},
+                ),
+                CallCustomAgentByPathResponse,
+                timeout=min(timeout, 300),
+            )
+            output_content = result.root
+            structured_output = (
+                output_schema.model_validate(output_content)
+                if output_schema is not None
+                else None
+            )
+            response_content: dict[str, Any] = {
+                "text": json.dumps(output_content),
+                "structuredOutput": structured_output,
+                "output": {"type": "structured", "content": output_content},
+            }
+            completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="success",
+                request_id=request_id,
+            )
+            return {
+                "requestId": request_id,
+                "status": "success",
+                "response": response_content,
+                "createdAt": completed_at,
+                "completedAt": completed_at,
+                "usage": {"actions": 0, "credits": 0},
+            }
+
         deadline = time.monotonic() + timeout
 
         headers = await self._get_auth_headers()
@@ -366,7 +437,6 @@ class BaseBrowserWindow(ABC):
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
-        parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
         cloud_browser_session_id = self.cloud_browser_session_id
@@ -945,6 +1015,9 @@ class BaseBrowserWindow(ABC):
             parent_run_ids = self._current_parent_run_ids()
             if parent_run_ids:
                 body["parentRunIds"] = parent_run_ids
+            request_id = self._current_request_id()
+            if request_id is not None:
+                body["requestId"] = request_id
             if timeout is not None:
                 body["timeout"] = timeout
 
@@ -966,6 +1039,8 @@ class BaseBrowserWindow(ABC):
             resp_json = await fetch_response.json()
 
             response = ExtensionActionResponse.model_validate(resp_json)
+            if response.workflowTrace is not None:
+                _trace.emit_sub_workflow(workflow_trace=response.workflowTrace)
             if response.status == "error":
                 raise NaradaError(response.error)
             if response.status == "aborted":
@@ -1023,6 +1098,10 @@ class LocalBrowserWindow(BaseBrowserWindow):
     @override
     def _current_parent_run_ids(self) -> list[str] | None:
         return _parent_run_ids()
+
+    @override
+    def _current_request_id(self) -> str | None:
+        return _request_id()
 
 
 class RemoteBrowserWindow(BaseBrowserWindow):
