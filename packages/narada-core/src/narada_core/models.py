@@ -345,7 +345,7 @@ class Usage(TypedDict):
 
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
-    status: Literal["success", "error"]
+    status: Literal["success", "error", "input-required"]
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
