@@ -11,15 +11,15 @@ async def main() -> None:
             url="https://w3c.github.io/uievents/tools/key-event-viewer.html", timeout=60
         )
 
-        # Dict items are accepted (same shape as JSON); DispatchKeyEventItem is optional.
-        await window.dispatch_key_event(
+        # Dict items are accepted (same shape as JSON); PressKeyEventItem is optional.
+        await window.press_key(
             events=[
                 {"type": "keyDown", "code": "KeyA", "key": "a"},
                 {"type": "keyUp", "code": "KeyA", "key": "a"},
             ],
         )
 
-        await window.dispatch_key_event(
+        await window.press_key(
             events=[
                 {
                     "type": "keyDown",

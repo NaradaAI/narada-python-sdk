@@ -34,8 +34,6 @@ from narada_core.actions.models import (
     AgentUsage,
     CloseWindowRequest,
     CriticResult,
-    DispatchKeyEventItem,
-    DispatchKeyEventRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -47,6 +45,8 @@ from narada_core.actions.models import (
     GetUrlRequest,
     GetUrlResponse,
     GoToUrlRequest,
+    PressKeyEventItem,
+    PressKeyRequest,
     PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
@@ -731,10 +731,10 @@ class BaseBrowserWindow(ABC):
 
         return result
 
-    async def dispatch_key_event(
+    async def press_key(
         self,
         *,
-        events: Sequence[DispatchKeyEventItem | Mapping[str, Any]],
+        events: Sequence[PressKeyEventItem | Mapping[str, Any]],
         timeout: int | None = 60,
     ) -> None:
         """Send keyboard events on the active tab (Chrome debugger).
@@ -742,27 +742,27 @@ class BaseBrowserWindow(ABC):
         Each item uses ``type`` of ``\"keyDown\"``, ``\"keyUp\"``, or ``\"press\"``.
         ``code`` is required per item; ``key`` and ``modifiers`` are optional.
 
-        Items may be :class:`DispatchKeyEventItem` instances or plain mappings (e.g. dicts from
+        Items may be :class:`PressKeyEventItem` instances or plain mappings (e.g. dicts from
         ``json.loads``) with the same keys::
 
-            await window.dispatch_key_event(events=[
+            await window.press_key(events=[
                 {"type": "keyDown", "code": "KeyA", "key": "a"},
                 {"type": "keyUp", "code": "KeyA", "key": "a"},
             ])
         """
 
         if not events:
-            raise ValueError("dispatch_key_event requires a non-empty events= sequence")
+            raise ValueError("press_key requires a non-empty events= sequence")
 
-        normalized: list[DispatchKeyEventItem] = [
+        normalized: list[PressKeyEventItem] = [
             event
-            if isinstance(event, DispatchKeyEventItem)
-            else DispatchKeyEventItem.model_validate(event)
+            if isinstance(event, PressKeyEventItem)
+            else PressKeyEventItem.model_validate(event)
             for event in events
         ]
 
         await self._run_extension_action(
-            DispatchKeyEventRequest(events=normalized),
+            PressKeyRequest(events=normalized),
             timeout=timeout,
         )
 
