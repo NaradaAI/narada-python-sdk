@@ -284,6 +284,49 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_waits_through_active_input_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "input-required",
+                    "completedAt": None,
+                    "response": None,
+                }
+            ),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": None,
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    sleep = AsyncMock()
+    monkeypatch.setattr(window_module.asyncio, "sleep", sleep)
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="hello from cloud browser")
+
+    assert response["status"] == "success"
+    assert pyfetch.await_count == 3
+    assert sleep.await_count == 1
+    first_poll_call = pyfetch.await_args_list[1]
+    second_poll_call = pyfetch.await_args_list[2]
+    assert first_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
+    assert second_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
