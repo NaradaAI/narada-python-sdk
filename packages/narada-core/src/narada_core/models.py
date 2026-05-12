@@ -293,6 +293,66 @@ class ObjectSetPropertiesTrace(TypedDict):
     description: str
 
 
+class PythonStdoutEvent(TypedDict):
+    kind: Literal["stdout"]
+    ts: int
+    text: str
+
+
+class PythonStderrEvent(TypedDict):
+    kind: Literal["stderr"]
+    ts: int
+    text: str
+
+
+class PythonSubAgentCallEvent(TypedDict):
+    kind: Literal["subAgentCall"]
+    ts_start: int
+    ts_end: int
+    agent_type: str
+    prompt: str
+    status: Literal["success", "error", "timeout"]
+    request_id: NotRequired[str]
+    error_message: NotRequired[str]
+    action_trace: NotRequired[ActionTrace]
+
+
+class PythonExtensionActionEvent(TypedDict):
+    kind: Literal["extensionAction"]
+    ts_start: int
+    ts_end: int
+    action_name: str
+    request_summary: dict[str, object]
+    result_summary: NotRequired[dict[str, object]]
+    status: Literal["success", "error", "timeout"]
+    error_message: NotRequired[str]
+
+
+class PythonSideEffectEvent(TypedDict):
+    kind: Literal["sideEffect"]
+    ts: int
+    effect_type: Literal["download_file", "render_html"]
+    description: str
+
+
+type PythonTraceEvent = (
+    PythonStdoutEvent
+    | PythonStderrEvent
+    | PythonSubAgentCallEvent
+    | PythonExtensionActionEvent
+    | PythonSideEffectEvent
+)
+
+
+class PythonAgentRunTrace(TypedDict):
+    step_type: Literal["pythonAgentRun"]
+    url: str
+    status: Literal["success", "error", "aborted"]
+    duration_ms: int
+    events: list[PythonTraceEvent]
+    error_message: NotRequired[str]
+
+
 ApaStepTrace = (
     GoToUrlTrace
     | GetUrlTrace
@@ -325,6 +385,7 @@ ApaStepTrace = (
     | DataTableInsertRowTrace
     | DataTableUpdateCellValueTrace
     | ObjectSetPropertiesTrace
+    | PythonAgentRunTrace
 )
 
 

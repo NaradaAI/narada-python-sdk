@@ -56,6 +56,8 @@ from narada_core.actions.models import (
     RecordedClick,
     UserApprovalRequest,
     UserApprovalResponse,
+    WaitForElementRequest,
+    WaitForElementResponse,
     WriteExcelSheetRequest,
     WriteGoogleSheetRequest,
 )
@@ -121,6 +123,18 @@ if TYPE_CHECKING:
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+
+def _trace_agent_type(agent: Agent | str) -> str:
+    match agent:
+        case Agent.PRODUCTIVITY:
+            return "generalist"
+        case Agent.OPERATOR:
+            return "operator"
+        case Agent.CORE_AGENT:
+            return "coreAgent"
+        case _:
+            return str(agent)
 
 
 def _normalize_narada_env(env: str | None) -> Literal["prod", "dev", None]:
@@ -378,7 +392,7 @@ class BaseBrowserWindow(ABC):
         # exit (successful return, timeout, or non-timeout failure) produces a
         # ``subAgentCall`` trace event with matching status. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
-        agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
+        agent_type_str = _trace_agent_type(agent)
 
         parent_run_ids = self._current_parent_run_ids()
         request_id = self._current_request_id()
@@ -826,6 +840,26 @@ class BaseBrowserWindow(ABC):
         return await self._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
+
+    async def wait_for_element(
+        self,
+        *,
+        selectors: AgenticSelectors,
+        state: Literal["visible", "hidden"],
+        timeout: int,
+    ) -> bool:
+        """Waits for an element matching the given selectors to reach the specified state.
+
+        Returns True if the element was found, False if no selector matched before timeout.
+        """
+        result = await self._run_extension_action(
+            WaitForElementRequest(selectors=selectors, state=state, timeout=timeout),
+            WaitForElementResponse,
+            timeout=timeout // 1000 + 30,
+        )
+        if result is None:
+            return False
+        return result.found
 
     async def get_url(self, *, timeout: int | None = None) -> str:
         """Gets the URL of the current active page."""
