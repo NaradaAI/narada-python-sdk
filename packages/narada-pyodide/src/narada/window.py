@@ -490,12 +490,19 @@ class BaseBrowserWindow(ABC):
                         and response_content is not None
                         else None
                     )
+                    trace_text: str | None = (
+                        response_content.get("text")
+                        if response["status"] == "success"
+                        and response_content is not None
+                        else None
+                    )
                     _trace.emit_sub_agent_call(
                         ts_start=trace_start_ms,
                         agent_type=agent_type_str,
                         prompt=prompt,
                         status=trace_status,
                         request_id=request_id,
+                        text=trace_text,
                         error_message=trace_error,
                         action_trace_raw=(
                             response_content.get("actionTrace")

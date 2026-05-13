@@ -315,6 +315,86 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "TRACE_CORE_AGENT_DONE",
+                        "actionTrace": [],
+                    },
+                }
+            ),
+        ]
+    )
+    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(
+        prompt="reply with marker",
+        agent=narada_pkg.Agent.CORE_AGENT,
+    )
+
+    from narada_core.tracing.model import PythonSubAgentCallEvent
+
+    assert response["status"] == "success"
+    assert len(emitted_events) == 1
+    event = json.loads(emitted_events[0])
+    parsed_event = PythonSubAgentCallEvent.model_validate(event)
+    assert parsed_event.agent_type == "coreAgent"
+    assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
+    assert parsed_event.action_trace == []
+
+
+def test_parse_action_trace_preserves_run_custom_agent_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(CORE_SRC))
+
+    from narada_core.tracing.model import parse_action_trace
+
+    parsed_trace = parse_action_trace(
+        [
+            {
+                "step_type": "runCustomAgent",
+                "url": "https://example.com",
+                "workflow_id": "workflow-parent",
+                "workflow_name": "Parent workflow",
+                "status": "success",
+                "children": [
+                    {
+                        "step_type": "print",
+                        "url": "https://example.com",
+                        "message": "TRACE_GUI_CHILD_DONE",
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert parsed_trace[0].step_type == "runCustomAgent"
+    assert parsed_trace[0].children is not None
+    assert parsed_trace[0].children[0].step_type == "print"
+    assert parsed_trace[0].children[0].message == "TRACE_GUI_CHILD_DONE"
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
