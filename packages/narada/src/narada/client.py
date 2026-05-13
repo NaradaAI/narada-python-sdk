@@ -177,11 +177,18 @@ class Narada:
         session_timeout: int | None = None,
         require_extension: bool = True,
     ) -> CloudBrowserWindow:
-        """Creates a cloud browser by calling the backend.
+        """Create a cloud browser session and return a ``CloudBrowserWindow``.
 
-        The backend creates a cloud browser session and returns
-        a CDP WebSocket URL. This method connects to it, initializes the extension,
-        and returns a CloudBrowserWindow instance.
+        With ``require_extension=True`` (default), calls
+        ``POST /cloud-browser/create-cloud-browser-session``, then connects local Playwright
+        over CDP, opens ``login_url``, and waits for ``#narada-browser-window-id`` (extension
+        install retries apply). ``config`` controls interactive prompts and related behavior.
+
+        With ``require_extension=False``, calls
+        ``POST /cloud-browser/create-and-initialize-cloud-browser-session`` instead: the API
+        provisions the browser and runs the same CDP initialization on the server, returning
+        ``session_id`` and ``browser_window_id`` in the JSON body. Local Playwright is not used
+        for that path, and ``config`` is ignored.
         """
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
