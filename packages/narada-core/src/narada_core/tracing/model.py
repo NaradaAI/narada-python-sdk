@@ -189,6 +189,7 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    children: ActionTrace | None = None
 
 
 class IfTrace(BaseModel):
@@ -260,6 +261,7 @@ class PythonSubAgentCallEvent(BaseModel):
     prompt: str
     status: Literal["success", "error", "timeout"]
     request_id: str | None = None
+    text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
 
