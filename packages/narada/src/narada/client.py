@@ -190,6 +190,41 @@ class Narada:
             "session_name": session_name,
             "session_timeout": session_timeout,
         }
+
+        if not require_extension:
+            endpoint_url = (
+                f"{base_url}/cloud-browser/create-and-initialize-cloud-browser-session"
+            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint_url,
+                    headers=self._auth_headers,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(total=180),
+                ) as resp:
+                    if not resp.ok:
+                        error_text = await resp.text()
+                        if resp.status == HTTPStatus.FORBIDDEN:
+                            error = ApiErrorPayload.from_error_text(error_text)
+                            err = RuntimeError(
+                                f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                                f"Endpoint URL: {endpoint_url}"
+                            )
+                            err.status_code = resp.status  # type: ignore[attr-defined]
+                            err.detail = error.detail  # type: ignore[attr-defined]
+                            raise err
+                        raise RuntimeError(
+                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                            f"Endpoint URL: {endpoint_url}"
+                        )
+                    response_data = await resp.json()
+
+            return CloudBrowserWindow(
+                browser_window_id=response_data["browser_window_id"],
+                session_id=response_data["session_id"],
+                auth_headers=self._auth_headers,
+            )
+
         endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
 
         async with aiohttp.ClientSession() as session:
