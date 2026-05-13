@@ -85,3 +85,56 @@ async def test_extensionless_cloud_browser_uses_backend_initialization(
         "session_name": "fast-session",
         "session_timeout": 300,
     }
+
+
+class _ForbiddenResponse:
+    ok = False
+    status = 403
+
+    async def __aenter__(self) -> "_ForbiddenResponse":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+    async def json(self) -> dict[str, Any]:
+        return {}
+
+    async def text(self) -> str:
+        return '{"detail": {"reason": "forbidden"}}'
+
+
+class _ForbiddenClientSession:
+    def __init__(self) -> None:
+        self.posts: list[str] = []
+
+    async def __aenter__(self) -> "_ForbiddenClientSession":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+    def post(self, url: str, **kwargs: Any) -> _ForbiddenResponse:
+        self.posts.append(url)
+        return _ForbiddenResponse()
+
+
+@pytest.mark.asyncio
+async def test_extensionless_cloud_browser_forbidden_sets_error_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _ForbiddenClientSession()
+    monkeypatch.setattr(client_module.aiohttp, "ClientSession", lambda: fake_session)
+
+    narada = Narada(auth_headers={"x-api-key": "test-key"})
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await narada.open_and_initialize_cloud_browser_window(require_extension=False)
+
+    err = excinfo.value
+    assert getattr(err, "status_code", None) == 403
+    assert getattr(err, "detail", None) == {"reason": "forbidden"}
+    assert len(fake_session.posts) == 1
+    assert fake_session.posts[0].endswith(
+        "/cloud-browser/create-and-initialize-cloud-browser-session"
+    )
