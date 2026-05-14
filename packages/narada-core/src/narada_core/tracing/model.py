@@ -261,6 +261,7 @@ class PythonSubAgentCallEvent(BaseModel):
     prompt: str
     status: Literal["success", "error", "timeout"]
     request_id: str | None = None
+    text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
 

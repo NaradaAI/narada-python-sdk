@@ -1,7 +1,8 @@
 import asyncio
 
-from narada import Agent, Narada, UserAbortedError
 from narada_core.actions.models import PromptForUserInputVariable
+
+from narada import Agent, Narada, UserAbortedError
 
 
 async def main() -> None:
@@ -27,6 +28,7 @@ async def main() -> None:
                         enum_values=["pricing", "customers", "recent news"],
                     ),
                 ],
+                prompt_message="Tell us which company to research and what to focus on.",
             )
 
             company = values["company"]

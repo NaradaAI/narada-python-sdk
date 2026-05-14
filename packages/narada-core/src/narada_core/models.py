@@ -313,6 +313,7 @@ class PythonSubAgentCallEvent(TypedDict):
     prompt: str
     status: Literal["success", "error", "timeout"]
     request_id: NotRequired[str]
+    text: NotRequired[str]
     error_message: NotRequired[str]
     action_trace: NotRequired[ActionTrace]
 

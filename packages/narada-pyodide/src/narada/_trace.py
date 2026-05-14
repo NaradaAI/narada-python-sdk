@@ -87,6 +87,7 @@ def emit_sub_agent_call(
     prompt: str,
     status: SubAgentCallStatus,
     request_id: str | None = None,
+    text: str | None = None,
     error_message: str | None = None,
     action_trace_raw: list[dict[str, Any]] | None = None,
 ) -> None:
@@ -100,6 +101,8 @@ def emit_sub_agent_call(
     }
     if request_id is not None:
         event["request_id"] = request_id
+    if text is not None:
+        event["text"] = text
     if error_message is not None:
         event["error_message"] = error_message
     if action_trace_raw is not None:

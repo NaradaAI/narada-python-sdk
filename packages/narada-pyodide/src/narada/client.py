@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -90,7 +91,9 @@ class Narada:
         }
 
         response = None
-        for _ in range(3):
+        max_attempts = 3
+        retry_backoff_seconds = (2.0, 4.0, 0.0)  # no wait after last attempt
+        for attempt in range(max_attempts):
             # Due to unknown network issues, sometimes create-and-initialize-cloud-browser-session API call fails.
             try:
                 response = await pyfetch(
@@ -102,6 +105,7 @@ class Narada:
                 if response.ok:
                     break
             except Exception:
+                await asyncio.sleep(retry_backoff_seconds[attempt])
                 continue
 
         if response is None or not response.ok:
@@ -110,7 +114,7 @@ class Narada:
                 await response.text() if response is not None else "unknown error"
             )
             raise RuntimeError(
-                "Failed to create and initialize cloud browser session after 3 attempts: "
+                "Failed to create and initialize cloud browser session after 3 attempts with backoff: "
                 f"{resp_status}: {resp_text}\n"
                 f"Endpoint URL: {endpoint_url}"
             )
