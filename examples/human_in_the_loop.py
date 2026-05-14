@@ -1,8 +1,7 @@
 import asyncio
 
-from narada_core.actions.models import PromptForUserInputVariable
-
 from narada import Agent, Narada, UserAbortedError
+from narada_core.actions.models import PromptForUserInputVariable
 
 
 async def main() -> None:

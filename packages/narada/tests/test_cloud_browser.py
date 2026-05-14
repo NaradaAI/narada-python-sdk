@@ -57,6 +57,7 @@ async def test_extensionless_cloud_browser_uses_backend_initialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import narada.client as client_module
+
     fake_session = _FakeClientSession(
         {
             "session_id": "session-123",
