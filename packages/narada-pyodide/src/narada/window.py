@@ -820,11 +820,14 @@ class BaseBrowserWindow(ABC):
         *,
         step_id: str,
         variables: list[PromptForUserInputVariable],
+        prompt_message: str | None = None,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._run_extension_action(
-            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputRequest(
+                step_id=step_id, prompt_message=prompt_message, variables=variables
+            ),
             PromptForUserInputResponse,
             timeout=timeout,
         )
