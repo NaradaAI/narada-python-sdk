@@ -22,6 +22,8 @@ from narada_core.tracing import model as tracing_model
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
 
+DEFAULT_HITL_TIMEOUT_SECONDS = 300
+
 _StructuredOutputT = TypeVar("_StructuredOutputT")
 
 
