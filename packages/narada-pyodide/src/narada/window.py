@@ -81,6 +81,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from .retry import pyfetch_with_retries
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -450,10 +451,11 @@ class BaseBrowserWindow(ABC):
                     create_once_callable(abort_controller.abort),
                     (deadline - now) * 1000,
                 )
-                fetch_response = await pyfetch(
+                fetch_response = await pyfetch_with_retries(
                     f"{self._base_url}/remote-dispatch/responses/{request_id}",
                     headers=headers,
                     signal=signal,
+                    retry_deadline=deadline,
                 )
 
                 if not fetch_response.ok:
@@ -1182,7 +1184,7 @@ async def _fetch_presigned_download_url(
     session_id: str,
     key: str,
 ) -> str:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/download-url",
@@ -1205,7 +1207,7 @@ async def _get_cloud_browser_downloads(
     auth_headers: dict[str, str],
     session_id: str,
 ) -> list[SessionDownloadItem]:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/downloads",
