@@ -78,6 +78,7 @@ from narada_core.models import (
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
+from pyodide.http import pyfetch
 
 from . import _trace
 from .retry import pyfetch_with_retries
@@ -427,13 +428,12 @@ class BaseBrowserWindow(ABC):
             signal = controller.signal
 
             setTimeout(create_once_callable(controller.abort), timeout * 1000)
-            fetch_response = await pyfetch_with_retries(
+            fetch_response = await pyfetch(
                 f"{self._base_url}/remote-dispatch",
                 method="POST",
                 headers=headers,
                 body=json.dumps(body),
                 signal=signal,
-                retry_deadline=deadline,
             )
 
             if not fetch_response.ok:
@@ -991,7 +991,7 @@ class BaseBrowserWindow(ABC):
             if timeout is not None:
                 body["timeout"] = timeout
 
-            fetch_response = await pyfetch_with_retries(
+            fetch_response = await pyfetch(
                 f"{self._base_url}/extension-actions",
                 method="POST",
                 headers=headers,
@@ -1255,7 +1255,7 @@ async def _stop_cloud_browser_session(
     timeout: int | None = None,
 ) -> None:
     try:
-        fetch_response = await pyfetch_with_retries(
+        fetch_response = await pyfetch(
             f"{base_url}/cloud-browser/stop-cloud-browser-session",
             method="POST",
             headers={**auth_headers, "Content-Type": "application/json"},

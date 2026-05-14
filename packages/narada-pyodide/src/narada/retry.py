@@ -41,11 +41,11 @@ async def _sleep_before_pyfetch_retry(
         return True
 
     remaining_seconds = retry_deadline - time.monotonic()
-    if remaining_seconds <= 0:
+    if remaining_seconds <= backoff_seconds:
         return False
 
-    await asyncio.sleep(min(backoff_seconds, remaining_seconds))
-    return True
+    await asyncio.sleep(backoff_seconds)
+    return time.monotonic() < retry_deadline
 
 
 async def pyfetch_with_retries(
@@ -69,6 +69,9 @@ async def pyfetch_with_retries(
     backoff_seconds = initial_backoff_seconds
     signal = kwargs.get("signal")
     for attempt in range(max_attempts):
+        if retry_deadline is not None and time.monotonic() >= retry_deadline:
+            raise asyncio.TimeoutError
+
         try:
             response = await pyfetch(url, **kwargs)
         except Exception:

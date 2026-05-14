@@ -311,6 +311,30 @@ async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures
 
 
 @pytest.mark.asyncio
+async def test_pyfetch_with_retries_does_not_start_retry_at_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(ok=False, status=502, text_data="bad gateway")
+    )
+    _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    retry_module = sys.modules["narada.retry"]
+    sleep = AsyncMock()
+
+    monkeypatch.setattr(retry_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(retry_module.time, "monotonic", lambda: 10.0)
+
+    response = await retry_module.pyfetch_with_retries(
+        "https://example.test/retry",
+        retry_deadline=10.5,
+    )
+
+    assert response.status == 502
+    assert pyfetch.await_count == 1
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
