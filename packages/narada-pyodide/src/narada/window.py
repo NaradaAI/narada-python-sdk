@@ -54,6 +54,7 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    StructuredOutput,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -395,51 +396,6 @@ class BaseBrowserWindow(ABC):
         trace_start_ms = _trace.now_ms()
         agent_type_str = _trace_agent_type(agent)
 
-        parent_run_ids = self._current_parent_run_ids()
-        request_id = self._current_request_id()
-        if (
-            isinstance(agent, str)
-            and agent.startswith("/")
-            and parent_run_ids
-            and request_id is not None
-        ):
-            result = await self._run_extension_action(
-                CallCustomAgentByPathRequest(
-                    agent_path=agent,
-                    prompt=prompt,
-                    input_variables=input_variables or {},
-                ),
-                CallCustomAgentByPathResponse,
-                timeout=min(timeout, 300),
-            )
-            output_content = result.root
-            structured_output = (
-                output_schema.model_validate(output_content)
-                if output_schema is not None
-                else None
-            )
-            response_content: dict[str, Any] = {
-                "text": json.dumps(output_content),
-                "structuredOutput": structured_output,
-                "output": {"type": "structured", "content": output_content},
-            }
-            completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            _trace.emit_sub_agent_call(
-                ts_start=trace_start_ms,
-                agent_type=agent_type_str,
-                prompt=prompt,
-                status="success",
-                request_id=request_id,
-            )
-            return {
-                "requestId": request_id,
-                "status": "success",
-                "response": response_content,
-                "createdAt": completed_at,
-                "completedAt": completed_at,
-                "usage": {"actions": 0, "credits": 0},
-            }
-
         deadline = time.monotonic() + timeout
 
         headers = await self._get_auth_headers()
@@ -452,6 +408,7 @@ class BaseBrowserWindow(ABC):
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
+        parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
         cloud_browser_session_id = self.cloud_browser_session_id
@@ -617,6 +574,91 @@ class BaseBrowserWindow(ABC):
             )
             raise
 
+    async def _run_custom_agent_in_process(
+        self,
+        *,
+        agent_path: str,
+        prompt: str,
+        output_schema: type[BaseModel] | None,
+        input_variables: dict[str, Any] | None,
+        timeout: int,
+    ) -> AgentResponse:
+        """Run a custom agent identified by Agent Studio path as an in-process
+        child of the current runnable.
+
+        This is the SDK equivalent of the GUI's `call_run_custom_agent_tool`:
+        instead of POSTing to `/remote-dispatch` (which mints a new
+        `remote_dispatch_request` row and a fresh request_id), we dispatch a
+        `call_custom_agent_by_path` extension-action so the frontend handler
+        runs `runCustomAgentWorkflow` under the parent's `runnableOptions` —
+        the child inherits the parent's `requestId` and the run shows up as
+        one logical execution in observability.
+
+        Only valid when the SDK is itself executing inside a parent runnable
+        (i.e. `_current_request_id()` is non-None); callers route here from
+        `agent()`.
+        """
+        trace_start_ms = _trace.now_ms()
+        agent_type_str = _trace_agent_type(agent_path)
+        request_id = self._current_request_id()
+        # `agent()` is the only caller and only routes here when the parent
+        # runnable has injected a request_id; the assertion documents that
+        # invariant for readers and type-checkers.
+        assert request_id is not None
+
+        try:
+            result = await self._run_extension_action(
+                CallCustomAgentByPathRequest(
+                    agent_path=agent_path,
+                    prompt=prompt,
+                    input_variables=input_variables or {},
+                ),
+                CallCustomAgentByPathResponse,
+                # The extension-action handler in the frontend has its own
+                # internal timeout; cap ours at 300s so we don't sit longer
+                # than the handler can produce a response.
+                timeout=min(timeout, 300),
+            )
+        except Exception as err:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="error",
+                error_message=str(err),
+                request_id=request_id,
+            )
+            raise
+
+        output_content = result.root
+        structured_output = (
+            output_schema.model_validate(output_content)
+            if output_schema is not None
+            else None
+        )
+
+        _trace.emit_sub_agent_call(
+            ts_start=trace_start_ms,
+            agent_type=agent_type_str,
+            prompt=prompt,
+            status="success",
+            request_id=request_id,
+        )
+
+        # Usage for a sub-workflow run is rolled up under the parent's
+        # request_id on the backend; surface zeros locally rather than
+        # double-counting in the parent's Python trace.
+        return AgentResponse(
+            request_id=request_id,
+            status="success",
+            text=json.dumps(output_content),
+            structured_output=structured_output,
+            output=StructuredOutput(type="structured", content=output_content),
+            usage=AgentUsage(actions=0, credits=0.0),
+            action_trace=None,
+            critic_result=None,
+        )
+
     # `reasoning` is only valid with the Core Agent. See `dispatch_request`
     # above for the rationale; the same overload pattern is mirrored here.
     @overload
@@ -704,6 +746,38 @@ class BaseBrowserWindow(ABC):
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the Narada extension side panel chat."""
+        # Calling a custom agent by Agent Studio path from inside a parent
+        # runnable: route through the in-frontend `call_custom_agent_by_path`
+        # handler instead of `/remote-dispatch`, so the child workflow shares
+        # the parent's request_id and shows up as one logical run in
+        # observability. Mirrors the GUI's `call_run_custom_agent_tool` flow.
+        # `reasoning` and `critic` aren't meaningful for a sub-workflow (the
+        # child workflow defines its own steps); reject so callers don't think
+        # they're being applied.
+        if (
+            isinstance(agent, str)
+            and agent.startswith("/")
+            and self._current_parent_run_ids()
+            and self._current_request_id() is not None
+        ):
+            if reasoning is not None:
+                raise ValueError(
+                    "`reasoning` is not supported when calling a custom agent "
+                    "by path from inside a parent workflow"
+                )
+            if critic is not None:
+                raise ValueError(
+                    "`critic` is not supported when calling a custom agent by "
+                    "path from inside a parent workflow"
+                )
+            return await self._run_custom_agent_in_process(
+                agent_path=agent,
+                prompt=prompt,
+                output_schema=output_schema,
+                input_variables=input_variables,
+                timeout=timeout,
+            )
+
         # Branch on `reasoning` so each call site binds a single, typed overload
         # of `dispatch_request`. The validation also lives in `dispatch_request`
         # itself (defense in depth + reachable when callers go straight to the
