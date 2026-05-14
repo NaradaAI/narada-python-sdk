@@ -278,6 +278,39 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            RuntimeError("temporary fetch failure"),
+            _FakeResponse(ok=False, status=502, text_data="bad gateway"),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    sleep_delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    retry_module = sys.modules["narada.retry"]
+    monkeypatch.setattr(retry_module.asyncio, "sleep", fake_sleep)
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="hello from cloud browser")
+
+    assert response["status"] == "success"
+    assert pyfetch.await_count == 4
+    assert sleep_delays == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
