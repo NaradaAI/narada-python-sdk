@@ -30,6 +30,8 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    CallBuiltInAgentRequest,
+    CallBuiltInAgentResponse,
     CallCustomAgentByPathRequest,
     CallCustomAgentByPathResponse,
     CloseWindowRequest,
@@ -55,6 +57,7 @@ from narada_core.actions.models import (
     ReadGoogleSheetResponse,
     RecordedClick,
     StructuredOutput,
+    TextOutput,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -659,6 +662,112 @@ class BaseBrowserWindow(ABC):
             critic_result=None,
         )
 
+    async def _run_built_in_agent_in_process(
+        self,
+        *,
+        agent: Agent,
+        prompt: str,
+        clear_chat: bool | None,
+        output_schema: type[BaseModel] | None,
+        timeout: int,
+    ) -> AgentResponse:
+        """Run a built-in agent (Operator / Core / Productivity / ...) as an
+        in-process child of the current runnable.
+
+        SDK equivalent of the dashboard's ``call_agent_tool`` extension action:
+        instead of POSTing to ``/remote-dispatch`` (which mints a new
+        ``remote_dispatch_request`` row and a fresh ``request_id``), we dispatch
+        a ``call_built_in_agent`` extension-action. The frontend handler runs
+        ``MainAgentRunnable`` under the parent's ``runnableOptions``, so the
+        child inherits the parent's ``requestId`` and surfaces its action chain
+        inline in the workflow-run detail page.
+
+        Only valid when the SDK is itself executing inside a parent runnable
+        (i.e. ``_current_request_id()`` is non-None); the caller is responsible
+        for that check.
+        """
+        trace_start_ms = _trace.now_ms()
+        agent_type_str = _trace_agent_type(agent)
+        request_id = self._current_request_id()
+        # The caller in ``agent()`` only routes here when the parent runnable
+        # has injected a request_id; the assertion documents that invariant
+        # for readers and type-checkers.
+        assert request_id is not None
+
+        try:
+            result = await self._run_extension_action(
+                CallBuiltInAgentRequest(
+                    agent_type=agent_type_str,
+                    prompt=prompt,
+                    clear_chat=clear_chat,
+                    response_format=(
+                        {
+                            "type": "jsonSchema",
+                            "jsonSchema": output_schema.model_json_schema(),
+                        }
+                        if output_schema is not None
+                        else None
+                    ),
+                ),
+                CallBuiltInAgentResponse,
+                # The extension-action handler has its own internal timeout
+                # (the MainAgentRunnable run loop). Cap ours at 300s so we
+                # don't sit longer than the handler can produce a response.
+                timeout=min(timeout, 300),
+            )
+        except Exception as err:
+            _trace.emit_sub_agent_call(
+                ts_start=trace_start_ms,
+                agent_type=agent_type_str,
+                prompt=prompt,
+                status="error",
+                error_message=str(err),
+                request_id=request_id,
+            )
+            raise
+
+        action_trace = (
+            parse_action_trace(result.action_trace)
+            if result.action_trace is not None
+            else None
+        )
+        output = result.output
+        structured_output = None
+        if (
+            output_schema is not None
+            and output is not None
+            and output.get("type") == "structured"
+        ):
+            structured_output = output_schema.model_validate(output["content"])
+
+        _trace.emit_sub_agent_call(
+            ts_start=trace_start_ms,
+            agent_type=agent_type_str,
+            prompt=prompt,
+            status="success",
+            request_id=request_id,
+            text=result.text,
+            action_trace_raw=result.action_trace,
+        )
+
+        # Usage is rolled up under the parent's request_id on the backend;
+        # surface zeros locally rather than double-counting in the parent's
+        # Python trace (mirrors `_run_custom_agent_in_process`).
+        return AgentResponse(
+            request_id=request_id,
+            status="success",
+            text=result.text,
+            structured_output=structured_output,
+            output=(
+                StructuredOutput(type="structured", content=output["content"])
+                if output is not None and output.get("type") == "structured"
+                else TextOutput(type="text", content=result.text)
+            ),
+            usage=AgentUsage(actions=0, credits=0.0),
+            action_trace=action_trace,
+            critic_result=None,
+        )
+
     # `reasoning` is only valid with the Core Agent. See `dispatch_request`
     # above for the rationale; the same overload pattern is mirrored here.
     @overload
@@ -775,6 +884,40 @@ class BaseBrowserWindow(ABC):
                 prompt=prompt,
                 output_schema=output_schema,
                 input_variables=input_variables,
+                timeout=timeout,
+            )
+
+        # Calling a built-in agent (Operator / Core / Productivity / ...)
+        # from inside a parent runnable: route through the in-frontend
+        # `call_built_in_agent` handler instead of `/remote-dispatch`, so the
+        # sub-agent shares the parent's `request_id` and its action chain
+        # renders inline in the workflow-run detail page (the same way an
+        # Operator step inside a GUI workflow already does).
+        #
+        # v1 supports plain prompts plus `clear_chat` and `output_schema`,
+        # which the frontend handler maps to the same responseFormat path as
+        # `/remote-dispatch`. Advanced kwargs that the dashboard in-process
+        # path can't express today (reasoning, critic, generate_gif,
+        # mcp_servers, etc.)
+        # fall through to `dispatch_request`. That keeps backwards
+        # compatibility for callers that depend on those features at the cost
+        # of a new request_id in those specific cases.
+        if (
+            isinstance(agent, Agent)
+            and self._current_parent_run_ids()
+            and self._current_request_id() is not None
+            and reasoning is None
+            and critic is None
+            and generate_gif is None
+            and not mcp_servers
+            and not secret_variables
+            and not input_variables
+        ):
+            return await self._run_built_in_agent_in_process(
+                agent=agent,
+                prompt=prompt,
+                clear_chat=clear_chat,
+                output_schema=output_schema,
                 timeout=timeout,
             )
 
