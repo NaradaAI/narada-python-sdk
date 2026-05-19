@@ -13,6 +13,7 @@ from typing import (
     Any,
     Literal,
     Mapping,
+    Sequence,
     TypedDict,
     TypeGuard,
     TypeVar,
@@ -44,6 +45,8 @@ from narada_core.actions.models import (
     GetUrlRequest,
     GetUrlResponse,
     GoToUrlRequest,
+    PressKeyEventItem,
+    PressKeyRequest,
     PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
@@ -695,6 +698,41 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def press_key(
+        self,
+        *,
+        events: Sequence[PressKeyEventItem | Mapping[str, Any]],
+        timeout: int | None = 60,
+    ) -> None:
+        """Send keyboard events on the active tab (Chrome debugger).
+
+        Each item uses ``type`` of ``\"keyDown\"``, ``\"keyUp\"``, or ``\"press\"`` (Playwright/CDP
+        semantics). ``code`` is required per item; ``key`` and ``modifiers`` are optional.
+
+        Items may be :class:`PressKeyEventItem` instances or plain mappings (e.g. dicts parsed
+        from JSON) with the same keys::
+
+            await window.press_key(events=[
+                {"type": "keyDown", "code": "KeyA", "key": "a"},
+                {"type": "keyUp", "code": "KeyA", "key": "a"},
+            ])
+        """
+
+        if not events:
+            raise ValueError("press_key requires a non-empty events= sequence")
+
+        normalized: list[PressKeyEventItem] = [
+            event
+            if isinstance(event, PressKeyEventItem)
+            else PressKeyEventItem.model_validate(event)
+            for event in events
+        ]
+
+        await self._run_extension_action(
+            PressKeyRequest(events=normalized),
+            timeout=timeout,
+        )
 
     async def agentic_mouse_action(
         self,

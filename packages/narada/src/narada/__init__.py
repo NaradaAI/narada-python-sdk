@@ -1,4 +1,4 @@
-from narada_core.actions.models import CriticResult
+from narada_core.actions.models import CriticResult, PressKeyEventItem
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -30,6 +30,7 @@ __all__ = [
     "CloudBrowserWindow",
     "CriticConfig",
     "CriticResult",
+    "PressKeyEventItem",
     "download_file",
     "File",
     "LocalBrowserWindow",

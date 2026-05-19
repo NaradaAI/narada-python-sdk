@@ -11,7 +11,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
+    Mapping,
     Optional,
+    Sequence,
     TypeVar,
     cast,
     overload,
@@ -43,6 +45,8 @@ from narada_core.actions.models import (
     GetUrlRequest,
     GetUrlResponse,
     GoToUrlRequest,
+    PressKeyEventItem,
+    PressKeyRequest,
     PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
@@ -716,6 +720,7 @@ class BaseBrowserWindow(ABC):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        nth_match: Optional[str] = None,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
@@ -736,6 +741,7 @@ class BaseBrowserWindow(ABC):
                 action=action,
                 selectors=selectors,
                 fallback_operator_query=fallback_operator_query,
+                nth_match=nth_match,
             ),
             response_model,
             timeout=timeout,
@@ -745,6 +751,41 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def press_key(
+        self,
+        *,
+        events: Sequence[PressKeyEventItem | Mapping[str, Any]],
+        timeout: int | None = 60,
+    ) -> None:
+        """Send keyboard events on the active tab (Chrome debugger).
+
+        Each item uses ``type`` of ``\"keyDown\"``, ``\"keyUp\"``, or ``\"press\"``.
+        ``code`` is required per item; ``key`` and ``modifiers`` are optional.
+
+        Items may be :class:`PressKeyEventItem` instances or plain mappings (e.g. dicts from
+        ``json.loads``) with the same keys::
+
+            await window.press_key(events=[
+                {"type": "keyDown", "code": "KeyA", "key": "a"},
+                {"type": "keyUp", "code": "KeyA", "key": "a"},
+            ])
+        """
+
+        if not events:
+            raise ValueError("press_key requires a non-empty events= sequence")
+
+        normalized: list[PressKeyEventItem] = [
+            event
+            if isinstance(event, PressKeyEventItem)
+            else PressKeyEventItem.model_validate(event)
+            for event in events
+        ]
+
+        await self._run_extension_action(
+            PressKeyRequest(events=normalized),
+            timeout=timeout,
+        )
 
     async def agentic_mouse_action(
         self,
