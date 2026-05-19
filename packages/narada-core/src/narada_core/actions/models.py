@@ -15,6 +15,7 @@ from typing import (
 from pydantic import (
     BaseModel,
     Field,
+    RootModel,
 )
 
 from narada_core.tracing import model as tracing_model
@@ -408,6 +409,49 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class CallCustomAgentByPathRequest(BaseModel):
+    name: Literal["call_custom_agent_by_path"] = "call_custom_agent_by_path"
+    agent_path: str
+    prompt: str
+    input_variables: dict[str, Any] = Field(default_factory=dict)
+
+
+class CallCustomAgentByPathResponse(RootModel[dict[str, Any]]):
+    pass
+
+
+class CallBuiltInAgentRequest(BaseModel):
+    """SDK-direct equivalent of ``call_agent_tool`` for built-in agent types
+    (Operator, Core, Productivity, ...). Dispatched from
+    ``window.agent(agent=Agent.X)`` when running inside a parent runnable so the
+    sub-agent inherits the parent's ``requestId`` instead of minting a new
+    ``remote_dispatch_request`` via ``dispatch_request``.
+
+    ``agent_type`` is the dashboard's ``ApaAgentType`` string slug (e.g.
+    ``"operator"``, ``"coreAgent"``, ``"generalist"``).
+    """
+
+    name: Literal["call_built_in_agent"] = "call_built_in_agent"
+    agent_type: str
+    prompt: str
+    clear_chat: bool | None = None
+    response_format: dict[str, Any] | None = None
+
+
+class CallBuiltInAgentResponse(BaseModel):
+    """JSON body returned in ``ExtensionActionResponse.data`` for
+    ``call_built_in_agent``. ``action_trace`` carries the same shape as the
+    legacy ``actionTrace`` field on ``dispatch_request`` responses, so the SDK
+    can reuse ``parse_action_trace`` to materialise it.
+    """
+
+    text: str
+    output: dict[str, Any] | None = None
+    action_trace: list[dict[str, Any]] | None = Field(default=None, alias="actionTrace")
+
+    model_config = {"populate_by_name": True}
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
     step_id: str
@@ -436,6 +480,8 @@ type ExtensionActionRequest = (
     | GetScreenshotRequest
     | GetUrlRequest
     | PromptForUserInputRequest
+    | CallCustomAgentByPathRequest
+    | CallBuiltInAgentRequest
     | UserApprovalRequest
 )
 
@@ -444,3 +490,4 @@ class ExtensionActionResponse(BaseModel):
     status: Literal["success", "error", "aborted"]
     error: str | None = None
     data: str | None = None
+    workflowTrace: dict[str, Any] | None = None
