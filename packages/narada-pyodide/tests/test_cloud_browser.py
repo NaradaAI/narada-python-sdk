@@ -327,6 +327,193 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            RuntimeError("temporary fetch failure"),
+            _FakeResponse(ok=False, status=502, text_data="bad gateway"),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": None,
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    sleep_delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    retry_module = sys.modules["narada.retry"]
+    monkeypatch.setattr(retry_module.asyncio, "sleep", fake_sleep)
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="hello from cloud browser")
+
+    assert response["status"] == "success"
+    assert pyfetch.await_count == 4
+    assert sleep_delays == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_pyfetch_with_retries_does_not_start_retry_at_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(ok=False, status=502, text_data="bad gateway")
+    )
+    _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    retry_module = sys.modules["narada.retry"]
+    sleep = AsyncMock()
+
+    monkeypatch.setattr(retry_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(retry_module.time, "monotonic", lambda: 10.0)
+
+    response = await retry_module.pyfetch_with_retries(
+        "https://example.test/retry",
+        retry_deadline=10.5,
+    )
+
+    assert response.status == 502
+    assert pyfetch.await_count == 1
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(
+        prompt="hello from cloud browser",
+        agent=narada_pkg.Agent.OPERATOR,
+    )
+
+    assert response["status"] == "success"
+    assert json.loads(pyfetch.await_args_list[0].kwargs["body"])["prompt"] == (
+        "/Operator hello from cloud browser"
+    )
+    assert len(emitted_events) == 1
+    assert json.loads(emitted_events[0])["agent_type"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": {
+                        "text": "TRACE_CORE_AGENT_DONE",
+                        "actionTrace": [],
+                    },
+                }
+            ),
+        ]
+    )
+    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(
+        prompt="reply with marker",
+        agent=narada_pkg.Agent.CORE_AGENT,
+    )
+
+    from narada_core.tracing.model import PythonSubAgentCallEvent
+
+    assert response["status"] == "success"
+    assert len(emitted_events) == 1
+    event = json.loads(emitted_events[0])
+    parsed_event = PythonSubAgentCallEvent.model_validate(event)
+    assert parsed_event.agent_type == "coreAgent"
+    assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
+    assert parsed_event.action_trace == []
+
+
+def test_parse_action_trace_preserves_run_custom_agent_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(CORE_SRC))
+
+    from narada_core.tracing.model import parse_action_trace
+
+    parsed_trace = parse_action_trace(
+        [
+            {
+                "step_type": "runCustomAgent",
+                "url": "https://example.com",
+                "workflow_id": "workflow-parent",
+                "workflow_name": "Parent workflow",
+                "status": "success",
+                "children": [
+                    {
+                        "step_type": "print",
+                        "url": "https://example.com",
+                        "message": "TRACE_GUI_CHILD_DONE",
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert parsed_trace[0].step_type == "runCustomAgent"
+    assert parsed_trace[0].children is not None
+    assert parsed_trace[0].children[0].step_type == "print"
+    assert parsed_trace[0].children[0].message == "TRACE_GUI_CHILD_DONE"
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

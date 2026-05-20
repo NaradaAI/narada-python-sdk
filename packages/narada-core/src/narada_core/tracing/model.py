@@ -8,8 +8,22 @@ from pydantic import (
     NonNegativeInt,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
+
+
+def _normalize_agent_type(agent_type: object) -> str:
+    """Normalize legacy SDK enum values into the frontend trace contract."""
+    match agent_type:
+        case 1 | "1":
+            return "generalist"
+        case 2 | "2":
+            return "operator"
+        case 3 | "3":
+            return "coreAgent"
+        case _:
+            return str(agent_type)
 
 
 class OperatorActionTraceItem(BaseModel):
@@ -41,6 +55,11 @@ class AgentTrace(BaseModel):
     agent_type: str
     action_trace: ActionTrace | None = None
     text: str | None = None
+
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _normalize_agent_type(cls, value: object) -> str:
+        return _normalize_agent_type(value)
 
 
 class ForLoopTrace(BaseModel):
@@ -170,6 +189,7 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    children: ActionTrace | None = None
 
 
 class IfTrace(BaseModel):
@@ -241,8 +261,14 @@ class PythonSubAgentCallEvent(BaseModel):
     prompt: str
     status: Literal["success", "error", "timeout"]
     request_id: str | None = None
+    text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
+
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _normalize_agent_type(cls, value: object) -> str:
+        return _normalize_agent_type(value)
 
     @model_validator(mode="after")
     def _check_ts_ordering(self) -> PythonSubAgentCallEvent:

@@ -81,6 +81,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from .retry import pyfetch_with_retries
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -107,6 +108,18 @@ if TYPE_CHECKING:
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+
+def _trace_agent_type(agent: Agent | str) -> str:
+    match agent:
+        case Agent.PRODUCTIVITY:
+            return "generalist"
+        case Agent.OPERATOR:
+            return "operator"
+        case Agent.CORE_AGENT:
+            return "coreAgent"
+        case _:
+            return str(agent)
 
 
 def _normalize_narada_env(env: str | None) -> Literal["prod", "dev", None]:
@@ -354,7 +367,7 @@ class BaseBrowserWindow(ABC):
         # exit (successful return, timeout, or non-timeout failure) produces a
         # ``subAgentCall`` trace event with matching status. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
-        agent_type_str = agent.value if isinstance(agent, Agent) else str(agent)
+        agent_type_str = _trace_agent_type(agent)
 
         deadline = time.monotonic() + timeout
 
@@ -438,10 +451,11 @@ class BaseBrowserWindow(ABC):
                     create_once_callable(abort_controller.abort),
                     (deadline - now) * 1000,
                 )
-                fetch_response = await pyfetch(
+                fetch_response = await pyfetch_with_retries(
                     f"{self._base_url}/remote-dispatch/responses/{request_id}",
                     headers=headers,
                     signal=signal,
+                    retry_deadline=deadline,
                 )
 
                 if not fetch_response.ok:
@@ -478,12 +492,19 @@ class BaseBrowserWindow(ABC):
                         and response_content is not None
                         else None
                     )
+                    trace_text: str | None = (
+                        response_content.get("text")
+                        if response["status"] == "success"
+                        and response_content is not None
+                        else None
+                    )
                     _trace.emit_sub_agent_call(
                         ts_start=trace_start_ms,
                         agent_type=agent_type_str,
                         prompt=prompt,
                         status=trace_status,
                         request_id=request_id,
+                        text=trace_text,
                         error_message=trace_error,
                         action_trace_raw=(
                             response_content.get("actionTrace")
@@ -799,11 +820,14 @@ class BaseBrowserWindow(ABC):
         *,
         step_id: str,
         variables: list[PromptForUserInputVariable],
+        prompt_message: str | None = None,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._run_extension_action(
-            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputRequest(
+                step_id=step_id, prompt_message=prompt_message, variables=variables
+            ),
             PromptForUserInputResponse,
             timeout=timeout,
         )
@@ -1173,7 +1197,7 @@ async def _fetch_presigned_download_url(
     session_id: str,
     key: str,
 ) -> str:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/download-url",
@@ -1196,7 +1220,7 @@ async def _get_cloud_browser_downloads(
     auth_headers: dict[str, str],
     session_id: str,
 ) -> list[SessionDownloadItem]:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/downloads",
