@@ -177,11 +177,18 @@ class Narada:
         session_timeout: int | None = None,
         require_extension: bool = True,
     ) -> CloudBrowserWindow:
-        """Creates a cloud browser by calling the backend.
+        """Create a cloud browser session and return a ``CloudBrowserWindow``.
 
-        The backend creates a cloud browser session and returns
-        a CDP WebSocket URL. This method connects to it, initializes the extension,
-        and returns a CloudBrowserWindow instance.
+        With ``require_extension=True`` (default), calls
+        ``POST /cloud-browser/create-cloud-browser-session``, then connects local Playwright
+        over CDP, opens ``login_url``, and waits for ``#narada-browser-window-id`` (extension
+        install retries apply). ``config`` controls interactive prompts and related behavior.
+
+        With ``require_extension=False``, calls
+        ``POST /cloud-browser/create-and-initialize-cloud-browser-session`` instead: the API
+        provisions the browser and runs the same CDP initialization on the server, returning
+        ``session_id`` and ``browser_window_id`` in the JSON body. Local Playwright is not used
+        for that path, and ``config`` is ignored.
         """
         config = config or BrowserConfig()
         base_url = os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2")
@@ -190,6 +197,41 @@ class Narada:
             "session_name": session_name,
             "session_timeout": session_timeout,
         }
+
+        if not require_extension:
+            endpoint_url = (
+                f"{base_url}/cloud-browser/create-and-initialize-cloud-browser-session"
+            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint_url,
+                    headers=self._auth_headers,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(total=180),
+                ) as resp:
+                    if not resp.ok:
+                        error_text = await resp.text()
+                        if resp.status == HTTPStatus.FORBIDDEN:
+                            error = ApiErrorPayload.from_error_text(error_text)
+                            err = RuntimeError(
+                                f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                                f"Endpoint URL: {endpoint_url}"
+                            )
+                            err.status_code = resp.status  # type: ignore[attr-defined]
+                            err.detail = error.detail  # type: ignore[attr-defined]
+                            raise err
+                        raise RuntimeError(
+                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                            f"Endpoint URL: {endpoint_url}"
+                        )
+                    response_data = await resp.json()
+
+            return CloudBrowserWindow(
+                browser_window_id=response_data["browser_window_id"],
+                session_id=response_data["session_id"],
+                auth_headers=self._auth_headers,
+            )
+
         endpoint_url = f"{base_url}/cloud-browser/create-cloud-browser-session"
 
         async with aiohttp.ClientSession() as session:
@@ -279,7 +321,9 @@ class Narada:
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
-        await initialization_page.goto(login_url, timeout=15_000)
+        await initialization_page.goto(
+            login_url, timeout=15_000, wait_until="domcontentloaded"
+        )
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
@@ -302,7 +346,9 @@ class Narada:
                     raise
                 # If browser window ID is not found, reload the page and try again
                 # try to go to the login URL again (with customToken query param)
-                await initialization_page.goto(login_url, timeout=15_000)
+                await initialization_page.goto(
+                    login_url, timeout=15_000, wait_until="domcontentloaded"
+                )
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,

@@ -27,6 +27,7 @@ async def main() -> None:
                         enum_values=["pricing", "customers", "recent news"],
                     ),
                 ],
+                prompt_message="Tell us which company to research and what to focus on.",
             )
 
             company = values["company"]

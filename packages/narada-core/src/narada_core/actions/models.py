@@ -403,6 +403,7 @@ class PromptForUserInputRequest(BaseModel):
     name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
     step_id: str
     variables: list[PromptForUserInputVariable]
+    prompt_message: str | None = None
 
 
 class PromptForUserInputResponse(BaseModel):
