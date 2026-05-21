@@ -83,8 +83,7 @@ from pyodide.http import pyfetch
 from . import _trace
 from .retry import pyfetch_with_retries
 
-# Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
-# in the stack on the frontend.
+# Magic variables injected by the JavaScript harness for the current frontend runnable.
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +97,16 @@ def _parent_run_ids() -> list[str]:
             _narada_parent_run_ids,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
         ).to_py()
     )
+
+
+def _parent_request_id() -> str | None:
+    try:
+        return cast(
+            str | None,
+            _narada_request_id,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+        )
+    except NameError:
+        return None
 
 
 if TYPE_CHECKING:
@@ -211,6 +220,10 @@ class BaseBrowserWindow(ABC):
         request as a child runnable of a stack frame it does not have.
         """
         return None
+
+    def _current_parent_request_id(self) -> str | None:
+        """Returns the remote dispatch request ID to store as a child request's parent."""
+        return _parent_request_id()
 
     async def _get_auth_headers(self) -> dict[str, str]:
         return await _build_auth_headers(
@@ -384,6 +397,9 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
+        parent_request_id = self._current_parent_request_id()
+        if parent_request_id:
+            body["parentRequestId"] = parent_request_id
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
