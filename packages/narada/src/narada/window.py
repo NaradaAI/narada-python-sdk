@@ -23,6 +23,7 @@ from typing import (
 import aiohttp
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
+    DEFAULT_HITL_TIMEOUT_SECONDS,
     AgenticMouseAction,
     AgenticMouseActionRequest,
     AgenticSelectorAction,
@@ -770,7 +771,7 @@ class BaseBrowserWindow(ABC):
         step_id: str,
         variables: list[PromptForUserInputVariable],
         prompt_message: str | None = None,
-        timeout: int | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._run_extension_action(
@@ -789,7 +790,7 @@ class BaseBrowserWindow(ABC):
         prompt_message: str,
         approve_label: str,
         reject_label: str,
-        timeout: int | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
     ) -> bool:
         """Prompts the user to approve or reject in the extension UI."""
         result = await self._run_extension_action(
