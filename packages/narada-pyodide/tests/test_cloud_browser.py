@@ -258,7 +258,6 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    window_module._narada_request_id = "parent-request-123"
 
     window = window_module.CloudBrowserWindow(
         browser_window_id="browser-window-123",
@@ -276,7 +275,6 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
-    assert payload["parentRequestId"] == "parent-request-123"
 
 
 @pytest.mark.asyncio
@@ -645,11 +643,9 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     window = window_module.LocalBrowserWindow()
 
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    window_module._narada_request_id = "parent-request-a"
     first_response = await window.dispatch_request(prompt="first prompt")
 
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
-    window_module._narada_request_id = "parent-request-b"
     second_response = await window.dispatch_request(prompt="second prompt")
 
     assert first_response["status"] == "success"
@@ -659,5 +655,3 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
-    assert first_post["parentRequestId"] == "parent-request-a"
-    assert second_post["parentRequestId"] == "parent-request-b"
