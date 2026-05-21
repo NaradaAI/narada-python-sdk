@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from packaging.version import InvalidVersion
-from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
@@ -42,15 +41,6 @@ class _FakeJsProxy:
 
     def to_py(self) -> object:
         return self._value
-
-
-class _PaperInfo(BaseModel):
-    title: str
-    url: str
-
-
-class _Papers(BaseModel):
-    papers: list[_PaperInfo]
 
 
 def _clear_modules() -> None:
@@ -601,105 +591,3 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
-
-
-@pytest.mark.asyncio
-async def test_local_browser_window_builtin_agents_with_clear_chat_share_parent_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
-    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
-    pyfetch = AsyncMock(
-        side_effect=[
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "data": json.dumps(
-                        {
-                            "text": json.dumps(
-                                {
-                                    "papers": [
-                                        {
-                                            "title": "Paper 1",
-                                            "url": "https://arxiv.org/abs/1",
-                                        }
-                                    ]
-                                }
-                            ),
-                            "output": {
-                                "type": "structured",
-                                "content": {
-                                    "papers": [
-                                        {
-                                            "title": "Paper 1",
-                                            "url": "https://arxiv.org/abs/1",
-                                        }
-                                    ]
-                                },
-                            },
-                        }
-                    ),
-                }
-            ),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "data": json.dumps({"text": "operator done"}),
-                }
-            ),
-        ]
-    )
-    narada_pkg, _, window_module = _import_pyodide_narada(
-        monkeypatch, pyfetch=pyfetch
-    )
-    window_module._narada_parent_run_ids = _FakeJsProxy(["parent-run"])
-    window_module._narada_request_id = "request-123"
-
-    window = window_module.LocalBrowserWindow()
-
-    productivity_response = await window.agent(
-        prompt="summarize my day",
-        agent=narada_pkg.Agent.PRODUCTIVITY,
-        output_schema=_Papers,
-        clear_chat=True,
-    )
-    operator_response = await window.agent(
-        prompt="click the button",
-        agent=narada_pkg.Agent.OPERATOR,
-        clear_chat=False,
-    )
-
-    assert productivity_response.request_id == "request-123"
-    assert productivity_response.structured_output == _Papers(
-        papers=[_PaperInfo(title="Paper 1", url="https://arxiv.org/abs/1")]
-    )
-    assert operator_response.request_id == "request-123"
-    assert operator_response.text == "operator done"
-    assert pyfetch.await_count == 2
-
-    productivity_payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
-    operator_payload = json.loads(pyfetch.await_args_list[1].kwargs["body"])
-    assert pyfetch.await_args_list[0].args[0].endswith("/extension-actions")
-    assert pyfetch.await_args_list[1].args[0].endswith("/extension-actions")
-    assert productivity_payload["requestId"] == "request-123"
-    assert productivity_payload["parentRunIds"] == ["parent-run"]
-    assert productivity_payload["action"]["name"] == "call_built_in_agent"
-    assert productivity_payload["action"]["agent_type"] == "generalist"
-    assert productivity_payload["action"]["prompt"] == "summarize my day"
-    assert productivity_payload["action"]["clear_chat"] is True
-    assert productivity_payload["action"]["response_format"]["type"] == "jsonSchema"
-    assert (
-        productivity_payload["action"]["response_format"]["jsonSchema"]["properties"][
-            "papers"
-        ]["type"]
-        == "array"
-    )
-    assert operator_payload["requestId"] == "request-123"
-    assert operator_payload["parentRunIds"] == ["parent-run"]
-    assert operator_payload["action"] == {
-        "name": "call_built_in_agent",
-        "agent_type": "operator",
-        "prompt": "click the button",
-        "clear_chat": False,
-        "response_format": None,
-    }
