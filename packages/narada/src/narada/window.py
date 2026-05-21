@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import mimetypes
 import os
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import (
     IO,
     Any,
+    Awaitable,
+    Callable,
     Literal,
     Mapping,
     TypedDict,
@@ -23,6 +26,7 @@ from typing import (
 import aiohttp
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
+    ActiveInputRequest,
     AgenticMouseAction,
     AgenticMouseActionRequest,
     AgenticSelectorAction,
@@ -90,6 +94,30 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
+
+
+async def _notify_input_required_callback(
+    callback: InputRequiredCallback | None,
+    response: Mapping[str, Any],
+    seen_input_ids: set[str],
+) -> None:
+    if callback is None or response.get("status") != "input-required":
+        return
+
+    active_input_request_data = response.get("activeInputRequest")
+    if active_input_request_data is None:
+        return
+
+    active_input_request = ActiveInputRequest.model_validate(active_input_request_data)
+    if active_input_request.input_id in seen_input_ids:
+        return
+
+    seen_input_ids.add(active_input_request.input_id)
+    callback_result = callback(active_input_request)
+    if inspect.isawaitable(callback_result):
+        await callback_result
 
 
 class _InputVariableFileReference(TypedDict):
@@ -278,6 +306,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -303,6 +332,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -328,6 +358,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -353,6 +384,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -378,6 +410,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -446,6 +479,7 @@ class BaseBrowserWindow(ABC):
             body["reasoningMode"] = reasoning.value
 
         try:
+            seen_input_ids: set[str] = set()
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self._base_url}/remote-dispatch",
@@ -467,27 +501,33 @@ class BaseBrowserWindow(ABC):
 
                     response["requestId"] = request_id
 
-                    if response["completedAt"] is not None:
-                        response_content = response["response"]
-                        if response_content is not None:
-                            # Populate the `structuredOutput` field. This is a client-side field
-                            # that's not directly returned by the API.
-                            output_data = response_content.get("output")
-                            if (
-                                output_schema is not None
-                                and output_data is not None
-                                and output_data.get("type") == "structured"
-                            ):
-                                response_content["structuredOutput"] = (
-                                    output_schema.model_validate(output_data["content"])
-                                )
-                            else:
-                                response_content["structuredOutput"] = None
+                    if response["completedAt"] is None:
+                        await _notify_input_required_callback(
+                            on_input_required,
+                            response,
+                            seen_input_ids,
+                        )
+                        # Poll every 3 seconds.
+                        await asyncio.sleep(3)
+                        continue
 
-                        return response
+                    response_content = response["response"]
+                    if response_content is not None:
+                        # Populate the `structuredOutput` field. This is a client-side field
+                        # that's not directly returned by the API.
+                        output_data = response_content.get("output")
+                        if (
+                            output_schema is not None
+                            and output_data is not None
+                            and output_data.get("type") == "structured"
+                        ):
+                            response_content["structuredOutput"] = (
+                                output_schema.model_validate(output_data["content"])
+                            )
+                        else:
+                            response_content["structuredOutput"] = None
 
-                    # Poll every 3 seconds.
-                    await asyncio.sleep(3)
+                    return response
                 else:
                     raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
@@ -511,6 +551,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -529,6 +570,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -546,6 +588,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
@@ -564,6 +607,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -582,6 +626,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
@@ -602,6 +647,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         else:
@@ -629,6 +675,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         response_content = remote_dispatch_response["response"]

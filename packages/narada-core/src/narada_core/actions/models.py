@@ -420,6 +420,17 @@ class UserApprovalResponse(BaseModel):
     approved: bool
 
 
+ActiveInputAction = Annotated[
+    PromptForUserInputRequest | UserApprovalRequest,
+    Field(discriminator="name"),
+]
+
+
+class ActiveInputRequest(BaseModel):
+    input_id: str = Field(alias="inputId")
+    action: ActiveInputAction
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
     | AgenticMouseActionRequest

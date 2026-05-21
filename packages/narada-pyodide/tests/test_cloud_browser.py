@@ -295,6 +295,41 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
                     "status": "input-required",
                     "completedAt": None,
                     "response": None,
+                    "activeInputRequest": {
+                        "inputId": "input-123",
+                        "action": {
+                            "name": "prompt_for_user_input",
+                            "step_id": "step-123",
+                            "variables": [
+                                {
+                                    "name": "email",
+                                    "type": "string",
+                                    "required": True,
+                                }
+                            ],
+                        },
+                    },
+                }
+            ),
+            _FakeResponse(
+                json_data={
+                    "status": "input-required",
+                    "completedAt": None,
+                    "response": None,
+                    "activeInputRequest": {
+                        "inputId": "input-123",
+                        "action": {
+                            "name": "prompt_for_user_input",
+                            "step_id": "step-123",
+                            "variables": [
+                                {
+                                    "name": "email",
+                                    "type": "string",
+                                    "required": True,
+                                }
+                            ],
+                        },
+                    },
                 }
             ),
             _FakeResponse(
@@ -308,6 +343,7 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     sleep = AsyncMock()
+    on_input_required = AsyncMock()
     monkeypatch.setattr(window_module.asyncio, "sleep", sleep)
 
     window = window_module.CloudBrowserWindow(
@@ -315,13 +351,20 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
         session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(prompt="hello from cloud browser")
+    response = await window.dispatch_request(
+        prompt="hello from cloud browser",
+        on_input_required=on_input_required,
+    )
 
     assert response["status"] == "success"
-    assert pyfetch.await_count == 3
-    assert sleep.await_count == 1
+    assert pyfetch.await_count == 4
+    assert sleep.await_count == 2
+    on_input_required.assert_awaited_once()
+    active_input_request = on_input_required.await_args.args[0]
+    assert active_input_request.input_id == "input-123"
+    assert active_input_request.action.name == "prompt_for_user_input"
     first_poll_call = pyfetch.await_args_list[1]
-    second_poll_call = pyfetch.await_args_list[2]
+    second_poll_call = pyfetch.await_args_list[3]
     assert first_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
     assert second_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
 
