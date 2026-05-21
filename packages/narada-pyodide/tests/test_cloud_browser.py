@@ -646,6 +646,70 @@ async def test_cloud_browser_window_get_downloaded_files_returns_presigned_urls(
 
 
 @pytest.mark.asyncio
+async def test_remote_browser_window_prompt_for_user_input_uses_hitl_default_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": '{"values_by_name":{"name":"Narada"}}',
+            }
+        )
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    values = await window.prompt_for_user_input(
+        step_id="input-step",
+        variables=[
+            window_module.PromptForUserInputVariable(
+                name="name", type="string", required=True
+            ),
+        ],
+    )
+
+    assert values == {"name": "Narada"}
+    call = pyfetch.await_args
+    assert call is not None
+    payload = json.loads(call.kwargs["body"])
+    assert payload["timeout"] == window_module.DEFAULT_HITL_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_window_user_approval_respects_explicit_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"approved":true}'}
+        )
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    approved = await window.user_approval(
+        step_id="approval-step",
+        prompt_message="Proceed?",
+        approve_label="Approve",
+        reject_label="Reject",
+        timeout=600,
+    )
+
+    assert approved is True
+    call = pyfetch.await_args
+    assert call is not None
+    payload = json.loads(call.kwargs["body"])
+    assert payload["timeout"] == 600
+
+
+@pytest.mark.asyncio
 async def test_remote_browser_window_without_cloud_session_keeps_extension_action_close(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
