@@ -292,7 +292,9 @@ async def test_cloud_browser_window_dispatch_request_keeps_parent_request_id(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "parent-request-123", raising=False)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
     window = window_module.CloudBrowserWindow(
         browser_window_id="browser-window-123",
@@ -329,7 +331,9 @@ async def test_window_agent_keeps_parent_request_id_from_injected_builtins(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "parent-request-123", raising=False)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
     window = window_module.CloudBrowserWindow(
         browser_window_id="browser-window-123",
@@ -700,7 +704,9 @@ async def test_remote_browser_window_extension_action_keeps_parent_request_id(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "parent-request-123", raising=False)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
     window = window_module.RemoteBrowserWindow(
         browser_window_id="browser-window-123",
@@ -762,7 +768,9 @@ async def test_local_browser_window_dispatch_request_includes_parent_request_id(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "parent-request-123", raising=False)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
     window = window_module.LocalBrowserWindow()
     response = await window.dispatch_request(prompt="child prompt")
@@ -784,7 +792,9 @@ async def test_local_browser_window_extension_action_includes_parent_request_id(
     )
     _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "parent-request-123", raising=False)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
     window = window_module.LocalBrowserWindow()
     await window.close()
