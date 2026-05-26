@@ -986,14 +986,10 @@ class BaseBrowserWindow(ABC):
             "action": request.model_dump(),
             "browserWindowId": self.browser_window_id,
         }
-        remote_dispatch_request_id = os.environ.get(
-            _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
-        )
+        remote_dispatch_request_id = os.environ.get(_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR)
         if remote_dispatch_request_id is not None:
             body["requestId"] = remote_dispatch_request_id
-        remote_dispatch_api_key_id = os.environ.get(
-            _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR
-        )
+        remote_dispatch_api_key_id = os.environ.get(_REMOTE_DISPATCH_API_KEY_ID_ENV_VAR)
         if remote_dispatch_api_key_id is not None:
             body["apiKeyId"] = remote_dispatch_api_key_id
         if timeout is not None:
