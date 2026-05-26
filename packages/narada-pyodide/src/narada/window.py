@@ -115,6 +115,12 @@ _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
+# Optional remote-dispatch context. In frontend Pyodide runs, these are generated
+# by prepare-code.ts; extension-action calls forward them so the parent request
+# can report active input-required status.
+_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
+_REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+
 type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
 
 
@@ -1036,12 +1042,12 @@ class BaseBrowserWindow(ABC):
                 "browserWindowId": self.browser_window_id,
             }
             remote_dispatch_request_id = os.environ.get(
-                "NARADA_REMOTE_DISPATCH_REQUEST_ID"
+                _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
             )
             if remote_dispatch_request_id is not None:
                 body["requestId"] = remote_dispatch_request_id
             remote_dispatch_api_key_id = os.environ.get(
-                "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+                _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR
             )
             if remote_dispatch_api_key_id is not None:
                 body["apiKeyId"] = remote_dispatch_api_key_id
