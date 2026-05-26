@@ -25,12 +25,12 @@ from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
+    AgenticMatchingElementFinderRequest,
+    AgenticMatchingElementFinderResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
     AgenticSelectors,
-    AgenticXPathFinderRequest,
-    AgenticXPathFinderResponse,
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
@@ -698,19 +698,37 @@ class BaseBrowserWindow(ABC):
 
         return result
 
+    async def agentic_matching_element_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[AgenticSelectors]:
+        """Finds all visible page elements matching a prompt and returns selectors."""
+        result = await self._run_extension_action(
+            AgenticMatchingElementFinderRequest(prompt=prompt),
+            AgenticMatchingElementFinderResponse,
+            timeout=timeout,
+        )
+        return result.selectors
+
     async def agentic_xpath_finder(
         self,
         *,
         prompt: str,
         timeout: int | None = 300,
     ) -> list[str]:
-        """Finds all visible page elements matching a prompt and returns XPath selectors."""
-        result = await self._run_extension_action(
-            AgenticXPathFinderRequest(prompt=prompt),
-            AgenticXPathFinderResponse,
+        """Finds matching page elements and returns their XPath selectors."""
+        selectors = await self.agentic_matching_element_finder(
+            prompt=prompt,
             timeout=timeout,
         )
-        return result.xpaths
+        xpaths: list[str] = []
+        for selector in selectors:
+            xpath = selector.get("xpath")
+            if isinstance(xpath, str):
+                xpaths.append(xpath)
+        return xpaths
 
     async def agentic_mouse_action(
         self,
