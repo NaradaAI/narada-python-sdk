@@ -79,6 +79,7 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    _RemoteDispatchPollResponse,
 )
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
@@ -119,7 +120,7 @@ type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | No
 
 async def _notify_input_required_callback(
     callback: InputRequiredCallback | None,
-    response: dict[str, Any],
+    response: _RemoteDispatchPollResponse,
     seen_input_ids: set[str],
 ) -> None:
     if callback is None or response.get("status") != "input-required":
@@ -498,7 +499,7 @@ class BaseBrowserWindow(ABC):
                     text = await fetch_response.text()
                     raise NaradaError(f"Failed to poll for response: {status} {text}")
 
-                response = await fetch_response.json()
+                response: _RemoteDispatchPollResponse = await fetch_response.json()
                 response["requestId"] = request_id
 
                 if response["completedAt"] is None:
@@ -554,7 +555,7 @@ class BaseBrowserWindow(ABC):
                         else None
                     ),
                 )
-                return response
+                return cast(Response, response)
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 

@@ -19,6 +19,7 @@ from typing import (
     TypedDict,
     TypeGuard,
     TypeVar,
+    cast,
     overload,
     override,
 )
@@ -80,6 +81,7 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    _RemoteDispatchPollResponse,
 )
 from narada_core.tracing.model import parse_action_trace
 from playwright.async_api import (
@@ -101,7 +103,7 @@ type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | No
 
 async def _notify_input_required_callback(
     callback: InputRequiredCallback | None,
-    response: Mapping[str, Any],
+    response: _RemoteDispatchPollResponse,
     seen_input_ids: set[str],
 ) -> None:
     if callback is None or response.get("status") != "input-required":
@@ -498,7 +500,7 @@ class BaseBrowserWindow(ABC):
                         timeout=aiohttp.ClientTimeout(total=deadline - now),
                     ) as resp:
                         resp.raise_for_status()
-                        response = await resp.json()
+                        response: _RemoteDispatchPollResponse = await resp.json()
 
                     response["requestId"] = request_id
 
@@ -528,7 +530,7 @@ class BaseBrowserWindow(ABC):
                         else:
                             response_content["structuredOutput"] = None
 
-                    return response
+                    return cast(Response, response)
                 else:
                     raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum, StrEnum
-from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -415,6 +415,16 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     createdAt: str
     completedAt: str | None
     usage: Usage
+    activeInputRequest: ActiveInputRequest | None
+
+
+class _RemoteDispatchPollResponse(TypedDict):
+    requestId: str
+    status: Literal["pending", "input-required", "success", "error"]
+    response: dict[str, Any] | None
+    createdAt: str
+    completedAt: str | None
+    usage: Usage | None
     activeInputRequest: ActiveInputRequest | None
 
 
