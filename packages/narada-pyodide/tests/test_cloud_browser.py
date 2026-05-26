@@ -258,6 +258,7 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -337,6 +338,7 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -383,6 +385,7 @@ async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -444,6 +447,7 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -490,6 +494,7 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
                         "text": "TRACE_CORE_AGENT_DONE",
                         "actionTrace": [],
                     },
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -568,6 +573,7 @@ async def test_cloud_browser_window_dispatch_request_preserves_current_file_vari
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]
@@ -773,6 +779,7 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
             _FakeResponse(json_data={"requestId": "req-2"}),
@@ -781,6 +788,7 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
+                    "activeInputRequest": None,
                 }
             ),
         ]

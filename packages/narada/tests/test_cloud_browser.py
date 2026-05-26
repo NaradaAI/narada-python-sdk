@@ -144,6 +144,7 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
             },
         ]
     )

@@ -415,7 +415,7 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     createdAt: str
     completedAt: str | None
     usage: Usage
-    activeInputRequest: NotRequired[ActiveInputRequest]
+    activeInputRequest: ActiveInputRequest | None
 
 
 class File(TypedDict):
