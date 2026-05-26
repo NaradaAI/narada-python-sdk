@@ -762,24 +762,6 @@ class BaseBrowserWindow(ABC):
         )
         return result.selectors
 
-    async def agentic_xpath_finder(
-        self,
-        *,
-        prompt: str,
-        timeout: int | None = 300,
-    ) -> list[str]:
-        """Finds matching page elements and returns their XPath selectors."""
-        selectors = await self.agentic_matching_element_finder(
-            prompt=prompt,
-            timeout=timeout,
-        )
-        xpaths: list[str] = []
-        for selector in selectors:
-            xpath = selector.get("xpath")
-            if isinstance(xpath, str):
-                xpaths.append(xpath)
-        return xpaths
-
     async def agentic_mouse_action(
         self,
         *,
