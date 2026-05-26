@@ -200,6 +200,15 @@ class AgenticSelectorResponse(BaseModel):
     value: str | None
 
 
+class AgenticXPathFinderRequest(BaseModel):
+    name: Literal["agentic_xpath_finder"] = "agentic_xpath_finder"
+    prompt: str
+
+
+class AgenticXPathFinderResponse(BaseModel):
+    xpaths: list[str]
+
+
 class WaitForElementRequest(BaseModel):
     name: Literal["wait_for_element"] = "wait_for_element"
     selectors: AgenticSelectors
@@ -422,6 +431,7 @@ class UserApprovalResponse(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | AgenticXPathFinderRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest

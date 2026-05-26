@@ -29,6 +29,8 @@ from narada_core.actions.models import (
     AgenticSelectorRequest,
     AgenticSelectorResponse,
     AgenticSelectors,
+    AgenticXPathFinderRequest,
+    AgenticXPathFinderResponse,
     AgentResponse,
     AgentUsage,
     CloseWindowRequest,
@@ -695,6 +697,20 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def agentic_xpath_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[str]:
+        """Finds all visible page elements matching a prompt and returns XPath selectors."""
+        result = await self._run_extension_action(
+            AgenticXPathFinderRequest(prompt=prompt),
+            AgenticXPathFinderResponse,
+            timeout=timeout,
+        )
+        return result.xpaths
 
     async def agentic_mouse_action(
         self,
