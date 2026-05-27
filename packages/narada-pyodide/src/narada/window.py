@@ -24,8 +24,8 @@ from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     AgenticMouseAction,
     AgenticMouseActionRequest,
-    AgenticMatchingElementFinderRequest,
-    AgenticMatchingElementFinderResponse,
+    AgenticMatchingSelectorsFinderRequest,
+    AgenticMatchingSelectorsFinderResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -748,16 +748,16 @@ class BaseBrowserWindow(ABC):
 
         return result
 
-    async def agentic_matching_element_finder(
+    async def agentic_matching_selectors_finder(
         self,
         *,
         prompt: str,
         timeout: int | None = 300,
     ) -> list[AgenticSelectors]:
-        """Finds all visible page elements matching a prompt and returns selectors."""
+        """Finds all visible targets matching a prompt and returns selectors."""
         result = await self._run_extension_action(
-            AgenticMatchingElementFinderRequest(prompt=prompt),
-            AgenticMatchingElementFinderResponse,
+            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
+            AgenticMatchingSelectorsFinderResponse,
             timeout=timeout,
         )
         return result.selectors

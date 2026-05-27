@@ -200,14 +200,14 @@ class AgenticSelectorResponse(BaseModel):
     value: str | None
 
 
-class AgenticMatchingElementFinderRequest(BaseModel):
-    name: Literal["agentic_matching_element_finder"] = (
-        "agentic_matching_element_finder"
+class AgenticMatchingSelectorsFinderRequest(BaseModel):
+    name: Literal["agentic_matching_selectors_finder"] = (
+        "agentic_matching_selectors_finder"
     )
     prompt: str
 
 
-class AgenticMatchingElementFinderResponse(BaseModel):
+class AgenticMatchingSelectorsFinderResponse(BaseModel):
     selectors: list[AgenticSelectors]
 
 
@@ -433,7 +433,7 @@ class UserApprovalResponse(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
-    | AgenticMatchingElementFinderRequest
+    | AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
