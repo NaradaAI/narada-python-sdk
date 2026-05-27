@@ -24,10 +24,10 @@ from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
-    AgenticMouseAction,
-    AgenticMouseActionRequest,
     AgenticMatchingSelectorsFinderRequest,
     AgenticMatchingSelectorsFinderResponse,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -708,7 +708,10 @@ class BaseBrowserWindow(ABC):
             else None
         )
         workflow_trace = response_content.get("workflowTrace")
-        if workflow_trace is not None:
+        parent_request_id = self._current_parent_request_id()
+        # Preserve the response contract for direct callers, but avoid adding a second
+        # child node when the backend will stitch the child request into the parent row.
+        if workflow_trace is not None and parent_request_id is None:
             _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         critic_result: CriticResult | None = None
