@@ -9,14 +9,14 @@ async def main() -> None:
         # Open a new browser window and initialize the Narada UI agent.
         window = await narada.open_and_initialize_browser_window()
 
-        # Run a custom agent, optionally setting the `input_as_text` input variable for that agent.
+        # Run a custom agent with a prompt (mapped to `chat_input` server-side).
         #
         # The definition of this demo agent can be viewed at:
         # https://app.narada.ai/agent-studio/agents/e9d8vb8Q7bD2AcaSkqmRZ
         custom_agent = "/demo@narada.ai/greeter-agent"
-        input_as_text = "John Doe"
+        chat_input = "John Doe"
         response = await window.agent(
-            prompt=input_as_text,
+            prompt=chat_input,
             agent=custom_agent,
         )
 

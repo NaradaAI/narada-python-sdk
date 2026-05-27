@@ -26,6 +26,8 @@ from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     AgenticMouseAction,
     AgenticMouseActionRequest,
+    AgenticMatchingSelectorsFinderRequest,
+    AgenticMatchingSelectorsFinderResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -768,6 +770,20 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def agentic_matching_selectors_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[AgenticSelectors]:
+        """Finds all visible targets matching a prompt and returns selectors."""
+        result = await self._run_extension_action(
+            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
+            AgenticMatchingSelectorsFinderResponse,
+            timeout=timeout,
+        )
+        return result.selectors
 
     async def agentic_mouse_action(
         self,
