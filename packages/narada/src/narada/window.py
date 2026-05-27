@@ -641,6 +641,7 @@ class BaseBrowserWindow(ABC):
             if action_trace_raw is not None
             else None
         )
+        workflow_trace = response_content.get("workflowTrace")
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -662,6 +663,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            workflow_trace=workflow_trace,
             critic_result=critic_result,
         )
 

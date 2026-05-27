@@ -2,15 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import (
-    BaseModel,
-    Field,
-    NonNegativeInt,
-    TypeAdapter,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field, NonNegativeInt, TypeAdapter, ValidationError, field_validator, model_validator
 
 
 def _normalize_agent_type(agent_type: object) -> str:
@@ -189,6 +181,7 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    subWorkflow: dict[str, Any] | None = None
     children: ActionTrace | None = None
 
 
