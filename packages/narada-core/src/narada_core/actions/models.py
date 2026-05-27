@@ -202,6 +202,17 @@ class AgenticSelectorResponse(BaseModel):
     value: str | None
 
 
+class AgenticMatchingSelectorsFinderRequest(BaseModel):
+    name: Literal["agentic_matching_selectors_finder"] = (
+        "agentic_matching_selectors_finder"
+    )
+    prompt: str
+
+
+class AgenticMatchingSelectorsFinderResponse(BaseModel):
+    selectors: list[AgenticSelectors]
+
+
 class WaitForElementRequest(BaseModel):
     name: Literal["wait_for_element"] = "wait_for_element"
     selectors: AgenticSelectors
@@ -424,6 +435,7 @@ class UserApprovalResponse(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
