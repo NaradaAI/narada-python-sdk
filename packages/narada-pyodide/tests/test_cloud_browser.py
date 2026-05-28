@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from packaging.version import InvalidVersion
+from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
@@ -823,6 +824,39 @@ async def test_remote_browser_window_prompt_for_user_input_uses_hitl_default_tim
     assert call is not None
     payload = json.loads(call.kwargs["body"])
     assert payload["timeout"] == window_module.DEFAULT_HITL_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_window_tolerates_legacy_response_model_without_workflow_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "workflowTrace": {"workflowId": "ignored-by-legacy-model"},
+            }
+        )
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    class LegacyExtensionActionResponse(BaseModel):
+        status: str
+        error: str | None = None
+        data: str | None = None
+
+    monkeypatch.setattr(
+        window_module, "ExtensionActionResponse", LegacyExtensionActionResponse
+    )
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    await window.go_to_url(url="https://example.com")
+
+    assert pyfetch.await_count == 1
 
 
 @pytest.mark.asyncio

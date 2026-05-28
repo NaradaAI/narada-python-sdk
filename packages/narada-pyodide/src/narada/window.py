@@ -1062,8 +1062,9 @@ class BaseBrowserWindow(ABC):
             resp_json = await fetch_response.json()
 
             response = ExtensionActionResponse.model_validate(resp_json)
-            if response.workflowTrace is not None:
-                _trace.emit_sub_workflow(workflow_trace=response.workflowTrace)
+            workflow_trace = getattr(response, "workflowTrace", None)
+            if workflow_trace is not None:
+                _trace.emit_sub_workflow(workflow_trace=workflow_trace)
             if response.status == "error":
                 raise NaradaError(response.error)
             if response.status == "aborted":
