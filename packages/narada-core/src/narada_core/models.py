@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum, StrEnum
-from typing import Annotated, Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -399,6 +399,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
+    workflowTrace: NotRequired[dict[str, Any]]
 
 
 class Usage(TypedDict):
