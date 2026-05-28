@@ -93,9 +93,7 @@ class Narada:
             "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", ""
         ).strip()
         if not initiator_remote_dispatch_request_id:
-            raise ValueError(
-                "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID is required"
-            )
+            raise ValueError("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID is required")
         request_body["initiator_remote_dispatch_request_id"] = (
             initiator_remote_dispatch_request_id
         )
