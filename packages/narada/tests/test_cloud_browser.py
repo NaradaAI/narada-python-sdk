@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from narada.client import Narada
 from narada.config import BrowserConfig
+from narada.window import CloudBrowserWindow
 from narada_core.errors import NaradaTimeoutError
 
 

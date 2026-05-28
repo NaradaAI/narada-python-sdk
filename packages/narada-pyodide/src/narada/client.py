@@ -84,11 +84,19 @@ class Narada:
             user_id=self._user_id,
             env=self._env,
         )
-        request_body = {
+        request_body: dict[str, Any] = {
             "session_name": session_name,
             "session_timeout": session_timeout,
             "require_extension": require_extension,
         }
+        initiator_remote_dispatch_request_id = os.environ.get(
+            "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", ""
+        ).strip()
+        if not initiator_remote_dispatch_request_id:
+            raise ValueError("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID is required")
+        request_body["initiator_remote_dispatch_request_id"] = (
+            initiator_remote_dispatch_request_id
+        )
 
         response = None
         max_attempts = 3
