@@ -31,6 +31,8 @@ from narada_core.actions.models import (
     ActiveInputRequest,
     AgenticMouseAction,
     AgenticMouseActionRequest,
+    AgenticMatchingSelectorsFinderRequest,
+    AgenticMatchingSelectorsFinderResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -696,6 +698,7 @@ class BaseBrowserWindow(ABC):
             if action_trace_raw is not None
             else None
         )
+        workflow_trace = response_content.get("workflowTrace")
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -717,6 +720,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            workflow_trace=workflow_trace,
             critic_result=critic_result,
         )
 
@@ -751,6 +755,20 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def agentic_matching_selectors_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[AgenticSelectors]:
+        """Finds all visible targets matching a prompt and returns selectors."""
+        result = await self._run_extension_action(
+            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
+            AgenticMatchingSelectorsFinderResponse,
+            timeout=timeout,
+        )
+        return result.selectors
 
     async def agentic_mouse_action(
         self,

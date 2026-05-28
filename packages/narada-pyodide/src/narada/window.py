@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import inspect
 import json
 import logging
@@ -27,6 +28,8 @@ from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     ActiveInputRequest,
+    AgenticMatchingSelectorsFinderRequest,
+    AgenticMatchingSelectorsFinderResponse,
     AgenticMouseAction,
     AgenticMouseActionRequest,
     AgenticSelectorAction,
@@ -106,9 +109,19 @@ def _parent_run_ids() -> list[str]:
     )
 
 
+def _parent_request_id() -> str | None:
+    parent_request_id = getattr(builtins, "_narada_request_id", None)
+    if isinstance(parent_request_id, str):
+        return parent_request_id
+    parent_request_id = globals().get("_narada_request_id")
+    return parent_request_id if isinstance(parent_request_id, str) else None
+
+
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
+
+    _narada_request_id: str | None
 
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
@@ -247,6 +260,10 @@ class BaseBrowserWindow(ABC):
         request as a child runnable of a stack frame it does not have.
         """
         return None
+
+    def _current_parent_request_id(self) -> str | None:
+        """Returns the remote-dispatch request that owns the current Python execution."""
+        return _parent_request_id()
 
     async def _get_auth_headers(self) -> dict[str, str]:
         return await _build_auth_headers(
@@ -425,6 +442,9 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
+        parent_request_id = self._current_parent_request_id()
+        if parent_request_id is not None:
+            body["parentRequestId"] = parent_request_id
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
@@ -739,6 +759,12 @@ class BaseBrowserWindow(ABC):
             if action_trace_raw is not None
             else None
         )
+        workflow_trace = response_content.get("workflowTrace")
+        parent_request_id = self._current_parent_request_id()
+        # Preserve the response contract for direct callers, but avoid adding a second
+        # child node when the backend will stitch the child request into the parent row.
+        if workflow_trace is not None and parent_request_id is None:
+            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -760,6 +786,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            workflow_trace=workflow_trace,
             critic_result=critic_result,
         )
 
@@ -798,6 +825,20 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def agentic_matching_selectors_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[AgenticSelectors]:
+        """Finds all visible targets matching a prompt and returns selectors."""
+        result = await self._run_extension_action(
+            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
+            AgenticMatchingSelectorsFinderResponse,
+            timeout=timeout,
+        )
+        return result.selectors
 
     async def agentic_mouse_action(
         self,
@@ -1054,6 +1095,9 @@ class BaseBrowserWindow(ABC):
             parent_run_ids = self._current_parent_run_ids()
             if parent_run_ids:
                 body["parentRunIds"] = parent_run_ids
+            parent_request_id = self._current_parent_request_id()
+            if parent_request_id is not None:
+                body["requestId"] = parent_request_id
             if timeout is not None:
                 body["timeout"] = timeout
 
@@ -1075,6 +1119,8 @@ class BaseBrowserWindow(ABC):
             resp_json = await fetch_response.json()
 
             response = ExtensionActionResponse.model_validate(resp_json)
+            if response.workflowTrace is not None:
+                _trace.emit_sub_workflow(workflow_trace=response.workflowTrace)
             if response.status == "error":
                 raise NaradaError(response.error)
             if response.status == "aborted":

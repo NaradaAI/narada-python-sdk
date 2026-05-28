@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from narada.client import Narada
 from narada.config import BrowserConfig
-from narada.window import RemoteBrowserWindow
+from narada.window import CloudBrowserWindow, RemoteBrowserWindow
 from narada_core.errors import NaradaTimeoutError
 
 
@@ -289,3 +289,38 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
     ]
     assert wait_for_browser_window_id.await_count == 2
     assert window.browser_window_id == "browser-window-123"
+
+
+@pytest.mark.asyncio
+async def test_window_agent_exposes_workflow_trace_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {"step_type": "workflow", "children": []}
+    window = CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        auth_headers={"x-api-key": "test-key"},
+    )
+    monkeypatch.setattr(
+        window,
+        "dispatch_request",
+        AsyncMock(
+            return_value={
+                "requestId": "request-123",
+                "status": "success",
+                "response": {
+                    "text": "done",
+                    "output": {"type": "text", "content": "done"},
+                    "workflowTrace": workflow_trace,
+                },
+                "completedAt": "2026-01-01T00:00:01Z",
+                "usage": {"actions": 0, "credits": 0},
+                "activeInputRequest": None,
+            }
+        ),
+    )
+
+    response = await window.agent(prompt="return a trace")
+
+    assert response.workflow_trace == workflow_trace
+    assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace

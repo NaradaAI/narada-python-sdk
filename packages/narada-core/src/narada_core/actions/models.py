@@ -12,10 +12,7 @@ from typing import (
     override,
 )
 
-from pydantic import (
-    BaseModel,
-    Field,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
 from narada_core.tracing import model as tracing_model
 
@@ -50,6 +47,8 @@ class CriticResult(BaseModel):
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
+    model_config = ConfigDict(populate_by_name=True)
+
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
@@ -60,6 +59,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
 
 
@@ -200,6 +200,17 @@ class AgenticSelectorRequest(BaseModel):
 
 class AgenticSelectorResponse(BaseModel):
     value: str | None
+
+
+class AgenticMatchingSelectorsFinderRequest(BaseModel):
+    name: Literal["agentic_matching_selectors_finder"] = (
+        "agentic_matching_selectors_finder"
+    )
+    prompt: str
+
+
+class AgenticMatchingSelectorsFinderResponse(BaseModel):
+    selectors: list[AgenticSelectors]
 
 
 class WaitForElementRequest(BaseModel):
@@ -435,6 +446,7 @@ class ActiveInputRequest(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
+    | AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
     | GoToUrlRequest
@@ -457,3 +469,5 @@ class ExtensionActionResponse(BaseModel):
     status: Literal["success", "error", "aborted"]
     error: str | None = None
     data: str | None = None
+    action_trace: tracing_model.ActionTrace | None = None
+    workflowTrace: dict[str, Any] | None = None
