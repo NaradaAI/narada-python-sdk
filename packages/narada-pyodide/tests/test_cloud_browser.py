@@ -96,6 +96,9 @@ def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMoc
 async def test_open_and_initialize_cloud_browser_window_maps_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-maps-123"
+    )
     pyfetch = AsyncMock(
         return_value=_FakeResponse(
             json_data={
@@ -132,6 +135,53 @@ async def test_open_and_initialize_cloud_browser_window_maps_response(
         "session_name": "demo",
         "session_timeout": 321,
         "require_extension": False,
+        "initiator_remote_dispatch_request_id": "request-maps-123",
+    }
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_requires_initiator_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", raising=False)
+    pyfetch = AsyncMock()
+    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    client = narada_pkg.Narada(api_key="test-api-key")
+    with pytest.raises(ValueError, match="NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID"):
+        await client.open_and_initialize_cloud_browser_window()
+
+    pyfetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_includes_initiator_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", " request-local-123 "
+    )
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "session_id": "session-123",
+                "session_name": "demo",
+                "browser_window_id": "browser-window-123",
+            }
+        )
+    )
+    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    client = narada_pkg.Narada(api_key="test-api-key")
+    await client.open_and_initialize_cloud_browser_window()
+
+    call = pyfetch.await_args
+    assert call is not None
+    assert json.loads(call.kwargs["body"]) == {
+        "session_name": None,
+        "session_timeout": None,
+        "require_extension": True,
+        "initiator_remote_dispatch_request_id": "request-local-123",
     }
 
 
@@ -142,6 +192,9 @@ async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer
     monkeypatch.delenv("NARADA_API_KEY", raising=False)
     monkeypatch.setenv("NARADA_USER_ID", "user-123")
     monkeypatch.setenv("NARADA_ENV", "dev")
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-bearer-123"
+    )
 
     pyfetch = AsyncMock(
         side_effect=[
