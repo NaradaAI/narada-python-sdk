@@ -96,6 +96,9 @@ def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMoc
 async def test_open_and_initialize_cloud_browser_window_maps_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-maps-123"
+    )
     pyfetch = AsyncMock(
         return_value=_FakeResponse(
             json_data={
@@ -132,6 +135,53 @@ async def test_open_and_initialize_cloud_browser_window_maps_response(
         "session_name": "demo",
         "session_timeout": 321,
         "require_extension": False,
+        "initiator_remote_dispatch_request_id": "request-maps-123",
+    }
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_requires_initiator_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", raising=False)
+    pyfetch = AsyncMock()
+    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    client = narada_pkg.Narada(api_key="test-api-key")
+    with pytest.raises(ValueError, match="NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID"):
+        await client.open_and_initialize_cloud_browser_window()
+
+    pyfetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_open_and_initialize_cloud_browser_window_includes_initiator_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", " request-local-123 "
+    )
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "session_id": "session-123",
+                "session_name": "demo",
+                "browser_window_id": "browser-window-123",
+            }
+        )
+    )
+    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    client = narada_pkg.Narada(api_key="test-api-key")
+    await client.open_and_initialize_cloud_browser_window()
+
+    call = pyfetch.await_args
+    assert call is not None
+    assert json.loads(call.kwargs["body"]) == {
+        "session_name": None,
+        "session_timeout": None,
+        "require_extension": True,
+        "initiator_remote_dispatch_request_id": "request-local-123",
     }
 
 
@@ -142,6 +192,9 @@ async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer
     monkeypatch.delenv("NARADA_API_KEY", raising=False)
     monkeypatch.setenv("NARADA_USER_ID", "user-123")
     monkeypatch.setenv("NARADA_ENV", "dev")
+    monkeypatch.setenv(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-bearer-123"
+    )
 
     pyfetch = AsyncMock(
         side_effect=[
@@ -658,6 +711,51 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
     assert parsed_event.agent_type == "coreAgent"
     assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
     assert parsed_event.action_trace == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_emits_input_required_sub_agent_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "input-required",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": {
+                        "text": "TRACE_INPUT_REQUIRED",
+                        "output": {"type": "text", "content": "TRACE_INPUT_REQUIRED"},
+                    },
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="needs input")
+
+    from narada_core.tracing.model import PythonSubAgentCallEvent
+
+    assert response["status"] == "input-required"
+    assert len(emitted_events) == 1
+    parsed_event = PythonSubAgentCallEvent.model_validate(json.loads(emitted_events[0]))
+    assert parsed_event.status == "input-required"
+    assert parsed_event.text == "TRACE_INPUT_REQUIRED"
 
 
 def test_parse_action_trace_preserves_run_custom_agent_children(

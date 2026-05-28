@@ -397,8 +397,19 @@ type APAActionTrace = list[ApaStepTrace]
 type ActionTrace = OperatorActionTrace | APAActionTrace
 
 
+class TextResponseOutput(TypedDict):
+    type: Literal["text"]
+    content: str
+
+
+class StructuredResponseOutput(TypedDict, Generic[_MaybeStructuredOutput]):
+    type: Literal["structured"]
+    content: _MaybeStructuredOutput
+
+
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
+    output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
     workflowTrace: NotRequired[dict[str, Any]]

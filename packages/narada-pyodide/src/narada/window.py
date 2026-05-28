@@ -554,9 +554,7 @@ class BaseBrowserWindow(ABC):
                     else:
                         response_content["structuredOutput"] = None
 
-                trace_status: _trace.SubAgentCallStatus = (
-                    "error" if response["status"] == "error" else "success"
-                )
+                trace_status = cast(_trace.SubAgentCallStatus, response["status"])
                 trace_error: str | None = (
                     response_content.get("text")
                     if response["status"] == "error" and response_content is not None
@@ -564,7 +562,8 @@ class BaseBrowserWindow(ABC):
                 )
                 trace_text: str | None = (
                     response_content.get("text")
-                    if response["status"] == "success" and response_content is not None
+                    if response["status"] in ("success", "input-required")
+                    and response_content is not None
                     else None
                 )
                 _trace.emit_sub_agent_call(

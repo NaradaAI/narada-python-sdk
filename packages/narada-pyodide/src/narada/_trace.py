@@ -75,7 +75,7 @@ def dump_model(model: BaseModel) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-SubAgentCallStatus = Literal["success", "error", "timeout"]
+SubAgentCallStatus = Literal["success", "error", "timeout", "input-required"]
 ExtensionActionStatus = Literal["success", "error", "timeout"]
 SideEffectType = Literal["download_file", "render_html"]
 

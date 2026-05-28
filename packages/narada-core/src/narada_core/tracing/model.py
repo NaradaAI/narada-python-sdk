@@ -260,7 +260,7 @@ class PythonSubAgentCallEvent(BaseModel):
     ts_end: int
     agent_type: str
     prompt: str
-    status: Literal["success", "error", "timeout"]
+    status: Literal["success", "error", "timeout", "input-required"]
     request_id: str | None = None
     text: str | None = None
     error_message: str | None = None
