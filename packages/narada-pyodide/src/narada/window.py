@@ -6,7 +6,17 @@ import time
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload, override
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Optional,
+    TypeVar,
+    cast,
+    overload,
+    override,
+)
 from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
