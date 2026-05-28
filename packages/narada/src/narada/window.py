@@ -21,13 +21,13 @@ from typing import (
 )
 
 import aiohttp
-from narada_core.actions.critic import run_critic
+from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
-    AgenticMouseAction,
-    AgenticMouseActionRequest,
     AgenticMatchingSelectorsFinderRequest,
     AgenticMatchingSelectorsFinderResponse,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -654,6 +654,10 @@ class BaseBrowserWindow(ABC):
                 critic=critic,
                 time_zone=time_zone,
                 timeout=timeout,
+            )
+            workflow_trace = merge_critic_workflow_trace(
+                workflow_trace=workflow_trace,
+                critic_result=critic_result,
             )
 
         return AgentResponse(

@@ -171,3 +171,106 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
     ]
     assert wait_for_browser_window_id.await_count == 2
     assert window.browser_window_id == "browser-window-123"
+
+
+@pytest.mark.asyncio
+async def test_window_agent_exposes_workflow_trace_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {"step_type": "workflow", "children": []}
+    window = CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        auth_headers={"x-api-key": "test-key"},
+    )
+    monkeypatch.setattr(
+        window,
+        "dispatch_request",
+        AsyncMock(
+            return_value={
+                "requestId": "request-123",
+                "status": "success",
+                "response": {
+                    "text": "done",
+                    "output": {"type": "text", "content": "done"},
+                    "workflowTrace": workflow_trace,
+                },
+                "usage": {"actions": 0, "credits": 0},
+            }
+        ),
+    )
+
+    response = await window.agent(prompt="return a trace")
+
+    assert response.workflow_trace == workflow_trace
+    assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
+
+
+@pytest.mark.asyncio
+async def test_window_agent_appends_critic_workflow_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {
+        "workflowId": "main-workflow",
+        "workflowName": "Main Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 100,
+        "children": [],
+    }
+    critic_workflow_trace = {
+        "workflowId": "critic-workflow",
+        "workflowName": "Critic Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 200,
+        "children": [],
+    }
+    window = CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        auth_headers={"x-api-key": "test-key"},
+    )
+    monkeypatch.setattr(
+        window,
+        "dispatch_request",
+        AsyncMock(
+            side_effect=[
+                {
+                    "requestId": "request-123",
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "workflowTrace": workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                },
+                {
+                    "requestId": "critic-request-123",
+                    "status": "success",
+                    "response": {
+                        "text": '{"narada_validation_passed":true}',
+                        "output": {
+                            "type": "structured",
+                            "content": {"narada_validation_passed": True},
+                        },
+                        "structuredOutput": SimpleNamespace(
+                            narada_validation_passed=True
+                        ),
+                        "workflowTrace": critic_workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                },
+            ]
+        ),
+    )
+
+    response = await window.agent(prompt="return a trace", critic={})
+
+    assert response.critic_result is not None
+    assert response.critic_result.workflow_trace == critic_workflow_trace
+    assert response.workflow_trace == {
+        **workflow_trace,
+        "children": [{"kind": "sub_workflow", "trace": critic_workflow_trace}],
+    }

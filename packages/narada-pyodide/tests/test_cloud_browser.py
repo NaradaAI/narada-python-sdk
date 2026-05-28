@@ -278,6 +278,207 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_window_dispatch_request_keeps_parent_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(json_data={"status": "success", "response": None}),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.dispatch_request(prompt="hello from cloud browser")
+
+    assert response["status"] == "success"
+    post_call = pyfetch.await_args_list[0]
+    payload = json.loads(post_call.kwargs["body"])
+    assert payload["parentRequestId"] == "parent-request-123"
+    assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_window_agent_keeps_parent_request_id_from_injected_builtins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.agent(prompt="run gui child", agent="/$USER/gui-child")
+
+    assert response.status == "success"
+    post_call = pyfetch.await_args_list[0]
+    payload = json.loads(post_call.kwargs["body"])
+    assert payload["parentRequestId"] == "parent-request-123"
+
+
+@pytest.mark.asyncio
+async def test_window_agent_exposes_workflow_trace_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {"step_type": "workflow", "children": []}
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "workflowTrace": workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.agent(prompt="return a trace")
+
+    assert response.workflow_trace == workflow_trace
+    assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
+    sub_workflow_events = [
+        json.loads(event)
+        for event in emitted_events
+        if json.loads(event)["kind"] == "subWorkflow"
+    ]
+    assert sub_workflow_events == [
+        {"kind": "subWorkflow", "workflowTrace": workflow_trace}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_window_agent_emits_combined_critic_workflow_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {
+        "workflowId": "main-workflow",
+        "workflowName": "Main Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 100,
+        "children": [],
+    }
+    critic_workflow_trace = {
+        "workflowId": "critic-workflow",
+        "workflowName": "Critic Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 200,
+        "children": [],
+    }
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "main-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "workflowTrace": workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                }
+            ),
+            _FakeResponse(json_data={"requestId": "critic-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": '{"narada_validation_passed":true}',
+                        "output": {
+                            "type": "structured",
+                            "content": {"narada_validation_passed": True},
+                        },
+                        "workflowTrace": critic_workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                }
+            ),
+        ]
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.CloudBrowserWindow(
+        browser_window_id="browser-window-123",
+        session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await window.agent(prompt="return a trace", critic={})
+
+    combined_workflow_trace = {
+        **workflow_trace,
+        "children": [{"kind": "sub_workflow", "trace": critic_workflow_trace}],
+    }
+    assert response.critic_result is not None
+    assert response.critic_result.workflow_trace == critic_workflow_trace
+    assert response.workflow_trace == combined_workflow_trace
+    sub_workflow_events = [
+        json.loads(event)
+        for event in emitted_events
+        if json.loads(event)["kind"] == "subWorkflow"
+    ]
+    assert sub_workflow_events == [
+        {"kind": "subWorkflow", "workflowTrace": combined_workflow_trace}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

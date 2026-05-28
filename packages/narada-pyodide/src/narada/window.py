@@ -6,27 +6,17 @@ import time
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import (
-    IO,
-    TYPE_CHECKING,
-    Any,
-    Literal,
-    Optional,
-    TypeVar,
-    cast,
-    overload,
-    override,
-)
+from typing import IO, TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, overload, override
 from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
-from narada_core.actions.critic import run_critic
+from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
-    AgenticMouseAction,
-    AgenticMouseActionRequest,
     AgenticMatchingSelectorsFinderRequest,
     AgenticMatchingSelectorsFinderResponse,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -689,6 +679,8 @@ class BaseBrowserWindow(ABC):
             if action_trace_raw is not None
             else None
         )
+        workflow_trace = response_content.get("workflowTrace")
+        parent_request_id = self._current_parent_request_id()
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -701,6 +693,15 @@ class BaseBrowserWindow(ABC):
                 time_zone=time_zone,
                 timeout=timeout,
             )
+            workflow_trace = merge_critic_workflow_trace(
+                workflow_trace=workflow_trace,
+                critic_result=critic_result,
+            )
+
+        # Preserve the response contract for direct callers, but avoid adding a second
+        # child node when the backend will stitch the child request into the parent row.
+        if workflow_trace is not None and parent_request_id is None:
+            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
