@@ -24,10 +24,10 @@ import aiohttp
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
-    AgenticMouseAction,
-    AgenticMouseActionRequest,
     AgenticMatchingSelectorsFinderRequest,
     AgenticMatchingSelectorsFinderResponse,
+    AgenticMouseAction,
+    AgenticMouseActionRequest,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -404,6 +404,7 @@ class BaseBrowserWindow(ABC):
             "prompt": agent_prefix + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
+            "timeout": timeout,
         }
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:

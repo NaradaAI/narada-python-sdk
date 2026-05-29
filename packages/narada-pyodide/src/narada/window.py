@@ -398,6 +398,7 @@ class BaseBrowserWindow(ABC):
             "prompt": agent_prefix + prompt,
             "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
+            "timeout": timeout,
         }
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:

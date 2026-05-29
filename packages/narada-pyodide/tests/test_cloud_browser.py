@@ -789,7 +789,7 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     window = window_module.LocalBrowserWindow()
 
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    first_response = await window.dispatch_request(prompt="first prompt")
+    first_response = await window.dispatch_request(prompt="first prompt", timeout=17)
 
     window_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
     second_response = await window.dispatch_request(prompt="second prompt")
@@ -799,6 +799,8 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
 
     first_post = json.loads(pyfetch.await_args_list[0].kwargs["body"])
     second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
+    assert first_post["timeout"] == 17
+    assert second_post["timeout"] == 1000
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
 
