@@ -20,10 +20,16 @@ jobs:
       - name: Compare pinned submodule SHA against architecture-docs/main
         env:
           GH_TOKEN: ${{ secrets.ARCHITECTURE_DOCS_READ_PAT || secrets.ALL_REPO_CHECKOUT_TOKEN }}
+          IS_UNTRUSTED_PR: ${{ github.event_name == 'pull_request' && (github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name != github.repository) }}
         run: |
           set -euo pipefail
 
           if [ -z "${GH_TOKEN:-}" ]; then
+            if [ "${IS_UNTRUSTED_PR:-false}" = "true" ]; then
+              echo "::notice::Skipping architecture-docs freshness check because this pull_request run cannot access repository secrets."
+              exit 0
+            fi
+
             echo "::error::Missing ARCHITECTURE_DOCS_READ_PAT or ALL_REPO_CHECKOUT_TOKEN."
             echo "Cannot verify architecture-docs freshness without read access to NaradaAI/architecture-docs."
             exit 1
