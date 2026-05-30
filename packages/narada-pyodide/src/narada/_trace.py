@@ -113,6 +113,7 @@ def emit_sub_agent_call(
 def emit_extension_action(
     *,
     ts_start: int,
+    action_execution_id: str,
     request: ExtensionActionRequest,
     status: ExtensionActionStatus,
     response: BaseModel | None = None,
@@ -122,6 +123,7 @@ def emit_extension_action(
         "kind": "extensionAction",
         "ts_start": ts_start,
         "ts_end": now_ms(),
+        "action_execution_id": action_execution_id,
         "action_name": request.name,
         "request_summary": dump_model(request),
         "status": status,

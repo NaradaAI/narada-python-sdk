@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -975,12 +976,14 @@ class BaseBrowserWindow(ABC):
         # Trace instrumentation: every exit path emits an ``extensionAction``
         # trace event with a status matching the outcome. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
+        action_execution_id = f"action_{uuid.uuid4().hex}"
 
         try:
             headers = await self._get_auth_headers()
 
             body = {
                 "action": request.model_dump(),
+                "actionExecutionId": action_execution_id,
                 "browserWindowId": self.browser_window_id,
             }
             parent_run_ids = self._current_parent_run_ids()
@@ -1015,6 +1018,7 @@ class BaseBrowserWindow(ABC):
             if response_model is None:
                 _trace.emit_extension_action(
                     ts_start=trace_start_ms,
+                    action_execution_id=action_execution_id,
                     request=request,
                     status="success",
                 )
@@ -1024,6 +1028,7 @@ class BaseBrowserWindow(ABC):
             parsed_response = response_model.model_validate_json(response.data)
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="success",
                 response=parsed_response,
@@ -1033,6 +1038,7 @@ class BaseBrowserWindow(ABC):
         except NaradaTimeoutError:
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="timeout",
                 error_message="Extension action timed out",
@@ -1041,6 +1047,7 @@ class BaseBrowserWindow(ABC):
         except Exception as err:
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="error",
                 error_message=str(err),

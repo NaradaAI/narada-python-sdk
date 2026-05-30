@@ -3,6 +3,7 @@ import logging
 import mimetypes
 import os
 import time
+import uuid
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -923,8 +924,10 @@ class BaseBrowserWindow(ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel | None:
+        action_execution_id = f"action_{uuid.uuid4().hex}"
         body = {
             "action": request.model_dump(),
+            "actionExecutionId": action_execution_id,
             "browserWindowId": self.browser_window_id,
         }
         if timeout is not None:

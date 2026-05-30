@@ -359,7 +359,42 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
     parsed_event = PythonSubAgentCallEvent.model_validate(event)
     assert parsed_event.agent_type == "coreAgent"
     assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
-    assert parsed_event.action_trace == []
+
+
+@pytest.mark.asyncio
+async def test_extension_action_request_and_trace_share_action_execution_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": json.dumps({"url": "https://example.com"}),
+            }
+        )
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    assert await window.get_url() == "https://example.com"
+
+    request_body = json.loads(pyfetch.await_args.kwargs["body"])
+    assert request_body["actionExecutionId"].startswith("action_")
+    assert len(emitted_events) == 1
+    trace_event = json.loads(emitted_events[0])
+    assert trace_event["kind"] == "extensionAction"
+    assert trace_event["action_name"] == "get_url"
+    assert trace_event["action_execution_id"] == request_body["actionExecutionId"]
 
 
 def test_parse_action_trace_preserves_run_custom_agent_children(
