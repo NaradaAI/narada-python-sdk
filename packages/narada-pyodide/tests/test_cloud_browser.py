@@ -439,6 +439,40 @@ async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
 
 
 @pytest.mark.asyncio
+async def test_agent_run_forwards_clear_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).run("fresh task", clear_chat=True)
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["clearChat"] is True
+
+
+@pytest.mark.asyncio
 async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -685,6 +719,48 @@ async def test_cloud_browser_downloads_return_presigned_urls(
 
 
 @pytest.mark.asyncio
+async def test_lambda_environment_downloads_return_presigned_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(
+                json_data={
+                    "downloaded_files": [
+                        {
+                            "file_name": "report.pdf",
+                            "key": "downloads/session-123/report.pdf",
+                            "size": 42,
+                        }
+                    ]
+                }
+            ),
+            _FakeResponse(
+                json_data={"presigned_url": "https://example.com/report.pdf"}
+            ),
+        ]
+    )
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.LambdaEnvironment(api_key="test-api-key")
+    env._session_id = "session-123"
+    files = await env.get_downloaded_files()
+
+    assert files == [
+        env_module.SessionDownloadItem(
+            file_name="report.pdf",
+            size=42,
+            download_url="https://example.com/report.pdf",
+        )
+    ]
+    first_call, second_call = pyfetch.await_args_list
+    assert first_call.args[0].endswith(
+        "/cloud-browser/replay/downloads?session_id=session-123"
+    )
+    assert "key=downloads%2Fsession-123%2Freport.pdf" in second_call.args[0]
+
+
+@pytest.mark.asyncio
 async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -715,6 +791,30 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     assert values == {"name": "Narada"}
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["timeout"] == env_module.DEFAULT_HITL_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_agentic_mouse_action_preserves_resize_window_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).agentic_mouse_action(
+        action={"type": "click"},
+        recorded_click={"x": 500, "y": 300, "viewport": {"width": 1280, "height": 720}},
+        fallback_operator_query="click the target",
+        resize_window=False,
+    )
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"]["resize_window"] is False
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,6 @@ from typing import (
     Callable,
     Literal,
     Mapping,
-    Optional,
     TypedDict,
     TypeGuard,
     TypeVar,
@@ -890,7 +889,7 @@ class Environment(ABC):
         *,
         action: AgenticMouseAction,
         recorded_click: RecordedClick,
-        resize_window: Optional[bool] = True,
+        resize_window: bool = True,
         fallback_operator_query: str,
         timeout: int | None = 60,
     ) -> None:
@@ -901,7 +900,7 @@ class Environment(ABC):
             AgenticMouseActionRequest(
                 action=action,
                 recorded_click=recorded_click,
-                resize_window=resize_window or True,
+                resize_window=resize_window,
                 fallback_operator_query=fallback_operator_query,
             ),
             timeout=timeout,
@@ -1462,6 +1461,14 @@ class LambdaEnvironment(Environment):
                 session_id=self._session_id,
                 timeout=timeout,
             )
+
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this lambda session (file name, size, presigned GET URL per file)."""
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self.session_id,
+        )
 
 
 async def _create_and_initialize_cloud_browser_session(

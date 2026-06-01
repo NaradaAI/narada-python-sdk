@@ -15,7 +15,7 @@ async def main() -> None:
             fallback_operator_query="get className from create button",
             timeout=60,
         )
-        print(f"Class Name: {property_response['value']}")
+        print(f"Class Name: {property_response.value}")
 
         print("\nTest 2: Getting text content...")
         text_response = await agent.agentic_selector(
@@ -24,7 +24,7 @@ async def main() -> None:
             fallback_operator_query="get text from create button",
             timeout=60,
         )
-        print(f"Text: {text_response['value']}")
+        print(f"Text: {text_response.value}")
     finally:
         await env.close()
 

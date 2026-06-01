@@ -219,6 +219,37 @@ async def test_lambda_environment_uses_backend_initialization(
 
 
 @pytest.mark.asyncio
+async def test_lambda_environment_exposes_downloaded_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    downloaded_files = [
+        environment_module.SessionDownloadItem(
+            file_name="report.pdf",
+            size=42,
+            download_url="https://example.com/report.pdf",
+        )
+    ]
+    get_downloads = AsyncMock(return_value=downloaded_files)
+    monkeypatch.setattr(
+        environment_module,
+        "_get_cloud_browser_downloads",
+        get_downloads,
+    )
+
+    env = LambdaEnvironment(auth_headers={"x-api-key": "test-key"})
+    env._session_id = "session-123"
+
+    assert await env.get_downloaded_files() == downloaded_files
+    get_downloads.assert_awaited_once_with(
+        base_url=env._base_url,
+        auth_headers={"x-api-key": "test-key"},
+        session_id="session-123",
+    )
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

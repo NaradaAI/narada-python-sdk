@@ -1873,6 +1873,14 @@ class LambdaEnvironment(Environment):
             timeout=timeout,
         )
 
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this lambda session (file name, size, presigned GET URL per file)."""
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            session_id=self.session_id,
+        )
+
 
 async def _fetch_presigned_download_url(
     http_session: aiohttp.ClientSession,
