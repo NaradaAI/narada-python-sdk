@@ -1084,8 +1084,6 @@ class BaseBrowserWindow(ABC):
             remote_dispatch_request_id = os.environ.get(
                 _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
             )
-            if remote_dispatch_request_id is not None:
-                body["requestId"] = remote_dispatch_request_id
             remote_dispatch_api_key_id = os.environ.get(
                 _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR
             )
@@ -1094,9 +1092,15 @@ class BaseBrowserWindow(ABC):
             parent_run_ids = self._current_parent_run_ids()
             if parent_run_ids:
                 body["parentRunIds"] = parent_run_ids
-            parent_request_id = self._current_parent_request_id()
-            if parent_request_id is not None:
-                body["requestId"] = parent_request_id
+            # The env-injected remote-dispatch request id identifies the request the
+            # external caller is polling (and that the frontend status reporter
+            # targets), so it must take precedence over the builtins parent request
+            # id, which for nested runs is a separate observability dispatch id.
+            request_id_for_action = (
+                remote_dispatch_request_id or self._current_parent_request_id()
+            )
+            if request_id_for_action is not None:
+                body["requestId"] = request_id_for_action
             if timeout is not None:
                 body["timeout"] = timeout
 

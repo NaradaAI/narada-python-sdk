@@ -995,6 +995,39 @@ async def test_extension_action_includes_remote_dispatch_context(
 
 
 @pytest.mark.asyncio
+async def test_extension_action_prefers_remote_dispatch_request_id_over_parent_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # In a nested remote-dispatch run, the env-injected request id (the request the
+    # external caller polls and the frontend status reporter targets) differs from the
+    # builtins parent request id (a separate observability dispatch id). The env value
+    # must win so input-required status is reported to the request the caller is polling.
+    monkeypatch.setenv(
+        "NARADA_REMOTE_DISPATCH_REQUEST_ID", "remote-dispatch-request-123"
+    )
+    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_API_KEY_ID", "api-key-123")
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "observability-dispatch-456", raising=False
+    )
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await window.close()
+
+    call = pyfetch.await_args
+    assert call is not None
+    payload = json.loads(call.kwargs["body"])
+    assert payload["requestId"] == "remote-dispatch-request-123"
+    assert payload["apiKeyId"] == "api-key-123"
+
+
+@pytest.mark.asyncio
 async def test_remote_browser_window_extension_action_keeps_parent_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
