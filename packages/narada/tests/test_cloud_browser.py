@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from narada.client import Narada
 from narada.config import BrowserConfig
-from narada.window import CloudBrowserWindow
+from narada.window import CloudBrowserWindow, RemoteBrowserWindow
 from narada_core.errors import NaradaTimeoutError
 
 
@@ -20,6 +20,9 @@ class _FakeResponse:
 
     async def __aexit__(self, *args):
         pass
+
+    def raise_for_status(self):
+        return None
 
     async def json(self):
         return self._payload
@@ -44,6 +47,29 @@ class _FakeClientSession:
         return _FakeResponse(self.payload)
 
 
+class _RemoteDispatchFakeClientSession:
+    def __init__(self, poll_payloads: list[dict]) -> None:
+        self.poll_payloads = poll_payloads
+        self.dispatched_body: dict | None = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    def post(self, url: str, **kwargs):
+        if url.endswith("/remote-dispatch"):
+            self.dispatched_body = kwargs["json"]
+            return _FakeResponse({"requestId": "req-123"})
+        raise AssertionError(f"Unexpected POST URL: {url}")
+
+    def get(self, url: str, **kwargs):
+        if url.endswith("/remote-dispatch/responses/req-123"):
+            return _FakeResponse(self.poll_payloads.pop(0))
+        raise AssertionError(f"Unexpected GET URL: {url}")
+
+
 def _build_client_with_cloud_page(page: AsyncMock) -> Narada:
     client = Narada(auth_headers={"x-api-key": "test-key"})
     browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
@@ -51,6 +77,97 @@ def _build_client_with_cloud_page(page: AsyncMock) -> Narada:
         chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser))
     )
     return client
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.window as window_module
+
+    fake_session = _RemoteDispatchFakeClientSession(
+        [
+            {
+                "status": "input-required",
+                "response": None,
+                "usage": None,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": None,
+                "activeInputRequest": {
+                    "inputId": "input-1",
+                    "action": {
+                        "name": "prompt_for_user_input",
+                        "step_id": "prompt-1",
+                        "variables": [
+                            {"name": "email", "type": "string", "required": True}
+                        ],
+                    },
+                },
+            },
+            {
+                "status": "input-required",
+                "response": None,
+                "usage": None,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": None,
+                "activeInputRequest": {
+                    "inputId": "input-1",
+                    "action": {
+                        "name": "prompt_for_user_input",
+                        "step_id": "prompt-1",
+                        "variables": [
+                            {"name": "email", "type": "string", "required": True}
+                        ],
+                    },
+                },
+            },
+            {
+                "status": "input-required",
+                "response": None,
+                "usage": None,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": None,
+                "activeInputRequest": {
+                    "inputId": "input-2",
+                    "action": {
+                        "name": "user_approval",
+                        "step_id": "approval-1",
+                        "prompt_message": "Approve?",
+                        "approve_label": "Approve",
+                        "reject_label": "Reject",
+                    },
+                },
+            },
+            {
+                "status": "success",
+                "response": {"text": "ok"},
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            },
+        ]
+    )
+    monkeypatch.setattr(window_module.aiohttp, "ClientSession", lambda: fake_session)
+    sleep = AsyncMock()
+    monkeypatch.setattr(window_module.asyncio, "sleep", sleep)
+
+    observed_input_ids: list[str] = []
+
+    async def on_input_required(active_input_request) -> None:
+        observed_input_ids.append(active_input_request.input_id)
+
+    window = RemoteBrowserWindow(browser_window_id="bw-1", api_key="test-key")
+
+    response = await window.dispatch_request(
+        prompt="Summarize",
+        timeout=5,
+        on_input_required=on_input_required,
+    )
+
+    assert response["status"] == "success"
+    assert observed_input_ids == ["input-1", "input-2"]
+    assert sleep.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -196,7 +313,9 @@ async def test_window_agent_exposes_workflow_trace_alias(
                     "output": {"type": "text", "content": "done"},
                     "workflowTrace": workflow_trace,
                 },
+                "completedAt": "2026-01-01T00:00:01Z",
                 "usage": {"actions": 0, "credits": 0},
+                "activeInputRequest": None,
             }
         ),
     )

@@ -5,6 +5,8 @@ from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, Typ
 
 from pydantic import BaseModel, Field
 
+from narada_core.actions.models import ActiveInputRequest
+
 
 class Agent(Enum):
     PRODUCTIVITY = 1
@@ -395,8 +397,19 @@ type APAActionTrace = list[ApaStepTrace]
 type ActionTrace = OperatorActionTrace | APAActionTrace
 
 
+class TextResponseOutput(TypedDict):
+    type: Literal["text"]
+    content: str
+
+
+class StructuredResponseOutput(TypedDict, Generic[_MaybeStructuredOutput]):
+    type: Literal["structured"]
+    content: _MaybeStructuredOutput
+
+
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
+    output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
     workflowTrace: NotRequired[dict[str, Any]]
@@ -409,11 +422,22 @@ class Usage(TypedDict):
 
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
-    status: Literal["success", "error"]
+    status: Literal["success", "error", "input-required"]
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
     usage: Usage
+    activeInputRequest: ActiveInputRequest | None
+
+
+class _RemoteDispatchPollResponse(TypedDict):
+    requestId: str
+    status: Literal["pending", "input-required", "success", "error"]
+    response: dict[str, Any] | None
+    createdAt: str
+    completedAt: str | None
+    usage: Usage | None
+    activeInputRequest: ActiveInputRequest | None
 
 
 class File(TypedDict):

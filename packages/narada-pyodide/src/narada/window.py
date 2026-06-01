@@ -1,5 +1,6 @@
 import asyncio
 import builtins
+import inspect
 import json
 import logging
 import os
@@ -11,6 +12,8 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
+    Awaitable,
+    Callable,
     Literal,
     Optional,
     TypeVar,
@@ -24,6 +27,7 @@ from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    ActiveInputRequest,
     AgenticMatchingSelectorsFinderRequest,
     AgenticMatchingSelectorsFinderResponse,
     AgenticMouseAction,
@@ -78,6 +82,7 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    _RemoteDispatchPollResponse,
 )
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
@@ -122,6 +127,36 @@ if TYPE_CHECKING:
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+# Optional remote-dispatch context. In frontend Pyodide runs, these are generated
+# by prepare-code.ts; extension-action calls forward them so the parent request
+# can report active input-required status.
+_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
+_REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+
+type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
+
+
+async def _notify_input_required_callback(
+    callback: InputRequiredCallback | None,
+    response: _RemoteDispatchPollResponse,
+    seen_input_ids: set[str],
+) -> None:
+    if callback is None or response.get("status") != "input-required":
+        return
+
+    active_input_request_data = response.get("activeInputRequest")
+    if active_input_request_data is None:
+        return
+
+    active_input_request = ActiveInputRequest.model_validate(active_input_request_data)
+    if active_input_request.input_id in seen_input_ids:
+        return
+
+    seen_input_ids.add(active_input_request.input_id)
+    callback_result = callback(active_input_request)
+    if inspect.isawaitable(callback_result):
+        await callback_result
 
 
 def _trace_agent_type(agent: Agent | str) -> str:
@@ -271,6 +306,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -295,6 +331,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -319,6 +356,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -343,6 +381,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -367,6 +406,7 @@ class BaseBrowserWindow(ABC):
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -445,6 +485,7 @@ class BaseBrowserWindow(ABC):
             body["reasoningMode"] = reasoning.value
 
         try:
+            seen_input_ids: set[str] = set()
             controller = AbortController.new()
             signal = controller.signal
 
@@ -484,59 +525,62 @@ class BaseBrowserWindow(ABC):
                     text = await fetch_response.text()
                     raise NaradaError(f"Failed to poll for response: {status} {text}")
 
-                response = await fetch_response.json()
+                response: _RemoteDispatchPollResponse = await fetch_response.json()
                 response["requestId"] = request_id
 
-                if response["status"] != "pending":
-                    response_content = response["response"]
-                    if response_content is not None:
-                        # Populate the `structuredOutput` field. This is a client-side field
-                        # that's not directly returned by the API.
-                        output_data = response_content.get("output")
-                        if (
-                            output_schema is not None
-                            and output_data is not None
-                            and output_data.get("type") == "structured"
-                        ):
-                            response_content["structuredOutput"] = (
-                                output_schema.model_validate(output_data["content"])
-                            )
-                        else:
-                            response_content["structuredOutput"] = None
+                if response["completedAt"] is None:
+                    await _notify_input_required_callback(
+                        on_input_required,
+                        response,
+                        seen_input_ids,
+                    )
+                    # Poll every 3 seconds.
+                    await asyncio.sleep(3)
+                    continue
 
-                    trace_status: _trace.SubAgentCallStatus = (
-                        "error" if response["status"] == "error" else "success"
-                    )
-                    trace_error: str | None = (
-                        response_content.get("text")
-                        if response["status"] == "error"
-                        and response_content is not None
-                        else None
-                    )
-                    trace_text: str | None = (
-                        response_content.get("text")
-                        if response["status"] == "success"
-                        and response_content is not None
-                        else None
-                    )
-                    _trace.emit_sub_agent_call(
-                        ts_start=trace_start_ms,
-                        agent_type=agent_type_str,
-                        prompt=prompt,
-                        status=trace_status,
-                        request_id=request_id,
-                        text=trace_text,
-                        error_message=trace_error,
-                        action_trace_raw=(
-                            response_content.get("actionTrace")
-                            if response_content is not None
-                            else None
-                        ),
-                    )
-                    return response
+                response_content = response["response"]
+                if response_content is not None:
+                    # Populate the `structuredOutput` field. This is a client-side field
+                    # that's not directly returned by the API.
+                    output_data = response_content.get("output")
+                    if (
+                        output_schema is not None
+                        and output_data is not None
+                        and output_data.get("type") == "structured"
+                    ):
+                        response_content["structuredOutput"] = (
+                            output_schema.model_validate(output_data["content"])
+                        )
+                    else:
+                        response_content["structuredOutput"] = None
 
-                # Poll every 3 seconds.
-                await asyncio.sleep(3)
+                trace_status = cast(_trace.SubAgentCallStatus, response["status"])
+                trace_error: str | None = (
+                    response_content.get("text")
+                    if response["status"] == "error" and response_content is not None
+                    else None
+                )
+                trace_text: str | None = (
+                    response_content.get("text")
+                    if response["status"] in ("success", "input-required")
+                    and response_content is not None
+                    else None
+                )
+                _trace.emit_sub_agent_call(
+                    ts_start=trace_start_ms,
+                    agent_type=agent_type_str,
+                    prompt=prompt,
+                    status=trace_status,
+                    request_id=request_id,
+                    text=trace_text,
+                    error_message=trace_error,
+                    action_trace_raw=(
+                        response_content.get("actionTrace")
+                        if response_content is not None
+                        else None
+                    ),
+                )
+                return cast(Response, response)
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
@@ -584,6 +628,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -601,6 +646,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -617,6 +663,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
@@ -634,6 +681,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -651,6 +699,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
@@ -670,6 +719,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         else:
@@ -696,6 +746,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         response_content = remote_dispatch_response["response"]
@@ -1030,12 +1081,26 @@ class BaseBrowserWindow(ABC):
                 "action": request.model_dump(),
                 "browserWindowId": self.browser_window_id,
             }
+            remote_dispatch_request_id = os.environ.get(
+                _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
+            )
+            remote_dispatch_api_key_id = os.environ.get(
+                _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR
+            )
+            if remote_dispatch_api_key_id is not None:
+                body["apiKeyId"] = remote_dispatch_api_key_id
             parent_run_ids = self._current_parent_run_ids()
             if parent_run_ids:
                 body["parentRunIds"] = parent_run_ids
-            parent_request_id = self._current_parent_request_id()
-            if parent_request_id is not None:
-                body["requestId"] = parent_request_id
+            # The env-injected remote-dispatch request id identifies the request the
+            # external caller is polling (and that the frontend status reporter
+            # targets), so it must take precedence over the builtins parent request
+            # id, which for nested runs is a separate observability dispatch id.
+            request_id_for_action = (
+                remote_dispatch_request_id or self._current_parent_request_id()
+            )
+            if request_id_for_action is not None:
+                body["requestId"] = request_id_for_action
             if timeout is not None:
                 body["timeout"] = timeout
 

@@ -1,4 +1,4 @@
-from narada_core.actions.models import CriticResult
+from narada_core.actions.models import ActiveInputRequest, CriticResult
 from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
@@ -23,6 +23,7 @@ from narada.window import (
 
 __all__ = [
     "__version__",
+    "ActiveInputRequest",
     "Agent",
     "CloudBrowserWindow",
     "CriticConfig",
