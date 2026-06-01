@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import Agent, Narada
+from narada import Agent, AgentKind, BrowserEnvironment
 from pydantic import BaseModel
 
 
@@ -14,16 +14,15 @@ class Papers(BaseModel):
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    core_agent = Agent(environment=env, kind=AgentKind.CORE_AGENT)
+    operator = Agent(environment=env)
 
-        await window.go_to_url(url="https://arxiv.org/list/cs.AI/recent")
+    try:
+        await core_agent.go_to_url(url="https://arxiv.org/list/cs.AI/recent")
 
-        resp = await window.agent(
+        resp = await core_agent.run(
             prompt="What are the top 2 AI papers based on the current page?",
-            agent=Agent.CORE_AGENT,
             output_schema=Papers,
         )
 
@@ -33,10 +32,12 @@ async def main() -> None:
         print("Top 2 AI papers:", papers.model_dump_json(indent=2))
 
         for paper in papers.papers:
-            await window.go_to_url(url=paper.url)
-            await window.agent(prompt="Click 'View PDF' then download the PDF")
+            await operator.go_to_url(url=paper.url)
+            await operator.run(prompt="Click 'View PDF' then download the PDF")
 
-        await window.print_message(message="All done!")
+        await operator.print_message(message="All done!")
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

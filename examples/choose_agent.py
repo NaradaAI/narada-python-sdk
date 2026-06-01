@@ -1,18 +1,19 @@
 import asyncio
 
-from narada import Agent, Narada
+from narada import Agent, AgentKind, BrowserEnvironment
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env, kind=AgentKind.CORE_AGENT)
 
+    try:
         # Choose a specific agent to handle the task. By default, the Operator agent is used.
-        response = await window.agent(prompt="Tell me a joke.", agent=Agent.CORE_AGENT)
+        response = await agent.run(prompt="Tell me a joke.")
 
         print("Response:", response.model_dump_json(indent=2))
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

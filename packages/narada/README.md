@@ -33,28 +33,31 @@ After installation and login, create a Narada API Key (see [this link](https://d
 export NARADA_API_KEY=<YOUR KEY>
 ```
 
-That's it. Now you can run the following code to spin up Narada to go and download a file for you from arxiv:
+That's it. Now you can run the following code to create a browser environment and ask an
+agent to download a file for you from arxiv:
 
 ```python
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    # Create the browser environment. It initializes lazily on the first action.
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
-        # Run a task in this browser window.
-        response = await window.agent(
+    try:
+        # Run a task in this browser environment.
+        response = await agent.run(
             prompt='Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF. Then download the PDF of the paper.',
             # Optionally generate a GIF of the agent's actions.
             generate_gif=True,
         )
 
         print("Response:", response.model_dump_json(indent=2))
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":
@@ -73,10 +76,15 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 ## Migration note
 
-For releases `0.1.38` and later:
+This version introduces a non-backward-compatible, agent-centered API:
 
-- `variables` has been renamed to `secret_variables`.
-- Use `input_variables` to pass structured values (objects/arrays) into custom agents.
+- Create an execution target with an environment, such as `BrowserEnvironment`,
+  `CloudBrowserEnvironment`, `RemoteBrowserEnvironment`, or `LambdaEnvironment`.
+- Create an `Agent(environment=env, kind=...)` and call `await agent.run(prompt=...)`.
+- Browser actions such as `go_to_url`, `agentic_selector`, and sheet operations are now methods on
+  `Agent`.
+- Environments keep lifecycle/bookkeeping APIs such as `start()`, `close()`,
+  `browser_window_id`, and `cloud_browser_session_id`.
 
 ## Features
 
