@@ -795,11 +795,15 @@ class BaseBrowserWindow(ABC):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        pre_cond: str | None = None,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
+
+        If ``pre_cond`` is provided, it is checked only after selector failure and before the
+        Operator fallback runs. A failed precondition raises ``NaradaError`` and prevents fallback.
 
         Returns AgenticSelectorResponse with the value for 'get_text' and 'get_property' actions,
         otherwise returns None.
@@ -815,6 +819,7 @@ class BaseBrowserWindow(ABC):
                 action=action,
                 selectors=selectors,
                 fallback_operator_query=fallback_operator_query,
+                pre_cond=pre_cond,
             ),
             response_model,
             timeout=timeout,

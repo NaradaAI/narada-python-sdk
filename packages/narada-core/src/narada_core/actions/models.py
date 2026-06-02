@@ -187,15 +187,19 @@ class AgenticSelectorRequest(BaseModel):
     action: AgenticSelectorAction
     selectors: AgenticSelectors
     fallback_operator_query: str
+    pre_cond: str | None = None
 
     @override
     def model_dump(self) -> dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "action": _dump_agentic_selector_action(self.action),
             "selectors": _dump_agentic_selectors(self.selectors),
             "fallback_operator_query": self.fallback_operator_query,
         }
+        if self.pre_cond is not None:
+            result["pre_cond"] = self.pre_cond
+        return result
 
 
 class AgenticSelectorResponse(BaseModel):
