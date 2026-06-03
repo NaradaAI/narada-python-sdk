@@ -111,11 +111,29 @@ def _parent_run_ids() -> list[str]:
 
 
 def _parent_request_id() -> str | None:
+    """Return the current frontend/Pyodide execution request id.
+
+    This value is used by extension-action calls so browser-side work can be
+    associated with the active Python run. It is intentionally broader than a
+    remote-dispatch parent request id.
+    """
     parent_request_id = getattr(builtins, "_narada_request_id", None)
     if isinstance(parent_request_id, str):
         return parent_request_id
     parent_request_id = globals().get("_narada_request_id")
     return parent_request_id if isinstance(parent_request_id, str) else None
+
+
+def _remote_dispatch_parent_request_id() -> str | None:
+    """Return the remote-dispatch request id that owns this Python execution.
+
+    `/remote-dispatch.parentRequestId` is validated against the remote-dispatch
+    table. A local UI-launched Python run also has `_narada_request_id`, but
+    that id is not a remote-dispatch row and must not be forwarded as
+    `parentRequestId`.
+    """
+    request_id = os.environ.get(_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR)
+    return request_id if request_id else None
 
 
 if TYPE_CHECKING:
@@ -283,7 +301,7 @@ class BaseBrowserWindow(ABC):
 
     def _current_parent_request_id(self) -> str | None:
         """Returns the remote-dispatch request that owns the current Python execution."""
-        return _parent_request_id()
+        return _remote_dispatch_parent_request_id()
 
     async def _get_auth_headers(self) -> dict[str, str]:
         return await _build_auth_headers(
@@ -1162,9 +1180,7 @@ class BaseBrowserWindow(ABC):
             # external caller is polling (and that the frontend status reporter
             # targets), so it must take precedence over the builtins parent request
             # id, which for nested runs is a separate observability dispatch id.
-            request_id_for_action = (
-                remote_dispatch_request_id or self._current_parent_request_id()
-            )
+            request_id_for_action = remote_dispatch_request_id or _parent_request_id()
             if request_id_for_action is not None:
                 body["requestId"] = request_id_for_action
             if timeout is not None:
