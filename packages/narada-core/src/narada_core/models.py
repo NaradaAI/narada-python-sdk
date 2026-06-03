@@ -316,6 +316,7 @@ class PythonSubAgentCallEvent(TypedDict):
     text: NotRequired[str]
     error_message: NotRequired[str]
     action_trace: NotRequired[ActionTrace]
+    execution_trace_context: NotRequired[dict[str, object]]
 
 
 class PythonExtensionActionEvent(TypedDict):
@@ -399,6 +400,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
+    executionTraceContext: NotRequired[dict[str, object]]
 
 
 class Usage(TypedDict):

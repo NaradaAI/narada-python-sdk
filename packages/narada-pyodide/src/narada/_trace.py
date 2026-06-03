@@ -90,6 +90,7 @@ def emit_sub_agent_call(
     text: str | None = None,
     error_message: str | None = None,
     action_trace_raw: list[dict[str, Any]] | None = None,
+    execution_trace_context: dict[str, Any] | None = None,
 ) -> None:
     event: dict[str, Any] = {
         "kind": "subAgentCall",
@@ -107,6 +108,8 @@ def emit_sub_agent_call(
         event["error_message"] = error_message
     if action_trace_raw is not None:
         event["action_trace"] = action_trace_raw
+    if execution_trace_context is not None:
+        event["execution_trace_context"] = execution_trace_context
     emit_trace_event(event)
 
 

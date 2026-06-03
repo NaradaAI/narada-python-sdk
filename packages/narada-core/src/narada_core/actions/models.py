@@ -59,6 +59,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
     critic_result: CriticResult | None = None
+    execution_trace_context: dict[str, Any] | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):

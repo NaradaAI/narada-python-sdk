@@ -151,6 +151,21 @@ async def _build_auth_headers(
     return headers
 
 
+def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
+    raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring malformed NARADA_EXECUTION_TRACE_CONTEXT")
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Ignoring non-object NARADA_EXECUTION_TRACE_CONTEXT")
+    return None
+
+
 @dataclass
 class SessionDownloadItem:
     """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
@@ -384,6 +399,10 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
+        else:
+            execution_trace_context = _load_execution_trace_context_from_env()
+            if execution_trace_context is not None:
+                body["executionTraceContext"] = execution_trace_context
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
@@ -507,6 +526,11 @@ class BaseBrowserWindow(ABC):
                         error_message=trace_error,
                         action_trace_raw=(
                             response_content.get("actionTrace")
+                            if response_content is not None
+                            else None
+                        ),
+                        execution_trace_context=(
+                            response_content.get("executionTraceContext")
                             if response_content is not None
                             else None
                         ),
@@ -707,6 +731,7 @@ class BaseBrowserWindow(ABC):
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
             critic_result=critic_result,
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def agentic_selector(

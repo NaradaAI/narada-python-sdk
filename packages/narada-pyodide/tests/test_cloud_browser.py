@@ -250,6 +250,18 @@ async def test_cloud_browser_window_close_stops_cloud_session(
 async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    inherited_trace_context = {
+        "type": "executionTraceInheritanceContext",
+        "schemaVersion": 1,
+        "traceId": "trace-parent",
+        "parentSegmentId": "segment-local",
+        "parentScopeId": "scope-python",
+        "segmentKind": "remote-dispatch",
+    }
+    monkeypatch.setenv(
+        "NARADA_EXECUTION_TRACE_CONTEXT",
+        json.dumps(inherited_trace_context),
+    )
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "req-123"}),
@@ -275,6 +287,7 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
+    assert payload["executionTraceContext"] == inherited_trace_context
 
 
 @pytest.mark.asyncio
@@ -327,6 +340,16 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
                     "response": {
                         "text": "TRACE_CORE_AGENT_DONE",
                         "actionTrace": [],
+                        "executionTraceContext": {
+                            "type": "executionTraceContext",
+                            "schemaVersion": 1,
+                            "label": "cloud child",
+                            "traceId": "trace-parent",
+                            "segmentId": "segment-cloud",
+                            "executionTraceS3Key": "s3://trace/segment-cloud/index.json",
+                            "executionTraceSegmentS3Key": "s3://trace/segment-cloud/index.json",
+                            "status": "completed",
+                        },
                     },
                 }
             ),
@@ -359,6 +382,8 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
     parsed_event = PythonSubAgentCallEvent.model_validate(event)
     assert parsed_event.agent_type == "coreAgent"
     assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
+    assert parsed_event.execution_trace_context is not None
+    assert parsed_event.execution_trace_context["segmentId"] == "segment-cloud"
 
 
 @pytest.mark.asyncio
@@ -544,6 +569,17 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
 ) -> None:
     monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
     monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
+    monkeypatch.setenv(
+        "NARADA_EXECUTION_TRACE_CONTEXT",
+        json.dumps(
+            {
+                "type": "executionTraceInheritanceContext",
+                "schemaVersion": 1,
+                "traceId": "trace-parent",
+                "parentSegmentId": "segment-local",
+            }
+        ),
+    )
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "req-1"}),
@@ -569,3 +605,5 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
+    assert "executionTraceContext" not in first_post
+    assert "executionTraceContext" not in second_post

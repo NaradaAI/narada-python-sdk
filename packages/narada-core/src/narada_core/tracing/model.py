@@ -264,6 +264,7 @@ class PythonSubAgentCallEvent(BaseModel):
     text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
+    execution_trace_context: dict[str, Any] | None = None
 
     @field_validator("agent_type", mode="before")
     @classmethod
