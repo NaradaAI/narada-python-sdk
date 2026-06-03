@@ -362,10 +362,60 @@ class Narada:
             auth_headers=self._auth_headers,
         )
 
+        await self._ensure_cloud_browser_side_panel_page(
+            browser=browser,
+            config=config,
+            browser_window_id=browser_window_id,
+            cdp_websocket_url=cdp_websocket_url,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+
         if config.interactive:
             self._print_success_message(browser_window_id)
 
         return cloud_window
+
+    async def _ensure_cloud_browser_side_panel_page(
+        self,
+        *,
+        browser: Browser,
+        config: BrowserConfig,
+        browser_window_id: str,
+        cdp_websocket_url: str,
+        cdp_auth_headers: dict[str, str],
+    ) -> None:
+        """Ensure the side-panel app that processes remote-dispatch requests is alive.
+
+        The initialize page opens the extension side panel, but CDP sessions do not always see the
+        side-panel page immediately. Local initialization already reconnects before trusting the
+        side-panel page; cloud initialization needs the same readiness invariant because backend
+        remote-dispatch writes target the returned browser window ID.
+        """
+        assert self._playwright is not None
+
+        side_panel_url = create_side_panel_url(config, browser_window_id)
+        max_attempts = 5
+        current_browser = browser
+
+        for attempt in range(max_attempts):
+            context = current_browser.contexts[0]
+            side_panel_page = next(
+                (page for page in context.pages if page.url == side_panel_url),
+                None,
+            )
+            if side_panel_page is not None:
+                return
+
+            if attempt == max_attempts - 1:
+                break
+
+            await current_browser.close()
+            await asyncio.sleep(1)
+            current_browser = await self._playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=cdp_auth_headers
+            )
+
+        raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
 
     async def initialize_in_existing_browser_window(
         self, config: BrowserConfig | None = None

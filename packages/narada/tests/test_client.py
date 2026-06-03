@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from narada import window as window_module
 from narada.client import Narada
@@ -10,8 +12,10 @@ from narada.window import RemoteBrowserWindow
 class _FakePage:
     def __init__(self) -> None:
         self.goto_calls: list[dict[str, object]] = []
+        self.url = "about:blank"
 
     async def goto(self, url: str, **kwargs: object) -> None:
+        self.url = url
         self.goto_calls.append({"url": url, **kwargs})
 
 
@@ -23,16 +27,20 @@ class _FakeContext:
 class _FakeBrowser:
     def __init__(self, page: _FakePage) -> None:
         self.contexts = [_FakeContext(page)]
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
 
 
 class _FakeChromium:
     def __init__(self, page: _FakePage) -> None:
-        self.page = page
+        self.browser = _FakeBrowser(page)
 
     async def connect_over_cdp(
         self, cdp_websocket_url: str, *, headers: dict[str, str]
     ) -> _FakeBrowser:
-        return _FakeBrowser(self.page)
+        return self.browser
 
 
 class _FakePlaywright:
@@ -120,6 +128,10 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     monkeypatch.setattr(
         narada, "_wait_for_browser_window_id", wait_for_browser_window_id
     )
+    ensure_side_panel_page = AsyncMock()
+    monkeypatch.setattr(
+        narada, "_ensure_cloud_browser_side_panel_page", ensure_side_panel_page
+    )
 
     window = await narada._initialize_cloud_browser_window(
         config=BrowserConfig(interactive=False),
@@ -130,6 +142,7 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     )
 
     assert window.browser_window_id == "window-123"
+    ensure_side_panel_page.assert_awaited_once()
     assert page.goto_calls == [
         {
             "url": "https://example.test/initialize",

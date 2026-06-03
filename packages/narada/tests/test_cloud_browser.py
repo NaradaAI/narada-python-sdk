@@ -1,10 +1,15 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
+import narada.client as client_module
 import pytest
 from narada.client import Narada
 from narada.config import BrowserConfig
-from narada.window import CloudBrowserWindow, RemoteBrowserWindow
+from narada.window import (
+    CloudBrowserWindow,
+    RemoteBrowserWindow,
+    create_side_panel_url,
+)
 from narada_core.errors import NaradaTimeoutError
 
 
@@ -70,9 +75,25 @@ class _RemoteDispatchFakeClientSession:
         raise AssertionError(f"Unexpected GET URL: {url}")
 
 
+def _fake_browser_with_pages(pages: list[object]) -> SimpleNamespace:
+    return SimpleNamespace(
+        contexts=[SimpleNamespace(pages=pages)],
+        close=AsyncMock(),
+    )
+
+
+def _fake_side_panel_page(
+    browser_window_id: str = "browser-window-123",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        url=create_side_panel_url(BrowserConfig(interactive=False), browser_window_id)
+    )
+
+
 def _build_client_with_cloud_page(page: AsyncMock) -> Narada:
     client = Narada(auth_headers={"x-api-key": "test-key"})
-    browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+    page.url = "about:blank"
+    browser = _fake_browser_with_pages([page, _fake_side_panel_page()])
     client._playwright = SimpleNamespace(
         chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser))
     )
@@ -248,6 +269,7 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_login_n
     )
     assert window.browser_window_id == "browser-window-123"
     assert window.cloud_browser_session_id == "session-123"
+    client._playwright.chromium.connect_over_cdp.return_value.close.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -289,6 +311,83 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
     ]
     assert wait_for_browser_window_id.await_count == 2
     assert window.browser_window_id == "browser-window-123"
+    client._playwright.chromium.connect_over_cdp.return_value.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_side_panel_readiness_uses_visible_page_without_reconnect() -> None:
+    client = Narada(auth_headers={"x-api-key": "test-key"})
+    browser = _fake_browser_with_pages([_fake_side_panel_page()])
+    client._playwright = SimpleNamespace(
+        chromium=SimpleNamespace(connect_over_cdp=AsyncMock())
+    )
+
+    await client._ensure_cloud_browser_side_panel_page(
+        browser=browser,
+        config=BrowserConfig(interactive=False),
+        browser_window_id="browser-window-123",
+        cdp_websocket_url="wss://agentcore.example.test/session-123",
+        cdp_auth_headers={"Authorization": "signed-cdp"},
+    )
+
+    browser.close.assert_not_awaited()
+    client._playwright.chromium.connect_over_cdp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_side_panel_readiness_can_appear_after_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Narada(auth_headers={"x-api-key": "test-key"})
+    first_browser = _fake_browser_with_pages([])
+    second_browser = _fake_browser_with_pages([_fake_side_panel_page()])
+    client._playwright = SimpleNamespace(
+        chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=second_browser))
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
+
+    await client._ensure_cloud_browser_side_panel_page(
+        browser=first_browser,
+        config=BrowserConfig(interactive=False),
+        browser_window_id="browser-window-123",
+        cdp_websocket_url="wss://agentcore.example.test/session-123",
+        cdp_auth_headers={"Authorization": "signed-cdp"},
+    )
+
+    first_browser.close.assert_awaited_once()
+    sleep.assert_awaited_once_with(1)
+    client._playwright.chromium.connect_over_cdp.assert_awaited_once_with(
+        "wss://agentcore.example.test/session-123",
+        headers={"Authorization": "signed-cdp"},
+    )
+    second_browser.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_side_panel_readiness_times_out_when_page_never_appears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Narada(auth_headers={"x-api-key": "test-key"})
+    first_browser = _fake_browser_with_pages([])
+    reconnect_browser = _fake_browser_with_pages([])
+    client._playwright = SimpleNamespace(
+        chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=reconnect_browser))
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
+
+    with pytest.raises(NaradaTimeoutError):
+        await client._ensure_cloud_browser_side_panel_page(
+            browser=first_browser,
+            config=BrowserConfig(interactive=False),
+            browser_window_id="browser-window-123",
+            cdp_websocket_url="wss://agentcore.example.test/session-123",
+            cdp_auth_headers={"Authorization": "signed-cdp"},
+        )
+
+    assert sleep.await_count == 4
+    assert client._playwright.chromium.connect_over_cdp.await_count == 4
 
 
 @pytest.mark.asyncio
