@@ -40,6 +40,8 @@ from narada_core.actions.models import (
     AgentUsage,
     CloseWindowRequest,
     CriticResult,
+    ExecuteJavascriptOnPageRequest,
+    ExecuteJavascriptOnPageResponse,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -901,6 +903,17 @@ class BaseBrowserWindow(ABC):
             timeout=timeout,
         )
         return result.url
+
+    async def execute_javascript_on_page(
+        self, *, code: str, timeout: int | None = None
+    ) -> Any:
+        """Executes JavaScript on the current active page and returns its JSON result."""
+        result = await self._run_extension_action(
+            ExecuteJavascriptOnPageRequest(code=code),
+            ExecuteJavascriptOnPageResponse,
+            timeout=timeout,
+        )
+        return result.result
 
     async def print_message(self, *, message: str, timeout: int | None = None) -> None:
         """Prints a message in the Narada extension side panel chat."""

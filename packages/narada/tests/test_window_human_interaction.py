@@ -96,3 +96,29 @@ async def test_user_approval_respects_explicit_timeout(
 
     assert approved is True
     assert fake_session.post_bodies[0]["timeout"] == 600
+
+
+@pytest.mark.asyncio
+async def test_execute_javascript_on_page_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": '{"result":{"title":"Example Domain","count":3}}',
+            }
+        ]
+    )
+    monkeypatch.setattr("narada.window.aiohttp.ClientSession", lambda: fake_session)
+    window = RemoteBrowserWindow(browser_window_id="bw-1", api_key="test-key")
+
+    result = await window.execute_javascript_on_page(
+        code="(() => ({ title: document.title, count: 3 }))()",
+    )
+
+    assert result == {"title": "Example Domain", "count": 3}
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "execute_javascript_on_page",
+        "code": "(() => ({ title: document.title, count: 3 }))()",
+    }

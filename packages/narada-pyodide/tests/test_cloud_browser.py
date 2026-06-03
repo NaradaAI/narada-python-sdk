@@ -971,6 +971,38 @@ async def test_remote_browser_window_without_cloud_session_keeps_extension_actio
 
 
 @pytest.mark.asyncio
+async def test_remote_browser_window_execute_javascript_on_page_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": '{"result":{"title":"Example Domain","count":3}}',
+            }
+        )
+    )
+    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = window_module.RemoteBrowserWindow(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    result = await window.execute_javascript_on_page(
+        code="(() => ({ title: document.title, count: 3 }))()",
+    )
+
+    assert result == {"title": "Example Domain", "count": 3}
+    call = pyfetch.await_args
+    assert call is not None
+    payload = json.loads(call.kwargs["body"])
+    assert payload["action"] == {
+        "name": "execute_javascript_on_page",
+        "code": "(() => ({ title: document.title, count: 3 }))()",
+    }
+
+
+@pytest.mark.asyncio
 async def test_extension_action_includes_remote_dispatch_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

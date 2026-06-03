@@ -403,6 +403,15 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class ExecuteJavascriptOnPageRequest(BaseModel):
+    name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
+    code: str
+
+
+class ExecuteJavascriptOnPageResponse(BaseModel):
+    result: Any
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -460,6 +469,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
     | GetUrlRequest
+    | ExecuteJavascriptOnPageRequest
     | PromptForUserInputRequest
     | UserApprovalRequest
 )
