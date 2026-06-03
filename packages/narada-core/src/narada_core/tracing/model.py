@@ -189,6 +189,7 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    subWorkflow: dict[str, Any] | None = None
     children: ActionTrace | None = None
 
 
@@ -259,7 +260,7 @@ class PythonSubAgentCallEvent(BaseModel):
     ts_end: int
     agent_type: str
     prompt: str
-    status: Literal["success", "error", "timeout"]
+    status: Literal["success", "error", "timeout", "input-required"]
     request_id: str | None = None
     text: str | None = None
     error_message: str | None = None
@@ -303,6 +304,11 @@ class PythonExtensionActionEvent(BaseModel):
         return self
 
 
+class PythonSubWorkflowEvent(BaseModel):
+    kind: Literal["subWorkflow"] = "subWorkflow"
+    workflowTrace: dict[str, Any]
+
+
 class PythonSideEffectEvent(BaseModel):
     kind: Literal["sideEffect"] = "sideEffect"
     ts: int
@@ -315,6 +321,7 @@ PythonTraceEvent = Annotated[
     | PythonStderrEvent
     | PythonSubAgentCallEvent
     | PythonExtensionActionEvent
+    | PythonSubWorkflowEvent
     | PythonSideEffectEvent,
     Field(discriminator="kind"),
 ]

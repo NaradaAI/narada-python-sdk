@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -83,14 +84,24 @@ class Narada:
             user_id=self._user_id,
             env=self._env,
         )
-        request_body = {
+        request_body: dict[str, Any] = {
             "session_name": session_name,
             "session_timeout": session_timeout,
             "require_extension": require_extension,
         }
+        initiator_remote_dispatch_request_id = os.environ.get(
+            "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", ""
+        ).strip()
+        if not initiator_remote_dispatch_request_id:
+            raise ValueError("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID is required")
+        request_body["initiator_remote_dispatch_request_id"] = (
+            initiator_remote_dispatch_request_id
+        )
 
         response = None
-        for _ in range(3):
+        max_attempts = 3
+        retry_backoff_seconds = (2.0, 4.0, 0.0)  # no wait after last attempt
+        for attempt in range(max_attempts):
             # Due to unknown network issues, sometimes create-and-initialize-cloud-browser-session API call fails.
             try:
                 response = await pyfetch(
@@ -102,6 +113,7 @@ class Narada:
                 if response.ok:
                     break
             except Exception:
+                await asyncio.sleep(retry_backoff_seconds[attempt])
                 continue
 
         if response is None or not response.ok:
@@ -110,7 +122,7 @@ class Narada:
                 await response.text() if response is not None else "unknown error"
             )
             raise RuntimeError(
-                "Failed to create and initialize cloud browser session after 3 attempts: "
+                "Failed to create and initialize cloud browser session after 3 attempts with backoff: "
                 f"{resp_status}: {resp_text}\n"
                 f"Endpoint URL: {endpoint_url}"
             )

@@ -75,7 +75,7 @@ def dump_model(model: BaseModel) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-SubAgentCallStatus = Literal["success", "error", "timeout"]
+SubAgentCallStatus = Literal["success", "error", "timeout", "input-required"]
 ExtensionActionStatus = Literal["success", "error", "timeout"]
 SideEffectType = Literal["download_file", "render_html"]
 
@@ -136,6 +136,15 @@ def emit_extension_action(
     if error_message is not None:
         event["error_message"] = error_message
     emit_trace_event(event)
+
+
+def emit_sub_workflow(*, workflow_trace: dict[str, Any]) -> None:
+    emit_trace_event(
+        {
+            "kind": "subWorkflow",
+            "workflowTrace": workflow_trace,
+        }
+    )
 
 
 def emit_side_effect(*, effect_type: SideEffectType, description: str) -> None:

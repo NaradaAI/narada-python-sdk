@@ -1,4 +1,6 @@
 import asyncio
+import builtins
+import inspect
 import json
 import logging
 import os
@@ -11,6 +13,8 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
+    Awaitable,
+    Callable,
     Literal,
     Optional,
     TypeVar,
@@ -23,6 +27,10 @@ from urllib.parse import urlencode
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
+    DEFAULT_HITL_TIMEOUT_SECONDS,
+    ActiveInputRequest,
+    AgenticMatchingSelectorsFinderRequest,
+    AgenticMatchingSelectorsFinderResponse,
     AgenticMouseAction,
     AgenticMouseActionRequest,
     AgenticSelectorAction,
@@ -75,6 +83,7 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    _RemoteDispatchPollResponse,
 )
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
@@ -82,6 +91,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from .retry import pyfetch_with_retries
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -100,15 +110,73 @@ def _parent_run_ids() -> list[str]:
     )
 
 
+def _parent_request_id() -> str | None:
+    parent_request_id = getattr(builtins, "_narada_request_id", None)
+    if isinstance(parent_request_id, str):
+        return parent_request_id
+    parent_request_id = globals().get("_narada_request_id")
+    return parent_request_id if isinstance(parent_request_id, str) else None
+
+
 if TYPE_CHECKING:
     # Magic function injected by the JavaScript harness to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
 
+    _narada_request_id: str | None
+
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
-type _RemoteDispatchExecutionMode = Literal["client", "cloud_browser", "cloud_browserless"]
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
+
+# Optional remote-dispatch context. In frontend Pyodide runs, these are generated
+# by prepare-code.ts; extension-action calls forward them so the parent request
+# can report active input-required status.
+_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
+_REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+
+type _RemoteDispatchExecutionMode = Literal[
+    "client", "cloud_browser", "cloud_browserless"
+]
+
+
+def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
+    raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring malformed NARADA_EXECUTION_TRACE_CONTEXT")
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Ignoring non-object NARADA_EXECUTION_TRACE_CONTEXT")
+    return None
+
+type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
+
+
+async def _notify_input_required_callback(
+    callback: InputRequiredCallback | None,
+    response: _RemoteDispatchPollResponse,
+    seen_input_ids: set[str],
+) -> None:
+    if callback is None or response.get("status") != "input-required":
+        return
+
+    active_input_request_data = response.get("activeInputRequest")
+    if active_input_request_data is None:
+        return
+
+    active_input_request = ActiveInputRequest.model_validate(active_input_request_data)
+    if active_input_request.input_id in seen_input_ids:
+        return
+
+    seen_input_ids.add(active_input_request.input_id)
+    callback_result = callback(active_input_request)
+    if inspect.isawaitable(callback_result):
+        await callback_result
 
 
 def _trace_agent_type(agent: Agent | str) -> str:
@@ -150,21 +218,6 @@ async def _build_auth_headers(
     headers["X-Narada-User-ID"] = user_id
     headers["X-Narada-Env"] = env
     return headers
-
-
-def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
-    raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        logger.warning("Ignoring malformed NARADA_EXECUTION_TRACE_CONTEXT")
-        return None
-    if isinstance(parsed, dict):
-        return parsed
-    logger.warning("Ignoring non-object NARADA_EXECUTION_TRACE_CONTEXT")
-    return None
 
 
 @dataclass
@@ -228,6 +281,10 @@ class BaseBrowserWindow(ABC):
         """
         return None
 
+    def _current_parent_request_id(self) -> str | None:
+        """Returns the remote-dispatch request that owns the current Python execution."""
+        return _parent_request_id()
+
     async def _get_auth_headers(self) -> dict[str, str]:
         return await _build_auth_headers(
             api_key=self._api_key,
@@ -274,6 +331,7 @@ class BaseBrowserWindow(ABC):
         cloud_browser_app_origin_override: str | None = None,
         cloud_browser_extension_s3_bucket: str | None = None,
         cloud_browser_extension_s3_key: str | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -303,6 +361,7 @@ class BaseBrowserWindow(ABC):
         cloud_browser_app_origin_override: str | None = None,
         cloud_browser_extension_s3_bucket: str | None = None,
         cloud_browser_extension_s3_key: str | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -332,6 +391,7 @@ class BaseBrowserWindow(ABC):
         cloud_browser_app_origin_override: str | None = None,
         cloud_browser_extension_s3_bucket: str | None = None,
         cloud_browser_extension_s3_key: str | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -361,6 +421,7 @@ class BaseBrowserWindow(ABC):
         cloud_browser_app_origin_override: str | None = None,
         cloud_browser_extension_s3_bucket: str | None = None,
         cloud_browser_extension_s3_key: str | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -390,6 +451,7 @@ class BaseBrowserWindow(ABC):
         cloud_browser_app_origin_override: str | None = None,
         cloud_browser_extension_s3_bucket: str | None = None,
         cloud_browser_extension_s3_key: str | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -435,6 +497,9 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
+        parent_request_id = self._current_parent_request_id()
+        if parent_request_id is not None:
+            body["parentRequestId"] = parent_request_id
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
@@ -478,6 +543,7 @@ class BaseBrowserWindow(ABC):
             body["reasoningMode"] = reasoning.value
 
         try:
+            seen_input_ids: set[str] = set()
             controller = AbortController.new()
             signal = controller.signal
 
@@ -505,10 +571,11 @@ class BaseBrowserWindow(ABC):
                     create_once_callable(abort_controller.abort),
                     (deadline - now) * 1000,
                 )
-                fetch_response = await pyfetch(
+                fetch_response = await pyfetch_with_retries(
                     f"{self._base_url}/remote-dispatch/responses/{request_id}",
                     headers=headers,
                     signal=signal,
+                    retry_deadline=deadline,
                 )
 
                 if not fetch_response.ok:
@@ -516,64 +583,67 @@ class BaseBrowserWindow(ABC):
                     text = await fetch_response.text()
                     raise NaradaError(f"Failed to poll for response: {status} {text}")
 
-                response = await fetch_response.json()
+                response: _RemoteDispatchPollResponse = await fetch_response.json()
                 response["requestId"] = request_id
 
-                if response["status"] != "pending":
-                    response_content = response["response"]
-                    if response_content is not None:
-                        # Populate the `structuredOutput` field. This is a client-side field
-                        # that's not directly returned by the API.
-                        output_data = response_content.get("output")
-                        if (
-                            output_schema is not None
-                            and output_data is not None
-                            and output_data.get("type") == "structured"
-                        ):
-                            response_content["structuredOutput"] = (
-                                output_schema.model_validate(output_data["content"])
-                            )
-                        else:
-                            response_content["structuredOutput"] = None
+                if response["completedAt"] is None:
+                    await _notify_input_required_callback(
+                        on_input_required,
+                        response,
+                        seen_input_ids,
+                    )
+                    # Poll every 3 seconds.
+                    await asyncio.sleep(3)
+                    continue
 
-                    trace_status: _trace.SubAgentCallStatus = (
-                        "error" if response["status"] == "error" else "success"
-                    )
-                    trace_error: str | None = (
-                        response_content.get("text")
-                        if response["status"] == "error"
-                        and response_content is not None
-                        else None
-                    )
-                    trace_text: str | None = (
-                        response_content.get("text")
-                        if response["status"] == "success"
-                        and response_content is not None
-                        else None
-                    )
-                    _trace.emit_sub_agent_call(
-                        ts_start=trace_start_ms,
-                        agent_type=agent_type_str,
-                        prompt=prompt,
-                        status=trace_status,
-                        request_id=request_id,
-                        text=trace_text,
-                        error_message=trace_error,
-                        action_trace_raw=(
-                            response_content.get("actionTrace")
-                            if response_content is not None
-                            else None
-                        ),
-                        execution_trace_context=(
-                            response_content.get("executionTraceContext")
-                            if response_content is not None
-                            else None
-                        ),
-                    )
-                    return response
+                response_content = response["response"]
+                if response_content is not None:
+                    # Populate the `structuredOutput` field. This is a client-side field
+                    # that's not directly returned by the API.
+                    output_data = response_content.get("output")
+                    if (
+                        output_schema is not None
+                        and output_data is not None
+                        and output_data.get("type") == "structured"
+                    ):
+                        response_content["structuredOutput"] = (
+                            output_schema.model_validate(output_data["content"])
+                        )
+                    else:
+                        response_content["structuredOutput"] = None
 
-                # Poll every 3 seconds.
-                await asyncio.sleep(3)
+                trace_status = cast(_trace.SubAgentCallStatus, response["status"])
+                trace_error: str | None = (
+                    response_content.get("text")
+                    if response["status"] == "error" and response_content is not None
+                    else None
+                )
+                trace_text: str | None = (
+                    response_content.get("text")
+                    if response["status"] in ("success", "input-required")
+                    and response_content is not None
+                    else None
+                )
+                _trace.emit_sub_agent_call(
+                    ts_start=trace_start_ms,
+                    agent_type=agent_type_str,
+                    prompt=prompt,
+                    status=trace_status,
+                    request_id=request_id,
+                    text=trace_text,
+                    error_message=trace_error,
+                    action_trace_raw=(
+                        response_content.get("actionTrace")
+                        if response_content is not None
+                        else None
+                    ),
+                    execution_trace_context=(
+                        response_content.get("executionTraceContext")
+                        if response_content is not None
+                        else None
+                    ),
+                )
+                return cast(Response, response)
             else:
                 raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
@@ -621,6 +691,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -638,6 +709,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -654,6 +726,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
@@ -671,6 +744,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -688,6 +762,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: dict[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
@@ -707,6 +782,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         else:
@@ -733,6 +809,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                on_input_required=on_input_required,
                 timeout=timeout,
             )
         response_content = remote_dispatch_response["response"]
@@ -744,6 +821,12 @@ class BaseBrowserWindow(ABC):
             if action_trace_raw is not None
             else None
         )
+        workflow_trace = response_content.get("workflowTrace")
+        parent_request_id = self._current_parent_request_id()
+        # Preserve the response contract for direct callers, but avoid adding a second
+        # child node when the backend will stitch the child request into the parent row.
+        if workflow_trace is not None and parent_request_id is None:
+            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -765,6 +848,7 @@ class BaseBrowserWindow(ABC):
             structured_output=response_content.get("structuredOutput"),
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
+            workflow_trace=workflow_trace,
             critic_result=critic_result,
             execution_trace_context=response_content.get("executionTraceContext"),
         )
@@ -804,6 +888,20 @@ class BaseBrowserWindow(ABC):
             return AgenticSelectorResponse(value=None)
 
         return result
+
+    async def agentic_matching_selectors_finder(
+        self,
+        *,
+        prompt: str,
+        timeout: int | None = 300,
+    ) -> list[AgenticSelectors]:
+        """Finds all visible targets matching a prompt and returns selectors."""
+        result = await self._run_extension_action(
+            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
+            AgenticMatchingSelectorsFinderResponse,
+            timeout=timeout,
+        )
+        return result.selectors
 
     async def agentic_mouse_action(
         self,
@@ -879,11 +977,14 @@ class BaseBrowserWindow(ABC):
         *,
         step_id: str,
         variables: list[PromptForUserInputVariable],
-        timeout: int | None = None,
+        prompt_message: str | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._run_extension_action(
-            PromptForUserInputRequest(step_id=step_id, variables=variables),
+            PromptForUserInputRequest(
+                step_id=step_id, prompt_message=prompt_message, variables=variables
+            ),
             PromptForUserInputResponse,
             timeout=timeout,
         )
@@ -896,7 +997,7 @@ class BaseBrowserWindow(ABC):
         prompt_message: str,
         approve_label: str,
         reject_label: str,
-        timeout: int | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
     ) -> bool:
         """Prompts the user to approve or reject in the extension UI."""
         result = await self._run_extension_action(
@@ -1046,9 +1147,26 @@ class BaseBrowserWindow(ABC):
                 "actionExecutionId": action_execution_id,
                 "browserWindowId": self.browser_window_id,
             }
+            remote_dispatch_request_id = os.environ.get(
+                _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
+            )
+            remote_dispatch_api_key_id = os.environ.get(
+                _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR
+            )
+            if remote_dispatch_api_key_id is not None:
+                body["apiKeyId"] = remote_dispatch_api_key_id
             parent_run_ids = self._current_parent_run_ids()
             if parent_run_ids:
                 body["parentRunIds"] = parent_run_ids
+            # The env-injected remote-dispatch request id identifies the request the
+            # external caller is polling (and that the frontend status reporter
+            # targets), so it must take precedence over the builtins parent request
+            # id, which for nested runs is a separate observability dispatch id.
+            request_id_for_action = (
+                remote_dispatch_request_id or self._current_parent_request_id()
+            )
+            if request_id_for_action is not None:
+                body["requestId"] = request_id_for_action
             if timeout is not None:
                 body["timeout"] = timeout
 
@@ -1070,6 +1188,9 @@ class BaseBrowserWindow(ABC):
             resp_json = await fetch_response.json()
 
             response = ExtensionActionResponse.model_validate(resp_json)
+            workflow_trace = getattr(response, "workflowTrace", None)
+            if workflow_trace is not None:
+                _trace.emit_sub_workflow(workflow_trace=workflow_trace)
             if response.status == "error":
                 raise NaradaError(response.error)
             if response.status == "aborted":
@@ -1249,7 +1370,7 @@ async def _fetch_presigned_download_url(
     session_id: str,
     key: str,
 ) -> str:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/download-url",
@@ -1272,7 +1393,7 @@ async def _get_cloud_browser_downloads(
     auth_headers: dict[str, str],
     session_id: str,
 ) -> list[SessionDownloadItem]:
-    fetch_response = await pyfetch(
+    fetch_response = await pyfetch_with_retries(
         _build_cloud_browser_url(
             base_url,
             "/cloud-browser/replay/downloads",

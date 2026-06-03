@@ -1,4 +1,4 @@
-from narada_core.actions.models import CriticResult
+from narada_core.actions.models import ActiveInputRequest, CriticResult
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -25,6 +25,7 @@ from narada.window import CloudBrowserWindow, LocalBrowserWindow, RemoteBrowserW
 
 __all__ = [
     "__version__",
+    "ActiveInputRequest",
     "Agent",
     "BrowserConfig",
     "CloudBrowserWindow",
