@@ -399,10 +399,9 @@ class BaseBrowserWindow(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
-        else:
-            execution_trace_context = _load_execution_trace_context_from_env()
-            if execution_trace_context is not None:
-                body["executionTraceContext"] = execution_trace_context
+        execution_trace_context = _load_execution_trace_context_from_env()
+        if execution_trace_context is not None:
+            body["executionTraceContext"] = execution_trace_context
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id

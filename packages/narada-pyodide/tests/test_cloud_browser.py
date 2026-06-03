@@ -564,7 +564,7 @@ async def test_remote_browser_window_without_cloud_session_keeps_extension_actio
 
 
 @pytest.mark.asyncio
-async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
+async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids_and_trace_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
@@ -605,5 +605,10 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids(
     second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
-    assert "executionTraceContext" not in first_post
-    assert "executionTraceContext" not in second_post
+    assert first_post["executionTraceContext"] == {
+        "type": "executionTraceInheritanceContext",
+        "schemaVersion": 1,
+        "traceId": "trace-parent",
+        "parentSegmentId": "segment-local",
+    }
+    assert second_post["executionTraceContext"] == first_post["executionTraceContext"]
