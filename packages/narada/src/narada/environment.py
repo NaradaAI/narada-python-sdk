@@ -221,6 +221,152 @@ class ApiErrorPayload(BaseModel):
             return cls()
 
 
+class _BrowserInitializationHelper:
+    def __init__(self, *, console: Console) -> None:
+        self._console = console
+
+    @staticmethod
+    async def wait_for_selector_attached(
+        page: Page, selector: str, *, timeout: int
+    ) -> ElementHandle | None:
+        try:
+            return await page.wait_for_selector(
+                selector, state="attached", timeout=timeout
+            )
+        except PlaywrightTimeoutError:
+            return None
+
+    @staticmethod
+    async def wait_for_browser_window_id_silently(page: Page, *, timeout: int) -> str:
+        selectors = [
+            _BROWSER_WINDOW_ID_SELECTOR,
+            _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
+            _EXTENSION_MISSING_INDICATOR_SELECTOR,
+            _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
+            _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
+        ]
+        tasks: list[asyncio.Task[ElementHandle | None]] = [
+            asyncio.create_task(
+                _BrowserInitializationHelper.wait_for_selector_attached(
+                    page, selector, timeout=timeout
+                )
+            )
+            for selector in selectors
+        ]
+        (
+            browser_window_id_task,
+            unsupported_browser_indicator_task,
+            extension_missing_indicator_task,
+            extension_unauthenticated_indicator_task,
+            initialization_error_indicator_task,
+        ) = tasks
+
+        done, pending = await asyncio.wait(
+            tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in pending:
+            task.cancel()
+
+        if len(done) == 0:
+            raise NaradaTimeoutError("Timed out waiting for browser window ID")
+
+        for task in done:
+            if task == browser_window_id_task:
+                browser_window_id_elem = task.result()
+                if browser_window_id_elem is None:
+                    raise NaradaTimeoutError("Timed out waiting for browser window ID")
+
+                browser_window_id = await browser_window_id_elem.text_content()
+                if browser_window_id is None:
+                    raise NaradaInitializationError("Browser window ID is empty")
+
+                return browser_window_id
+
+            # TODO: Create custom exception types for these cases.
+            if task == unsupported_browser_indicator_task and task.result() is not None:
+                raise NaradaUnsupportedBrowserError("Unsupported browser")
+
+            if task == extension_missing_indicator_task and task.result() is not None:
+                raise NaradaExtensionMissingError("Narada extension missing")
+
+            if (
+                task == extension_unauthenticated_indicator_task
+                and task.result() is not None
+            ):
+                raise NaradaExtensionUnauthenticatedError(
+                    "Sign in to the Narada extension first"
+                )
+
+            if (
+                task == initialization_error_indicator_task
+                and task.result() is not None
+            ):
+                raise NaradaInitializationError("Initialization error")
+
+        assert_never()
+
+    async def wait_for_browser_window_id_interactively(
+        self, page: Page, *, per_attempt_timeout: int
+    ) -> str:
+        try:
+            while True:
+                try:
+                    return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
+                        page, timeout=per_attempt_timeout
+                    )
+                except NaradaExtensionMissingError:
+                    self._console.input(
+                        "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
+                        "installed. Please follow the instructions in the browser window to "
+                        "install it first, then press Enter to continue.[/bold blue]\n",
+                    )
+                except NaradaExtensionUnauthenticatedError:
+                    self._console.input(
+                        "\n[bold]>[/bold] [bold blue]Please sign in to the Narada extension first, "
+                        "then press Enter to continue.[/bold blue]",
+                    )
+
+                # Bring the page to the front and wait a little bit before refreshing it, as this
+                # page needs to be the active tab in order to automatically open the side panel.
+                await page.bring_to_front()
+                await asyncio.sleep(0.1)
+                await page.reload()
+
+        except PlaywrightError:
+            self._console.print(
+                "\n[bold]>[/bold] [bold red]It seems the Narada automation page was closed. Please "
+                "retry the action and keep the Narada web page open.[/bold red]",
+            )
+            sys.exit(1)
+
+    async def wait_for_browser_window_id(
+        self,
+        initialization_page: Page,
+        config: BrowserConfig,
+        timeout: int = 30_000,
+    ) -> str:
+        """Waits for the browser window ID to be available, potentially letting the user respond to
+        recoverable errors interactively.
+        """
+        if config.interactive:
+            return await self.wait_for_browser_window_id_interactively(
+                initialization_page, per_attempt_timeout=timeout
+            )
+        else:
+            return (
+                await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
+                    initialization_page, timeout=timeout
+                )
+            )
+
+    def print_success_message(self, browser_window_id: str) -> None:
+        self._console.print(
+            "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
+            f"{browser_window_id}[/bold green]\n",
+        )
+
+
 class Environment(ABC):
     _auth_headers: dict[str, str]
     _base_url: str
@@ -1052,6 +1198,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._attach_to_existing = attach_to_existing
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
+        self._browser_initialization = _BrowserInitializationHelper(
+            console=self._console
+        )
 
     @property
     def browser_process_id(self) -> int | None:
@@ -1307,118 +1456,24 @@ class BrowserEnvironment(BaseBrowserEnvironment):
     async def _wait_for_selector_attached(
         page: Page, selector: str, *, timeout: int
     ) -> ElementHandle | None:
-        try:
-            return await page.wait_for_selector(
-                selector, state="attached", timeout=timeout
-            )
-        except PlaywrightTimeoutError:
-            return None
+        return await _BrowserInitializationHelper.wait_for_selector_attached(
+            page, selector, timeout=timeout
+        )
 
     @staticmethod
     async def _wait_for_browser_window_id_silently(page: Page, *, timeout: int) -> str:
-        selectors = [
-            _BROWSER_WINDOW_ID_SELECTOR,
-            _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
-            _EXTENSION_MISSING_INDICATOR_SELECTOR,
-            _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
-            _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
-        ]
-        tasks: list[asyncio.Task[ElementHandle | None]] = [
-            asyncio.create_task(
-                BrowserEnvironment._wait_for_selector_attached(
-                    page, selector, timeout=timeout
-                )
-            )
-            for selector in selectors
-        ]
-        (
-            browser_window_id_task,
-            unsupported_browser_indicator_task,
-            extension_missing_indicator_task,
-            extension_unauthenticated_indicator_task,
-            initialization_error_indicator_task,
-        ) = tasks
-
-        done, pending = await asyncio.wait(
-            tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
+            page, timeout=timeout
         )
-
-        for task in pending:
-            task.cancel()
-
-        if len(done) == 0:
-            raise NaradaTimeoutError("Timed out waiting for browser window ID")
-
-        for task in done:
-            if task == browser_window_id_task:
-                browser_window_id_elem = task.result()
-                if browser_window_id_elem is None:
-                    raise NaradaTimeoutError("Timed out waiting for browser window ID")
-
-                browser_window_id = await browser_window_id_elem.text_content()
-                if browser_window_id is None:
-                    raise NaradaInitializationError("Browser window ID is empty")
-
-                return browser_window_id
-
-            # TODO: Create custom exception types for these cases.
-            if task == unsupported_browser_indicator_task and task.result() is not None:
-                raise NaradaUnsupportedBrowserError("Unsupported browser")
-
-            if task == extension_missing_indicator_task and task.result() is not None:
-                raise NaradaExtensionMissingError("Narada extension missing")
-
-            if (
-                task == extension_unauthenticated_indicator_task
-                and task.result() is not None
-            ):
-                raise NaradaExtensionUnauthenticatedError(
-                    "Sign in to the Narada extension first"
-                )
-
-            if (
-                task == initialization_error_indicator_task
-                and task.result() is not None
-            ):
-                raise NaradaInitializationError("Initialization error")
-
-        assert_never()
 
     async def _wait_for_browser_window_id_interactively(
         self, page: Page, *, per_attempt_timeout: int
     ) -> str:
-        try:
-            while True:
-                try:
-                    return (
-                        await BrowserEnvironment._wait_for_browser_window_id_silently(
-                            page, timeout=per_attempt_timeout
-                        )
-                    )
-                except NaradaExtensionMissingError:
-                    self._console.input(
-                        "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
-                        "installed. Please follow the instructions in the browser window to "
-                        "install it first, then press Enter to continue.[/bold blue]\n",
-                    )
-                except NaradaExtensionUnauthenticatedError:
-                    self._console.input(
-                        "\n[bold]>[/bold] [bold blue]Please sign in to the Narada extension first, "
-                        "then press Enter to continue.[/bold blue]",
-                    )
-
-                # Bring the page to the front and wait a little bit before refreshing it, as this
-                # page needs to be the active tab in order to automatically open the side panel.
-                await page.bring_to_front()
-                await asyncio.sleep(0.1)
-                await page.reload()
-
-        except PlaywrightError:
-            self._console.print(
-                "\n[bold]>[/bold] [bold red]It seems the Narada automation page was closed. Please "
-                "retry the action and keep the Narada web page open.[/bold red]",
+        return (
+            await self._browser_initialization.wait_for_browser_window_id_interactively(
+                page, per_attempt_timeout=per_attempt_timeout
             )
-            sys.exit(1)
+        )
 
     async def _wait_for_browser_window_id(
         self,
@@ -1426,17 +1481,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         config: BrowserConfig,
         timeout: int = 30_000,
     ) -> str:
-        """Waits for the browser window ID to be available, potentially letting the user respond to
-        recoverable errors interactively.
-        """
-        if config.interactive:
-            return await self._wait_for_browser_window_id_interactively(
-                initialization_page, per_attempt_timeout=timeout
-            )
-        else:
-            return await BrowserEnvironment._wait_for_browser_window_id_silently(
-                initialization_page, timeout=timeout
-            )
+        return await self._browser_initialization.wait_for_browser_window_id(
+            initialization_page, config, timeout=timeout
+        )
 
     async def _setup_proxy_authentication_browser_level(
         self, browser: Browser, proxy_config: ProxyConfig
@@ -1514,10 +1561,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         await cdp_session.detach()
 
     def _print_success_message(self, browser_window_id: str) -> None:
-        self._console.print(
-            "\n[bold]>[/bold] [bold green]Initialization successful. Browser window ID: "
-            f"{browser_window_id}[/bold green]\n",
-        )
+        self._browser_initialization.print_success_message(browser_window_id)
 
 
 class RemoteBrowserEnvironment(BaseBrowserEnvironment):
@@ -1579,7 +1623,7 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
         return f"RemoteBrowserEnvironment(browser_window_id={self.browser_window_id})"
 
 
-class CloudBrowserEnvironment(BrowserEnvironment):
+class CloudBrowserEnvironment(BaseBrowserEnvironment):
     """A browser environment that connects to a backend-cloud browser session via CDP.
 
     This class connects to a cloud browser session created by the backend API and provides
@@ -1603,8 +1647,12 @@ class CloudBrowserEnvironment(BrowserEnvironment):
         self._session_name = session_name
         self._session_timeout = session_timeout
         self._session_id: str | None = None
+        self._context: BrowserContext | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
+        self._browser_initialization = _BrowserInitializationHelper(
+            console=self._console
+        )
 
     @property
     def cloud_browser_session_id(self) -> str:
@@ -1614,6 +1662,11 @@ class CloudBrowserEnvironment(BrowserEnvironment):
                 "or run an agent action first."
             )
         return self._session_id
+
+    @property
+    def browser_process_id(self) -> int | None:
+        # Cloud browser sessions are backend-owned, so there is no local browser process.
+        return None
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
@@ -1699,6 +1752,39 @@ class CloudBrowserEnvironment(BrowserEnvironment):
                 )
             # Re-raise the original connection error
             raise
+
+    async def _stop_playwright(self) -> None:
+        if self._playwright_context_manager is None:
+            return
+
+        await self._playwright_context_manager.__aexit__(None, None, None)
+        self._playwright_context_manager = None
+        self._playwright = None
+
+    async def reset_agent_state(self) -> None:
+        await self._ensure_initialized()
+        assert self._context is not None
+        side_panel_url = create_side_panel_url(self._config, self.browser_window_id)
+        side_panel_page = next(
+            p for p in self._context.pages if p.url == side_panel_url
+        )
+
+        # Refresh the extension side panel, which ensures any inflight Narada operations are
+        # canceled.
+        await side_panel_page.reload()
+
+    async def _wait_for_browser_window_id(
+        self,
+        initialization_page: Page,
+        config: BrowserConfig,
+        timeout: int = 30_000,
+    ) -> str:
+        return await self._browser_initialization.wait_for_browser_window_id(
+            initialization_page, config, timeout=timeout
+        )
+
+    def _print_success_message(self, browser_window_id: str) -> None:
+        self._browser_initialization.print_success_message(browser_window_id)
 
     async def _initialize_cloud_browser_window(
         self,
