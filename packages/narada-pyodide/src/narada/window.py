@@ -53,6 +53,7 @@ from narada_core.actions.models import (
     GetUrlRequest,
     GetUrlResponse,
     GoToUrlRequest,
+    JsonValue,
     PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
@@ -906,7 +907,7 @@ class BaseBrowserWindow(ABC):
 
     async def execute_javascript_on_page(
         self, *, code: str, timeout: int | None = None
-    ) -> Any:
+    ) -> JsonValue:
         """Executes JavaScript on the current active page and returns its JSON result."""
         result = await self._run_extension_action(
             ExecuteJavascriptOnPageRequest(code=code),
