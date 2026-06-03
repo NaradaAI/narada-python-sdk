@@ -8,6 +8,10 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from narada_core.actions.models import (
+    DEFAULT_HITL_TIMEOUT_SECONDS,
+    PromptForUserInputVariable,
+)
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -116,7 +120,7 @@ async def test_cloud_browser_environment_maps_backend_response(
             ),
         ]
     )
-    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
     env = narada_pkg.CloudBrowserEnvironment(
         api_key="test-api-key",
@@ -772,7 +776,7 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
             }
         )
     )
-    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
     env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
@@ -782,15 +786,13 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     values = await agent.prompt_for_user_input(
         step_id="input-step",
         variables=[
-            env_module.PromptForUserInputVariable(
-                name="name", type="string", required=True
-            ),
+            PromptForUserInputVariable(name="name", type="string", required=True),
         ],
     )
 
     assert values == {"name": "Narada"}
     payload = json.loads(pyfetch.await_args.kwargs["body"])
-    assert payload["timeout"] == env_module.DEFAULT_HITL_TIMEOUT_SECONDS
+    assert payload["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
 
 
 @pytest.mark.asyncio
