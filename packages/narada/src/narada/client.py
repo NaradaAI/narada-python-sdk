@@ -276,10 +276,16 @@ class Narada:
             cdp_websocket_url, headers=cdp_auth_headers
         )
 
-        # Navigate to login URL (provided by backend with custom token)
+        # Navigate to login URL (provided by backend with custom token). The real readiness
+        # condition is the browser-window-id sentinel below; the page's load event can be delayed
+        # by tunneled frontend assets and should not be treated as initialization success.
         context = browser.contexts[0]
         initialization_page = context.pages[0]
-        await initialization_page.goto(login_url, timeout=15_000)
+        await initialization_page.goto(
+            login_url,
+            timeout=60_000,
+            wait_until="domcontentloaded",
+        )
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
@@ -302,7 +308,11 @@ class Narada:
                     raise
                 # If browser window ID is not found, reload the page and try again
                 # try to go to the login URL again (with customToken query param)
-                await initialization_page.goto(login_url, timeout=15_000)
+                await initialization_page.goto(
+                    login_url,
+                    timeout=60_000,
+                    wait_until="domcontentloaded",
+                )
 
         cloud_window = CloudBrowserWindow(
             browser_window_id=browser_window_id,
