@@ -28,6 +28,7 @@ from typing import (
     overload,
     override,
 )
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import aiohttp
@@ -150,6 +151,10 @@ class _PresignedPost(BaseModel):
     fields: dict[str, Any]
 
 
+class _CustomTokenResponse(BaseModel):
+    token: str
+
+
 @dataclass
 class SessionDownloadItem:
     """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
@@ -164,6 +169,23 @@ class _LaunchBrowserResult:
     browser_process_id: int
     browser_window_id: str
     side_panel_page: Page
+
+
+def _with_query_params(url: str, params: Mapping[str, str]) -> str:
+    parsed_url = urlsplit(url)
+    query_params = [
+        *parse_qsl(parsed_url.query, keep_blank_values=True),
+        *params.items(),
+    ]
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            urlencode(query_params),
+            parsed_url.fragment,
+        )
+    )
 
 
 class ApiErrorPayload(BaseModel):
@@ -290,8 +312,8 @@ class _BrowserInitializationHelper:
                     )
                 except NaradaExtensionUnauthenticatedError:
                     self._console.input(
-                        "\n[bold]>[/bold] [bold blue]Please sign in to the Narada extension first, "
-                        "then press Enter to continue.[/bold blue]",
+                        "\n[bold]>[/bold] [bold blue]Narada is signing in automatically with your "
+                        "SDK credentials. Press Enter to retry if this does not continue.[/bold blue]",
                     )
 
                 # Bring the page to the front and wait a little bit before refreshing it, as this
@@ -1007,8 +1029,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         initialization_page = await context.new_page()
         await initialization_page.goto(tagged_initialization_url)
 
-        browser_window_id = await self._wait_for_browser_window_id(
-            initialization_page, self._config
+        browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
+            initialization_page,
+            self._config,
+            tagged_initialization_url,
         )
 
         # Playwright seems unable to pick up the side panel page that is automatically opened by the
@@ -1139,8 +1163,12 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
             if initialization_page is not None:
-                browser_window_id = await self._wait_for_browser_window_id(
-                    initialization_page, config
+                browser_window_id = (
+                    await self._wait_for_browser_window_id_with_lazy_login(
+                        initialization_page,
+                        config,
+                        tagged_initialization_url,
+                    )
                 )
 
                 side_panel_url = create_side_panel_url(config, browser_window_id)
@@ -1202,6 +1230,82 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         return await self._browser_initialization.wait_for_browser_window_id(
             initialization_page, config, timeout=timeout
         )
+
+    async def _fetch_browser_login_token(self) -> str:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self._base_url}/auth/custom-token",
+                headers=self._auth_headers,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if not resp.ok:
+                    error_text = await resp.text()
+                    raise NaradaInitializationError(
+                        "Failed to sign in the Narada browser with SDK credentials: "
+                        f"{resp.status} {error_text}"
+                    )
+
+                return _CustomTokenResponse.model_validate(await resp.json()).token
+
+    async def _wait_for_browser_window_id_with_lazy_login(
+        self,
+        initialization_page: Page,
+        config: BrowserConfig,
+        initialization_url: str,
+        *,
+        timeout: int = 30_000,
+    ) -> str:
+        login_attempts = 0
+        max_login_attempts = 2
+
+        try:
+            while True:
+                try:
+                    return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
+                        initialization_page,
+                        timeout=timeout,
+                    )
+                except NaradaExtensionMissingError:
+                    if not config.interactive:
+                        raise
+
+                    self._console.input(
+                        "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
+                        "installed. Please follow the instructions in the browser window to "
+                        "install it first, then press Enter to continue.[/bold blue]\n",
+                    )
+                    await initialization_page.bring_to_front()
+                    await asyncio.sleep(0.1)
+                    await initialization_page.reload()
+                except NaradaExtensionUnauthenticatedError as error:
+                    if login_attempts >= max_login_attempts:
+                        raise NaradaExtensionUnauthenticatedError(
+                            "Automatic sign-in with SDK credentials did not complete"
+                        ) from error
+
+                    login_attempts += 1
+                    if config.interactive:
+                        self._console.print(
+                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
+                            "credentials...[/bold blue]\n",
+                        )
+
+                    custom_token = await self._fetch_browser_login_token()
+                    await initialization_page.goto(
+                        _with_query_params(
+                            initialization_url,
+                            {"customToken": custom_token},
+                        ),
+                        timeout=15_000,
+                        wait_until="domcontentloaded",
+                    )
+
+        except PlaywrightError:
+            self._console.print(
+                "\n[bold]>[/bold] [bold red]It seems the Narada automation page was closed. Please "
+                "retry the action and keep the Narada web page open.[/bold red]",
+            )
+            sys.exit(1)
 
     async def _setup_proxy_authentication_browser_level(
         self, browser: Browser, proxy_config: ProxyConfig
