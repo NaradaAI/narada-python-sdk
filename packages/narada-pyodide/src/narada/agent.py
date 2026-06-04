@@ -16,6 +16,8 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     CriticResult,
+    ExecuteJavaScriptOnPageRequest,
+    ExecuteJavaScriptOnPageResponse,
     GetFullHtmlRequest,
     GetFullHtmlResponse,
     GetScreenshotRequest,
@@ -25,6 +27,7 @@ from narada_core.actions.models import (
     GetUrlRequest,
     GetUrlResponse,
     GoToUrlRequest,
+    JsonValue,
     PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
@@ -421,6 +424,17 @@ class Agent(Generic[_StructuredOutput]):
             timeout=timeout,
         )
         return result
+
+    async def execute_javascript_on_page(
+        self, *, code: str, timeout: int | None = None
+    ) -> JsonValue:
+        """Executes JavaScript on the current active page and returns its JSON result."""
+        result = await self._browser_environment()._run_extension_action(
+            ExecuteJavaScriptOnPageRequest(code=code),
+            ExecuteJavaScriptOnPageResponse,
+            timeout=timeout,
+        )
+        return result.result
 
     async def print_message(self, *, message: str, timeout: int | None = None) -> None:
         """Prints a message in the Narada extension side panel chat."""

@@ -22,6 +22,9 @@ from narada_core.tracing import model as tracing_model
 DEFAULT_HITL_TIMEOUT_SECONDS = 300
 
 _StructuredOutputT = TypeVar("_StructuredOutputT")
+type JsonValue = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 
 class AgentUsage(BaseModel):
@@ -403,6 +406,15 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class ExecuteJavaScriptOnPageRequest(BaseModel):
+    name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
+    code: str
+
+
+class ExecuteJavaScriptOnPageResponse(BaseModel):
+    result: JsonValue
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -460,6 +472,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
     | GetUrlRequest
+    | ExecuteJavaScriptOnPageRequest
     | PromptForUserInputRequest
     | UserApprovalRequest
 )
