@@ -1198,39 +1198,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             side_panel_page=side_panel_page,
         )
 
-    @staticmethod
-    async def _wait_for_selector_attached(
-        page: Page, selector: str, *, timeout: int
-    ) -> ElementHandle | None:
-        return await _BrowserInitializationHelper.wait_for_selector_attached(
-            page, selector, timeout=timeout
-        )
-
-    @staticmethod
-    async def _wait_for_browser_window_id_silently(page: Page, *, timeout: int) -> str:
-        return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
-            page, timeout=timeout
-        )
-
-    async def _wait_for_browser_window_id_interactively(
-        self, page: Page, *, per_attempt_timeout: int
-    ) -> str:
-        return (
-            await self._browser_initialization.wait_for_browser_window_id_interactively(
-                page, per_attempt_timeout=per_attempt_timeout
-            )
-        )
-
-    async def _wait_for_browser_window_id(
-        self,
-        initialization_page: Page,
-        config: BrowserConfig,
-        timeout: int = 30_000,
-    ) -> str:
-        return await self._browser_initialization.wait_for_browser_window_id(
-            initialization_page, config, timeout=timeout
-        )
-
     async def _fetch_browser_login_token(self) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -1595,7 +1562,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         # canceled.
         await side_panel_page.reload()
 
-    async def _wait_for_browser_window_id(
+    async def _wait_for_cloud_browser_window_id(
         self,
         initialization_page: Page,
         config: BrowserConfig,
@@ -1635,7 +1602,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         max_attempts = 10
         for attempt in range(max_attempts):
             try:
-                browser_window_id = await self._wait_for_browser_window_id(
+                browser_window_id = await self._wait_for_cloud_browser_window_id(
                     initialization_page,
                     self._config,
                     timeout=30_000,
