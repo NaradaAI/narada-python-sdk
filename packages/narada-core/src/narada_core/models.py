@@ -8,25 +8,25 @@ from pydantic import BaseModel, Field
 from narada_core.actions.models import ActiveInputRequest
 
 
-class Agent(Enum):
+class AgentKind(Enum):
     PRODUCTIVITY = 1
     OPERATOR = 2
     CORE_AGENT = 3
 
     def prompt_prefix(self) -> str:
         match self:
-            case Agent.PRODUCTIVITY:
+            case AgentKind.PRODUCTIVITY:
                 return ""
-            case Agent.OPERATOR:
+            case AgentKind.OPERATOR:
                 return "/Operator "
-            case Agent.CORE_AGENT:
+            case AgentKind.CORE_AGENT:
                 return "/coreAgent "
 
 
 class ReasoningEffort(StrEnum):
     """Controls how much reasoning the Core Agent uses before responding.
 
-    Only `Agent.CORE_AGENT` supports this option; other agents raise `ValueError`.
+    Only `AgentKind.CORE_AGENT` supports this option; other agents raise `ValueError`.
     """
 
     NONE = "none"

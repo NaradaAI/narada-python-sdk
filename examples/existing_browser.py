@@ -2,7 +2,7 @@ import asyncio
 import subprocess
 import sys
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 from narada.config import BrowserConfig
 
 
@@ -49,20 +49,25 @@ async def main() -> None:
 
     # Step 2: Use Narada SDK to attach to the existing browser.
     print("Connecting to existing browser with Narada SDK...")
-    async with Narada() as narada:
-        # Attach to the existing browser window.
-        window = await narada.initialize_in_existing_browser_window(config)
+    env = BrowserEnvironment(config=config, attach_to_existing=True)
+    agent = Agent(environment=env)
 
-        print(f"Successfully attached to browser window: {window.browser_window_id}")
+    try:
+        # Attach to the existing browser window.
+        await env.start()
+
+        print(f"Successfully attached to browser window: {env.browser_window_id}")
 
         # Run a task in this browser window
-        response = await window.agent(
+        response = await agent.run(
             prompt='Search for "LLM Compiler" on Google and open the first arXiv paper on the results page, then open the PDF. Then download the PDF of the paper.',
             # Optionally generate a GIF of the agent's actions
             generate_gif=True,
         )
 
         print("Response:", response.model_dump_json(indent=2))
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import BrowserConfig, Narada, ProxyConfig
+from narada import Agent, BrowserConfig, BrowserEnvironment, ProxyConfig
 
 
 async def main() -> None:
@@ -14,15 +14,18 @@ async def main() -> None:
 
     config = BrowserConfig(proxy=proxy)
 
-    async with Narada() as narada:
-        window = await narada.open_and_initialize_browser_window(config)
+    env = BrowserEnvironment(config=config)
+    agent = Agent(environment=env)
 
+    try:
         # Browser traffic now routes through the proxy.
-        response = await window.agent(
+        response = await agent.run(
             prompt="Go to https://httpbin.org/ip and tell me what IP address is shown.",
         )
 
         print("Response:", response.text)
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

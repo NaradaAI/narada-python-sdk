@@ -1,14 +1,15 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 
 
 async def main() -> None:
-    async with Narada() as narada:
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
+    try:
         # Read from a public Google Sheet.
-        resp = await window.read_google_sheet(
+        resp = await agent.read_google_sheet(
             spreadsheet_id="1COnQZsoxb_eMKWscX3e5OuFk-xQAHWza9QN2Tw0H6sg",
             range="Sheet1!A1:D10",
         )
@@ -18,11 +19,13 @@ async def main() -> None:
         # the spreadsheet ID from the URL of the sheet, which looks like:
         # https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/...
         #
-        # await window.write_google_sheet(
+        # await agent.write_google_sheet(
         #     spreadsheet_id="SPREADSHEET_ID",
         #     range="Sheet1!A11:D12",
         #     values=[["hello", "world", "foo", "bar"], ["1", "2", "3", "4"]],
         # )
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":
