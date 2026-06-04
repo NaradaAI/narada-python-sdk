@@ -678,6 +678,38 @@ async def test_dispatch_request_preserves_current_file_variable_shape(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_request_rejects_file_uploads_in_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+
+    pyfetch = AsyncMock()
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    # Reading file contents from disk is not possible in the browser, so passing a file-like
+    # object (rather than an already-uploaded reference) must fail fast instead of attempting
+    # an upload over the network.
+    file_obj = BytesIO(b"hello")
+    file_obj.name = "report.txt"
+
+    with pytest.raises(
+        NotImplementedError, match="not supported in the browser environment"
+    ):
+        await env._dispatch_request(
+            prompt="summarize {{ $doc }}",
+            input_variables={"doc": file_obj},
+        )
+
+    pyfetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_downloads_return_presigned_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

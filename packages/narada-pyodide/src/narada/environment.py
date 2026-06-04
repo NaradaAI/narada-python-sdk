@@ -129,11 +129,6 @@ type _NormalizedInputVariableValue = (
 type _NormalizedInputVariables = dict[str, _NormalizedInputVariableValue]
 
 
-class _PresignedPost(BaseModel):
-    url: str
-    fields: dict[str, Any]
-
-
 async def _notify_input_required_callback(
     callback: InputRequiredCallback | None,
     response: _RemoteDispatchPollResponse,
@@ -343,63 +338,14 @@ class Environment(ABC):
         )
 
     async def _upload_file_impl(self, *, file: IO[Any]) -> File:
-        """Uploads a file that can be used as an attachment in a subsequent `Agent.run` request.
-
-        The file is temporarily saved in Narada cloud and expires after 1 day. It can only be
-        accessed by the user who uploaded it.
-        """
-        await self._ensure_initialized()
-        # Import browser-only objects lazily so tests and non-browser tooling can import the module.
-        from js import Blob, FormData  # type: ignore
-
-        # Get the base filename without directories.
-        filename = Path(file.name).name
-
-        seekable = getattr(file, "seekable", None)
-        if callable(seekable) and seekable():
-            file.seek(0)
-
-        headers = await self._get_auth_headers()
-        response = await pyfetch(
-            f"{self._base_url}/remote-dispatch/generate-file-upload-presigned-post",
-            method="POST",
-            headers=headers,
-            body=json.dumps({"filename": filename}),
+        # Uploading file contents is not supported in the browser: the Pyodide runtime has no
+        # access to the user's filesystem, so there is no reliable local file to upload. File
+        # input variables that already reference an uploaded object (e.g. `agentStudioAttachment`
+        # references) are plain dicts and pass through `_normalize_input_variables` unchanged
+        # without reaching this path.
+        raise NotImplementedError(
+            "Uploading files is not supported in the browser environment"
         )
-        if not response.ok:
-            raise NaradaError(
-                "Failed to generate file upload URL: "
-                f"{response.status} {await response.text()}"
-            )
-
-        presigned_post = _PresignedPost.model_validate(await response.json())
-        object_key: str = presigned_post.fields["key"]
-
-        content = file.read()
-        if isinstance(content, str):
-            content = content.encode()
-
-        # Upload the file with a POST request where:
-        # - The URL is the presigned POST URL.
-        # - The form fields are the presigned POST fields.
-        # - The form data has an addition 'file' field that contains the file contents.
-        form_data = FormData.new()
-        for key, value in presigned_post.fields.items():
-            form_data.append(key, value)
-        form_data.append("file", Blob.new([content]), filename)
-
-        upload_response = await pyfetch(
-            presigned_post.url,
-            method="POST",
-            body=form_data,
-        )
-        if not upload_response.ok:
-            raise NaradaError(
-                "Failed to upload file: "
-                f"{upload_response.status} {await upload_response.text()}"
-            )
-
-        return File(key=object_key)
 
     async def _normalize_input_variables(
         self, *, input_variables: Mapping[str, Any]
