@@ -41,8 +41,8 @@ from narada_core.actions.models import (
     AgentUsage,
     CloseWindowRequest,
     CriticResult,
-    ExecuteJavascriptOnPageRequest,
-    ExecuteJavascriptOnPageResponse,
+    ExecuteJavaScriptOnPageRequest,
+    ExecuteJavaScriptOnPageResponse,
     ExtensionActionRequest,
     ExtensionActionResponse,
     GetFullHtmlRequest,
@@ -840,8 +840,8 @@ class BaseBrowserWindow(ABC):
     ) -> JsonValue:
         """Executes JavaScript on the current active page and returns its JSON result."""
         result = await self._run_extension_action(
-            ExecuteJavascriptOnPageRequest(code=code),
-            ExecuteJavascriptOnPageResponse,
+            ExecuteJavaScriptOnPageRequest(code=code),
+            ExecuteJavaScriptOnPageResponse,
             timeout=timeout,
         )
         return result.result

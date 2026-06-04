@@ -406,12 +406,12 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
-class ExecuteJavascriptOnPageRequest(BaseModel):
+class ExecuteJavaScriptOnPageRequest(BaseModel):
     name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
     code: str
 
 
-class ExecuteJavascriptOnPageResponse(BaseModel):
+class ExecuteJavaScriptOnPageResponse(BaseModel):
     result: JsonValue
 
 
@@ -472,7 +472,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
     | GetUrlRequest
-    | ExecuteJavascriptOnPageRequest
+    | ExecuteJavaScriptOnPageRequest
     | PromptForUserInputRequest
     | UserApprovalRequest
 )
