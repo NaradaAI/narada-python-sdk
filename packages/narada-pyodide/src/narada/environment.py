@@ -3,11 +3,14 @@ import builtins
 import inspect
 import json
 import logging
+import mimetypes
 import os
 import time
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
+from io import IOBase
+from pathlib import Path
 from typing import (
     IO,
     TYPE_CHECKING,
@@ -15,7 +18,9 @@ from typing import (
     Awaitable,
     Callable,
     Literal,
-    Optional,
+    Mapping,
+    TypedDict,
+    TypeGuard,
     TypeVar,
     cast,
     overload,
@@ -24,48 +29,11 @@ from typing import (
 from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
-from narada_core.actions.critic import run_critic
 from narada_core.actions.models import (
-    DEFAULT_HITL_TIMEOUT_SECONDS,
     ActiveInputRequest,
-    AgenticMatchingSelectorsFinderRequest,
-    AgenticMatchingSelectorsFinderResponse,
-    AgenticMouseAction,
-    AgenticMouseActionRequest,
-    AgenticSelectorAction,
-    AgenticSelectorRequest,
-    AgenticSelectorResponse,
-    AgenticSelectors,
-    AgentResponse,
-    AgentUsage,
     CloseWindowRequest,
-    CriticResult,
     ExtensionActionRequest,
     ExtensionActionResponse,
-    GetFullHtmlRequest,
-    GetFullHtmlResponse,
-    GetScreenshotRequest,
-    GetScreenshotResponse,
-    GetSimplifiedHtmlRequest,
-    GetSimplifiedHtmlResponse,
-    GetUrlRequest,
-    GetUrlResponse,
-    GoToUrlRequest,
-    PrintMessageRequest,
-    PromptForUserInputRequest,
-    PromptForUserInputResponse,
-    PromptForUserInputVariable,
-    ReadExcelSheetRequest,
-    ReadExcelSheetResponse,
-    ReadGoogleSheetRequest,
-    ReadGoogleSheetResponse,
-    RecordedClick,
-    UserApprovalRequest,
-    UserApprovalResponse,
-    WaitForElementRequest,
-    WaitForElementResponse,
-    WriteExcelSheetRequest,
-    WriteGoogleSheetRequest,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -74,8 +42,7 @@ from narada_core.errors import (
     UserAbortedError,
 )
 from narada_core.models import (
-    Agent,
-    CriticConfig,
+    AgentKind,
     File,
     McpServer,
     ReasoningEffort,
@@ -83,14 +50,16 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
     _RemoteDispatchPollResponse,
+    _SdkConfig,
 )
-from narada_core.tracing.model import parse_action_trace
+from packaging.version import Version
 from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
 from .retry import pyfetch_with_retries
+from .version import __version__
 
 # Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
 # in the stack on the frontend.
@@ -137,6 +106,29 @@ _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
 type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
 
 
+class _InputVariableFileReference(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
+
+
+type _JsonPrimitive = str | int | float | bool | None
+type _InputVariableValue = (
+    _JsonPrimitive
+    | IOBase
+    | list["_InputVariableValue"]
+    | dict[str, "_InputVariableValue"]
+)
+type _NormalizedInputVariableValue = (
+    _JsonPrimitive
+    | _InputVariableFileReference
+    | list["_NormalizedInputVariableValue"]
+    | dict[str, "_NormalizedInputVariableValue"]
+)
+type _NormalizedInputVariables = dict[str, _NormalizedInputVariableValue]
+
+
 async def _notify_input_required_callback(
     callback: InputRequiredCallback | None,
     response: _RemoteDispatchPollResponse,
@@ -159,13 +151,13 @@ async def _notify_input_required_callback(
         await callback_result
 
 
-def _trace_agent_type(agent: Agent | str) -> str:
+def _trace_agent_type(agent: AgentKind | str) -> str:
     match agent:
-        case Agent.PRODUCTIVITY:
+        case AgentKind.PRODUCTIVITY:
             return "generalist"
-        case Agent.OPERATOR:
+        case AgentKind.OPERATOR:
             return "operator"
-        case Agent.CORE_AGENT:
+        case AgentKind.CORE_AGENT:
             return "coreAgent"
         case _:
             return str(agent)
@@ -209,47 +201,120 @@ class SessionDownloadItem:
     download_url: str
 
 
-class BaseBrowserWindow(ABC):
+class Environment(ABC):
     _api_key: str | None
     _base_url: str
     _user_id: str | None
     _env: Literal["prod", "dev", None]
-    _browser_window_id: str
+    _initialized: bool
+    _init_lock: asyncio.Lock | None
 
     def __init__(
         self,
         *,
-        api_key: str | None,
-        base_url: str,
-        user_id: str | None,
-        env: Literal["prod", "dev", None] = "prod",
-        browser_window_id: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
     ) -> None:
+        api_key = api_key or os.environ.get("NARADA_API_KEY")
+        user_id = user_id or os.environ.get("NARADA_USER_ID")
+        env = _normalize_narada_env(env or os.environ.get("NARADA_ENV"))
         if api_key is None and (user_id is None or env is None):
             raise ValueError(
                 "Either `api_key` or all of `user_id`, `user_id_token`, and `env` must be provided"
             )
 
         self._api_key = api_key
-        self._base_url = base_url
+        self._base_url = base_url or os.getenv(
+            "NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"
+        )
         self._user_id = user_id
         self._env = env
-        self._browser_window_id = browser_window_id
-
-    @property
-    def browser_window_id(self) -> str:
-        return self._browser_window_id
+        self._initialized = False
+        self._init_lock = None
 
     @property
     def cloud_browser_session_id(self) -> str | None:
-        """Cloud browser session backing this window, if any.
+        """Cloud browser session backing this environment, if any.
 
-        `dispatch_request` includes this value in remote-dispatch requests so backend
-        observability can link a client-mode run to an existing SDK-owned cloud browser. Plain
-        local windows are not cloud-backed and return `None`; cloud-backed subclasses override this
-        property with their session ID.
+        Remote dispatch includes this value so backend observability can link a client-mode run to
+        an existing SDK-owned cloud browser. Plain local environments are not cloud-backed and
+        return `None`; cloud-backed subclasses override this property with their session ID.
         """
         return None
+
+    async def start(self) -> None:
+        """Initializes the environment eagerly.
+
+        Initialization is also performed lazily by `Agent.run()` and browser actions. Reusing the
+        same environment instance reuses the initialized target.
+        """
+        await self._ensure_initialized()
+
+    async def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+
+        async with self._init_lock:
+            if self._initialized:
+                return
+
+            if self._validates_sdk_config:
+                await self._validate_sdk_config()
+            await self._initialize()
+            self._initialized = True
+
+    @property
+    def _validates_sdk_config(self) -> bool:
+        return True
+
+    async def _initialize(self) -> None:
+        pass
+
+    async def close(self, *, timeout: int | None = None) -> None:
+        await self._close_impl(timeout=timeout)
+
+    async def _close_impl(self, *, timeout: int | None = None) -> None:
+        pass
+
+    @property
+    def _dispatch_browser_window_id(self) -> str | None:
+        return None
+
+    async def _fetch_sdk_config(self) -> _SdkConfig | None:
+        url = f"{self._base_url}/sdk/config"
+        headers = await self._get_auth_headers()
+
+        try:
+            resp = await pyfetch(url, headers=headers)
+            if not resp.ok:
+                logging.warning(
+                    "Failed to fetch SDK config: %s %s", resp.status, await resp.text()
+                )
+                return None
+
+            return _SdkConfig.model_validate(await resp.json())
+        except Exception as e:
+            logging.warning("Failed to fetch SDK config: %s", e)
+            return None
+
+    async def _validate_sdk_config(self) -> None:
+        config = await self._fetch_sdk_config()
+        if config is None:
+            return
+
+        package_config = config.packages["narada-pyodide"]
+        current_version = Version(__version__)
+        min_required_version = Version(package_config.min_required_version)
+        if current_version < min_required_version:
+            raise RuntimeError(
+                f"narada-pyodide<={__version__} is not supported. Please reload the page to "
+                f"upgrade to version {package_config.min_required_version} or higher."
+            )
 
     def _current_parent_run_ids(self) -> list[str] | None:
         """Returns the runnable stack to forward with SDK requests.
@@ -272,25 +337,79 @@ class BaseBrowserWindow(ABC):
             env=self._env,
         )
 
-    async def upload_file(self, *, file: IO) -> File:
-        """Uploads a file that can be used as an attachment in a subsequent `agent` request.
-
-        The file is temporarily saved in Narada cloud and expires after 1 day. It can only be
-        accessed by the user who uploaded it.
-        """
+    async def _upload_file_impl(self, *, file: IO[Any]) -> File:
+        # Uploading file contents is not supported in the browser: the Pyodide runtime has no
+        # access to the user's filesystem, so there is no reliable local file to upload. File
+        # input variables that already reference an uploaded object (e.g. `agentStudioAttachment`
+        # references) are plain dicts and pass through `_normalize_input_variables` unchanged
+        # without reaching this path.
         raise NotImplementedError(
             "Uploading files is not supported in the browser environment"
         )
+
+    async def _normalize_input_variables(
+        self, *, input_variables: Mapping[str, Any]
+    ) -> _NormalizedInputVariables:
+        normalized: _NormalizedInputVariables = {}
+        for key, value in input_variables.items():
+            normalized[key] = await self._normalize_input_variables_value_impl(
+                input_variable_value=value
+            )
+        return normalized
+
+    async def _normalize_input_variables_value_impl(
+        self, *, input_variable_value: Any
+    ) -> _NormalizedInputVariableValue:
+        if isinstance(input_variable_value, list):
+            return [
+                await self._normalize_input_variables_value_impl(
+                    input_variable_value=item
+                )
+                for item in input_variable_value
+            ]
+
+        if self._is_uploadable_file(input_variable_value):
+            return await self._upload_input_variable_file(
+                input_variable_value=input_variable_value
+            )
+
+        if isinstance(input_variable_value, dict):
+            normalized: dict[str, _NormalizedInputVariableValue] = {}
+            for key, value in input_variable_value.items():
+                normalized[key] = await self._normalize_input_variables_value_impl(
+                    input_variable_value=value
+                )
+            return normalized
+
+        return input_variable_value
+
+    @staticmethod
+    def _is_uploadable_file(value: Any) -> TypeGuard[IO[Any]]:
+        # Keep runtime eligibility aligned with the existing file-upload transport.
+        return isinstance(value, IOBase) and hasattr(value, "name")
+
+    async def _upload_input_variable_file(
+        self, *, input_variable_value: IO[Any]
+    ) -> _InputVariableFileReference:
+        filename = Path(input_variable_value.name).name
+        uploaded_file = await self._upload_file_impl(file=input_variable_value)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return {
+            "source": "remoteDispatchUpload",
+            "id": uploaded_file["key"],
+            "filename": filename,
+            "mimeType": mime_type,
+        }
 
     # `reasoning` is only valid with the Core Agent; these two overloads make
     # that constraint type-checkable. Generic-agent calls fall through to the
     # general overloads below, which do not accept a `reasoning` argument.
     @overload
-    async def dispatch_request(
+    async def _dispatch_request(
         self,
         *,
         prompt: str,
-        agent: Literal[Agent.CORE_AGENT],
+        agent: Literal[AgentKind.CORE_AGENT],
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -298,11 +417,12 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -311,11 +431,11 @@ class BaseBrowserWindow(ABC):
     ) -> Response[None]: ...
 
     @overload
-    async def dispatch_request(
+    async def _dispatch_request(
         self,
         *,
         prompt: str,
-        agent: Literal[Agent.CORE_AGENT],
+        agent: Literal[AgentKind.CORE_AGENT],
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -323,11 +443,12 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
@@ -336,22 +457,23 @@ class BaseBrowserWindow(ABC):
     ) -> Response[_StructuredOutput]: ...
 
     @overload
-    async def dispatch_request(
+    async def _dispatch_request(
         self,
         *,
         prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
+        agent: AgentKind | str = AgentKind.OPERATOR,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -361,22 +483,23 @@ class BaseBrowserWindow(ABC):
     ) -> Response[None]: ...
 
     @overload
-    async def dispatch_request(
+    async def _dispatch_request(
         self,
         *,
         prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
+        agent: AgentKind | str = AgentKind.OPERATOR,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -385,11 +508,11 @@ class BaseBrowserWindow(ABC):
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
-    async def dispatch_request(
+    async def _dispatch_request(
         self,
         *,
         prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
+        agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -397,11 +520,12 @@ class BaseBrowserWindow(ABC):
         previous_request_id: str | None = None,
         chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
         additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -411,14 +535,16 @@ class BaseBrowserWindow(ABC):
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
 
-        The higher-level `agent` method should be preferred for most use cases.
+        The higher-level `Agent.run` method should be preferred for most use cases.
         """
         # The overloads enforce this at type-check time when callers use
-        # ``Agent.CORE_AGENT``; the runtime check covers string-form agents
+        # ``AgentKind.CORE_AGENT``; the runtime check covers string-form agents
         # (``agent="..."``) and callers without a type checker.
-        if reasoning is not None and agent is not Agent.CORE_AGENT:
+        await self._ensure_initialized()
+
+        if reasoning is not None and agent is not AgentKind.CORE_AGENT:
             raise ValueError(
-                "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
+                "`reasoning` is only supported with `agent=AgentKind.CORE_AGENT` "
                 f"(got agent={agent!r})"
             )
         # Trace instrumentation: the entire method body is wrapped so that any
@@ -432,13 +558,15 @@ class BaseBrowserWindow(ABC):
         headers = await self._get_auth_headers()
 
         agent_prefix = (
-            agent.prompt_prefix() if isinstance(agent, Agent) else f"{agent} "
+            agent.prompt_prefix() if isinstance(agent, AgentKind) else f"{agent} "
         )
         body: dict[str, Any] = {
             "prompt": agent_prefix + prompt,
-            "browserWindowId": self.browser_window_id,
             "timeZone": time_zone,
         }
+        browser_window_id = self._dispatch_browser_window_id
+        if browser_window_id is not None:
+            body["browserWindowId"] = browser_window_id
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
@@ -463,6 +591,11 @@ class BaseBrowserWindow(ABC):
             body["chatHistory"] = chat_history
         if additional_context is not None:
             body["additionalContext"] = additional_context
+        if attachment is not None:
+            if hasattr(attachment, "read") and hasattr(attachment, "name"):
+                body["attachment"] = await self._upload_file_impl(file=attachment)
+            else:
+                body["attachment"] = attachment
         if user_resource_credentials is not None:
             body["userResourceCredentials"] = user_resource_credentials
         if mcp_servers is not None:
@@ -472,7 +605,9 @@ class BaseBrowserWindow(ABC):
         if secret_variables is not None:
             body["secretVariables"] = secret_variables
         if input_variables is not None:
-            body["inputVariables"] = input_variables
+            body["inputVariables"] = await self._normalize_input_variables(
+                input_variables=input_variables
+            )
         if critic_context is not None:
             body["criticContext"] = critic_context
         if callback_url is not None:
@@ -612,438 +747,9 @@ class BaseBrowserWindow(ABC):
             )
             raise
 
-    # `reasoning` is only valid with the Core Agent. See `dispatch_request`
-    # above for the rationale; the same overload pattern is mirrored here.
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Literal[Agent.CORE_AGENT],
-        reasoning: ReasoningEffort | None = None,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        time_zone: str = "America/Los_Angeles",
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        timeout: int = 1000,
-    ) -> AgentResponse[dict[str, Any]]: ...
-
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Literal[Agent.CORE_AGENT],
-        reasoning: ReasoningEffort | None = None,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        time_zone: str = "America/Los_Angeles",
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        timeout: int = 1000,
-    ) -> AgentResponse[_StructuredOutput]: ...
-
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        time_zone: str = "America/Los_Angeles",
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        critic: CriticConfig | None = None,
-        timeout: int = 1000,
-    ) -> AgentResponse[dict[str, Any]]: ...
-
-    @overload
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        time_zone: str = "America/Los_Angeles",
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        critic: CriticConfig | None = None,
-        timeout: int = 1000,
-    ) -> AgentResponse[_StructuredOutput]: ...
-
-    async def agent(
-        self,
-        *,
-        prompt: str,
-        agent: Agent | str = Agent.OPERATOR,
-        reasoning: ReasoningEffort | None = None,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[BaseModel] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        critic: CriticConfig | None = None,
-        timeout: int = 1000,
-    ) -> AgentResponse:
-        """Invokes an agent in the Narada extension side panel chat."""
-        # Branch on `reasoning` so each call site binds a single, typed overload
-        # of `dispatch_request`. The validation also lives in `dispatch_request`
-        # itself (defense in depth + reachable when callers go straight to the
-        # low-level API), so the redundancy here is intentional.
-        if reasoning is None:
-            remote_dispatch_response = await self.dispatch_request(
-                prompt=prompt,
-                agent=agent,
-                clear_chat=clear_chat,
-                generate_gif=generate_gif,
-                output_schema=output_schema,
-                time_zone=time_zone,
-                mcp_servers=mcp_servers,
-                secret_variables=secret_variables,
-                input_variables=input_variables,
-                on_input_required=on_input_required,
-                timeout=timeout,
-            )
-        else:
-            if agent is not Agent.CORE_AGENT:
-                raise ValueError(
-                    "`reasoning` is only supported with `agent=Agent.CORE_AGENT` "
-                    f"(got agent={agent!r})"
-                )
-            # The CORE_AGENT-specific overloads of `dispatch_request` split on
-            # a narrower `output_schema` discriminator (None vs `type[T]`),
-            # which the impl's `type[BaseModel] | None` union doesn't cleanly
-            # narrow into without further branching. The public `agent()`
-            # overloads above already give callers correct return-type
-            # narrowing, so the internal forward call bypasses overload
-            # disambiguation on this single dimension.
-            remote_dispatch_response = await self.dispatch_request(  # pyright: ignore[reportCallIssue]
-                prompt=prompt,
-                agent=agent,
-                reasoning=reasoning,
-                clear_chat=clear_chat,
-                generate_gif=generate_gif,
-                output_schema=output_schema,  # pyright: ignore[reportArgumentType]
-                time_zone=time_zone,
-                mcp_servers=mcp_servers,
-                secret_variables=secret_variables,
-                input_variables=input_variables,
-                on_input_required=on_input_required,
-                timeout=timeout,
-            )
-        response_content = remote_dispatch_response["response"]
-        assert response_content is not None
-
-        action_trace_raw = response_content.get("actionTrace")
-        action_trace = (
-            parse_action_trace(action_trace_raw)
-            if action_trace_raw is not None
-            else None
-        )
-        workflow_trace = response_content.get("workflowTrace")
-        parent_request_id = self._current_parent_request_id()
-        # Preserve the response contract for direct callers, but avoid adding a second
-        # child node when the backend will stitch the child request into the parent row.
-        if workflow_trace is not None and parent_request_id is None:
-            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
-
-        critic_result: CriticResult | None = None
-        if critic is not None:
-            critic_result = await run_critic(
-                dispatch_request=self.dispatch_request,
-                original_prompt=prompt,
-                response_content=response_content,
-                action_trace_raw=action_trace_raw,
-                critic=critic,
-                time_zone=time_zone,
-                timeout=timeout,
-            )
-
-        return AgentResponse(
-            request_id=remote_dispatch_response["requestId"],
-            status=remote_dispatch_response["status"],
-            text=response_content["text"],
-            output=response_content.get("output"),
-            structured_output=response_content.get("structuredOutput"),
-            usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
-            action_trace=action_trace,
-            workflow_trace=workflow_trace,
-            critic_result=critic_result,
-        )
-
-    async def agentic_selector(
-        self,
-        *,
-        action: AgenticSelectorAction,
-        selectors: AgenticSelectors,
-        fallback_operator_query: str,
-        # Larger default timeout because Operator can take a bit to run.
-        timeout: int | None = 300,
-    ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
-
-        Returns AgenticSelectorResponse with the value for 'get_text' and 'get_property' actions,
-        otherwise returns None.
-        """
-        response_model = (
-            AgenticSelectorResponse
-            if action["type"] in {"get_text", "get_property"}
-            else None
-        )
-
-        result = await self._run_extension_action(
-            AgenticSelectorRequest(
-                action=action,
-                selectors=selectors,
-                fallback_operator_query=fallback_operator_query,
-            ),
-            response_model,
-            timeout=timeout,
-        )
-
-        if result is None:
-            return AgenticSelectorResponse(value=None)
-
-        return result
-
-    async def agentic_matching_selectors_finder(
-        self,
-        *,
-        prompt: str,
-        timeout: int | None = 300,
-    ) -> list[AgenticSelectors]:
-        """Finds all visible targets matching a prompt and returns selectors."""
-        result = await self._run_extension_action(
-            AgenticMatchingSelectorsFinderRequest(prompt=prompt),
-            AgenticMatchingSelectorsFinderResponse,
-            timeout=timeout,
-        )
-        return result.selectors
-
-    async def agentic_mouse_action(
-        self,
-        *,
-        action: AgenticMouseAction,
-        recorded_click: RecordedClick,
-        resize_window: Optional[bool] = True,
-        fallback_operator_query: str,
-        timeout: int | None = 60,
-    ) -> None:
-        """Performs a mouse action at the specified click coordinates, falling back to using
-        the Operator agent if the click fails.
-        """
-        return await self._run_extension_action(
-            AgenticMouseActionRequest(
-                action=action,
-                recorded_click=recorded_click,
-                resize_window=resize_window or True,
-                fallback_operator_query=fallback_operator_query,
-            ),
-            timeout=timeout,
-        )
-
-    async def close(self, *, timeout: int | None = None) -> None:
+    async def _close_browser_window(self, *, timeout: int | None = None) -> None:
         """Gracefully closes the current browser window."""
         return await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
-
-    async def go_to_url(
-        self, *, url: str, new_tab: bool = False, timeout: int | None = None
-    ) -> None:
-        """Navigates the active page in this window to the given URL."""
-        return await self._run_extension_action(
-            GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
-        )
-
-    async def wait_for_element(
-        self,
-        *,
-        selectors: AgenticSelectors,
-        state: Literal["visible", "hidden"],
-        timeout: int,
-    ) -> bool:
-        """Waits for an element matching the given selectors to reach the specified state.
-
-        Returns True if the element was found, False if no selector matched before timeout.
-        """
-        result = await self._run_extension_action(
-            WaitForElementRequest(selectors=selectors, state=state, timeout=timeout),
-            WaitForElementResponse,
-            timeout=timeout // 1000 + 30,
-        )
-        if result is None:
-            return False
-        return result.found
-
-    async def get_url(self, *, timeout: int | None = None) -> str:
-        """Gets the URL of the current active page."""
-        result = await self._run_extension_action(
-            GetUrlRequest(),
-            GetUrlResponse,
-            timeout=timeout,
-        )
-        return result.url
-
-    async def print_message(self, *, message: str, timeout: int | None = None) -> None:
-        """Prints a message in the Narada extension side panel chat."""
-        return await self._run_extension_action(
-            PrintMessageRequest(message=message), timeout=timeout
-        )
-
-    async def prompt_for_user_input(
-        self,
-        *,
-        step_id: str,
-        variables: list[PromptForUserInputVariable],
-        prompt_message: str | None = None,
-        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
-    ) -> dict[str, Any]:
-        """Prompts the user for one or more input values in the extension UI."""
-        result = await self._run_extension_action(
-            PromptForUserInputRequest(
-                step_id=step_id, prompt_message=prompt_message, variables=variables
-            ),
-            PromptForUserInputResponse,
-            timeout=timeout,
-        )
-        return result.values_by_name
-
-    async def user_approval(
-        self,
-        *,
-        step_id: str,
-        prompt_message: str,
-        approve_label: str,
-        reject_label: str,
-        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
-    ) -> bool:
-        """Prompts the user to approve or reject in the extension UI."""
-        result = await self._run_extension_action(
-            UserApprovalRequest(
-                step_id=step_id,
-                prompt_message=prompt_message,
-                approve_label=approve_label,
-                reject_label=reject_label,
-            ),
-            UserApprovalResponse,
-            timeout=timeout,
-        )
-        return result.approved
-
-    async def read_google_sheet(
-        self,
-        *,
-        spreadsheet_id: str,
-        range: str,
-        timeout: int | None = None,
-    ) -> ReadGoogleSheetResponse:
-        """Reads a range of cells from a Google Sheet."""
-        return await self._run_extension_action(
-            ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
-            ReadGoogleSheetResponse,
-            timeout=timeout,
-        )
-
-    async def read_excel_sheet(
-        self,
-        *,
-        workbook_url: str,
-        range: str,
-        microsoft_account_email: str,
-        timeout: int | None = None,
-    ) -> ReadExcelSheetResponse:
-        """Reads a range of cells from a Microsoft Excel workbook."""
-        return await self._run_extension_action(
-            ReadExcelSheetRequest(
-                workbook_url=workbook_url,
-                range=range,
-                microsoft_account_email=microsoft_account_email,
-            ),
-            ReadExcelSheetResponse,
-            timeout=timeout,
-        )
-
-    async def write_google_sheet(
-        self,
-        *,
-        spreadsheet_id: str,
-        range: str,
-        values: list[list[str]],
-        timeout: int | None = None,
-    ) -> None:
-        """Writes a range of cells to a Google Sheet."""
-        return await self._run_extension_action(
-            WriteGoogleSheetRequest(
-                spreadsheet_id=spreadsheet_id, range=range, values=values
-            ),
-            timeout=timeout,
-        )
-
-    async def write_excel_sheet(
-        self,
-        *,
-        workbook_url: str,
-        range: str,
-        microsoft_account_email: str,
-        values: list[list[str]],
-        timeout: int | None = None,
-    ) -> None:
-        """Writes a range of cells to a Microsoft Excel workbook."""
-        return await self._run_extension_action(
-            WriteExcelSheetRequest(
-                workbook_url=workbook_url,
-                range=range,
-                microsoft_account_email=microsoft_account_email,
-                values=values,
-            ),
-            timeout=timeout,
-        )
-
-    async def get_full_html(self, *, timeout: int | None = None) -> GetFullHtmlResponse:
-        """Gets the full HTML content of the current page."""
-        return await self._run_extension_action(
-            GetFullHtmlRequest(),
-            GetFullHtmlResponse,
-            timeout=timeout,
-        )
-
-    async def get_simplified_html(
-        self, *, timeout: int | None = None
-    ) -> GetSimplifiedHtmlResponse:
-        """Gets the simplified HTML content of the current page."""
-        return await self._run_extension_action(
-            GetSimplifiedHtmlRequest(),
-            GetSimplifiedHtmlResponse,
-            timeout=timeout,
-        )
-
-    async def get_screenshot(
-        self, *, timeout: int | None = None
-    ) -> GetScreenshotResponse:
-        """Takes a screenshot of the current browser window."""
-        return await self._run_extension_action(
-            GetScreenshotRequest(),
-            GetScreenshotResponse,
-            timeout=timeout,
-        )
 
     @overload
     async def _run_extension_action(
@@ -1070,6 +776,13 @@ class BaseBrowserWindow(ABC):
         *,
         timeout: int | None = None,
     ) -> _ResponseModel | None:
+        await self._ensure_initialized()
+        browser_window_id = self._dispatch_browser_window_id
+        if browser_window_id is None:
+            raise NaradaError(
+                f"{type(self).__name__} does not support browser extension actions"
+            )
+
         # Trace instrumentation: every exit path emits an ``extensionAction``
         # trace event with a status matching the outcome. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
@@ -1079,7 +792,7 @@ class BaseBrowserWindow(ABC):
 
             body = {
                 "action": request.model_dump(),
-                "browserWindowId": self.browser_window_id,
+                "browserWindowId": browser_window_id,
             }
             remote_dispatch_request_id = os.environ.get(
                 _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR
@@ -1166,25 +879,70 @@ class BaseBrowserWindow(ABC):
             raise
 
 
-class LocalBrowserWindow(BaseBrowserWindow):
-    def __init__(self) -> None:
+class BaseBrowserEnvironment(Environment):
+    _browser_window_id: str | None
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
+        browser_window_id: str | None = None,
+        initialized: bool = False,
+    ) -> None:
         super().__init__(
-            api_key=os.environ.get("NARADA_API_KEY"),
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
-            user_id=os.environ.get("NARADA_USER_ID"),
-            env=_normalize_narada_env(os.environ.get("NARADA_ENV")),
-            browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
+            api_key=api_key,
+            user_id=user_id,
+            env=env,
+        )
+        self._browser_window_id = browser_window_id
+        self._initialized = initialized
+
+    @property
+    def browser_window_id(self) -> str:
+        if self._browser_window_id is None:
+            raise RuntimeError(
+                "Browser environment is not initialized yet. Call `await env.start()` "
+                "or run an agent action first."
+            )
+        return self._browser_window_id
+
+    @property
+    def _dispatch_browser_window_id(self) -> str | None:
+        return self.browser_window_id
+
+
+class BrowserEnvironment(BaseBrowserEnvironment):
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
+        browser_window_id: str | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            user_id=user_id,
+            env=env,
+            browser_window_id=browser_window_id
+            or os.environ["NARADA_BROWSER_WINDOW_ID"],
         )
 
     def __str__(self) -> str:
-        return f"LocalBrowserWindow(browser_window_id={self.browser_window_id})"
+        return f"BrowserEnvironment(browser_window_id={self.browser_window_id})"
 
     @override
     def _current_parent_run_ids(self) -> list[str] | None:
         return _parent_run_ids()
 
+    @override
+    async def _close_impl(self, *, timeout: int | None = None) -> None:
+        await self._close_browser_window(timeout=timeout)
 
-class RemoteBrowserWindow(BaseBrowserWindow):
+
+class RemoteBrowserEnvironment(BaseBrowserEnvironment):
     def __init__(
         self,
         *,
@@ -1195,22 +953,27 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         env: Literal["prod", "dev", None] = None,
     ) -> None:
         super().__init__(
-            api_key=api_key or os.environ.get("NARADA_API_KEY"),
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
-            user_id=user_id or os.environ.get("NARADA_USER_ID"),
-            env=_normalize_narada_env(env or os.environ.get("NARADA_ENV")),
+            api_key=api_key,
+            user_id=user_id,
+            env=env,
             browser_window_id=browser_window_id,
+            initialized=True,
         )
         self._cloud_browser_session_id = cloud_browser_session_id
+
+    @property
+    def _validates_sdk_config(self) -> bool:
+        return False
 
     @property
     def cloud_browser_session_id(self) -> str | None:
         return self._cloud_browser_session_id
 
-    async def close(self, *, timeout: int | None = None) -> None:
-        """Closes the browser window or stops the backing cloud session."""
+    @override
+    async def _close_impl(self, *, timeout: int | None = None) -> None:
+        """Closes the browser environment or stops the backing cloud session."""
         if self._cloud_browser_session_id is None:
-            return await super().close(timeout=timeout)
+            return await self._close_browser_window(timeout=timeout)
 
         await _stop_cloud_browser_session(
             base_url=self._base_url,
@@ -1233,56 +996,193 @@ class RemoteBrowserWindow(BaseBrowserWindow):
         )
 
     def __str__(self) -> str:
-        return f"RemoteBrowserWindow(browser_window_id={self.browser_window_id})"
+        return f"RemoteBrowserEnvironment(browser_window_id={self.browser_window_id})"
 
 
-class CloudBrowserWindow(BaseBrowserWindow):
+class CloudBrowserEnvironment(BaseBrowserEnvironment):
     def __init__(
         self,
         *,
-        browser_window_id: str,
-        session_id: str,
+        session_name: str | None = None,
+        session_timeout: int | None = None,
         api_key: str | None = None,
         user_id: str | None = None,
         env: Literal["prod", "dev", None] = None,
     ) -> None:
         super().__init__(
-            api_key=api_key or os.environ.get("NARADA_API_KEY"),
-            base_url=os.getenv("NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"),
-            user_id=user_id or os.environ.get("NARADA_USER_ID"),
-            env=_normalize_narada_env(env or os.environ.get("NARADA_ENV")),
-            browser_window_id=browser_window_id,
+            api_key=api_key,
+            user_id=user_id,
+            env=env,
         )
-        self._session_id = session_id
+        self._session_name = session_name
+        self._session_timeout = session_timeout
+        self._session_id: str | None = None
 
     @property
     def cloud_browser_session_id(self) -> str:
+        if self._session_id is None:
+            raise RuntimeError(
+                "Cloud browser environment is not initialized yet. Call `await env.start()` "
+                "or run an agent action first."
+            )
         return self._session_id
 
-    async def close(self, *, timeout: int | None = None) -> None:
-        """Stops the cloud browser session."""
-        await _stop_cloud_browser_session(
+    async def _initialize(self) -> None:
+        response_data = await _create_and_initialize_cloud_browser_session(
             base_url=self._base_url,
             auth_headers=await self._get_auth_headers(),
-            session_id=self._session_id,
-            timeout=timeout,
+            session_name=self._session_name,
+            session_timeout=self._session_timeout,
+            require_extension=True,
         )
+        self._browser_window_id = response_data["browser_window_id"]
+        self._session_id = response_data["session_id"]
+
+    @override
+    async def _close_impl(self, *, timeout: int | None = None) -> None:
+        """Stops the cloud browser session."""
+        if self._session_id is not None:
+            await _stop_cloud_browser_session(
+                base_url=self._base_url,
+                auth_headers=await self._get_auth_headers(),
+                session_id=self._session_id,
+                timeout=timeout,
+            )
 
     async def get_downloaded_files(self) -> list[SessionDownloadItem]:
         """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
         return await _get_cloud_browser_downloads(
             base_url=self._base_url,
             auth_headers=await self._get_auth_headers(),
-            session_id=self._session_id,
+            session_id=self.cloud_browser_session_id,
         )
 
     def __str__(self) -> str:
         return (
-            "CloudBrowserWindow("
+            "CloudBrowserEnvironment("
             f"cloud_browser_session_id={self._session_id}, "
             f"browser_window_id={self.browser_window_id}"
             ")"
         )
+
+
+class LambdaEnvironment(Environment):
+    """Cloud execution environment without browser actions."""
+
+    def __init__(
+        self,
+        *,
+        session_name: str | None = None,
+        session_timeout: int | None = None,
+        api_key: str | None = None,
+        user_id: str | None = None,
+        env: Literal["prod", "dev", None] = None,
+    ) -> None:
+        super().__init__(api_key=api_key, user_id=user_id, env=env)
+        self._session_name = session_name
+        self._session_timeout = session_timeout
+        self._session_id: str | None = None
+        self._browser_window_id: str | None = None
+
+    @property
+    def session_id(self) -> str:
+        if self._session_id is None:
+            raise RuntimeError(
+                "Lambda environment is not initialized yet. Call `await env.start()` "
+                "or run an agent first."
+            )
+        return self._session_id
+
+    @property
+    def cloud_browser_session_id(self) -> str | None:
+        return self._session_id
+
+    @property
+    def _dispatch_browser_window_id(self) -> str | None:
+        return self._browser_window_id
+
+    async def _initialize(self) -> None:
+        response_data = await _create_and_initialize_cloud_browser_session(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_name=self._session_name,
+            session_timeout=self._session_timeout,
+            require_extension=False,
+        )
+        self._browser_window_id = response_data["browser_window_id"]
+        self._session_id = response_data["session_id"]
+
+    async def _close_impl(self, *, timeout: int | None = None) -> None:
+        if self._session_id is not None:
+            await _stop_cloud_browser_session(
+                base_url=self._base_url,
+                auth_headers=await self._get_auth_headers(),
+                session_id=self._session_id,
+                timeout=timeout,
+            )
+
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        """Return files downloaded during this lambda session (file name, size, presigned GET URL per file)."""
+        return await _get_cloud_browser_downloads(
+            base_url=self._base_url,
+            auth_headers=await self._get_auth_headers(),
+            session_id=self.session_id,
+        )
+
+
+async def _create_and_initialize_cloud_browser_session(
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    session_name: str | None,
+    session_timeout: int | None,
+    require_extension: bool,
+) -> dict[str, Any]:
+    endpoint_url = (
+        f"{base_url}/cloud-browser/create-and-initialize-cloud-browser-session"
+    )
+    request_body: dict[str, Any] = {
+        "session_name": session_name,
+        "session_timeout": session_timeout,
+        "require_extension": require_extension,
+    }
+    initiator_remote_dispatch_request_id = os.environ.get(
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", ""
+    ).strip()
+    if not initiator_remote_dispatch_request_id:
+        raise ValueError("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID is required")
+    request_body["initiator_remote_dispatch_request_id"] = (
+        initiator_remote_dispatch_request_id
+    )
+
+    response = None
+    max_attempts = 3
+    retry_backoff_seconds = (2.0, 4.0, 0.0)  # no wait after last attempt
+    for attempt in range(max_attempts):
+        # Due to unknown network issues, sometimes create-and-initialize-cloud-browser-session API call fails.
+        try:
+            response = await pyfetch(
+                endpoint_url,
+                method="POST",
+                headers=auth_headers,
+                body=json.dumps(request_body),
+            )
+            if response.ok:
+                break
+        except Exception:
+            await asyncio.sleep(retry_backoff_seconds[attempt])
+            continue
+
+    if response is None or not response.ok:
+        resp_status = response.status if response is not None else "unknown status"
+        resp_text = await response.text() if response is not None else "unknown error"
+        raise RuntimeError(
+            "Failed to create and initialize cloud browser session after 3 attempts with backoff: "
+            f"{resp_status}: {resp_text}\n"
+            f"Endpoint URL: {endpoint_url}"
+        )
+
+    return await response.json()
 
 
 def _build_cloud_browser_url(

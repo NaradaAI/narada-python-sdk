@@ -7,8 +7,9 @@ which assembles a ``PythonAgentRunTrace`` that surfaces on the Narada
 observability dashboard.
 
 The module is private: user code should not import from here. The public
-surface lives in ``window.py`` and ``utils.py``; instrumentation is applied
-at those module boundaries by calling into this module.
+surface lives in ``agent.py``, ``environment.py``, and ``utils.py``;
+instrumentation is applied at those module boundaries by calling into this
+module.
 """
 
 from __future__ import annotations

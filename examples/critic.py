@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import CriticConfig, Narada
+from narada import Agent, BrowserEnvironment, CriticConfig
 from pydantic import BaseModel, Field
 
 
@@ -10,10 +10,10 @@ class SearchCriticOutput(BaseModel):
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
+    try:
         # Define a critic that verifies the agent completed the task and extracts
         # additional structured information from the agent's actions.
         critic = CriticConfig(
@@ -26,13 +26,15 @@ async def main() -> None:
 
         # Run a task with the critic. After the main agent finishes, the critic
         # evaluates whether the task was completed successfully.
-        response = await window.agent(
+        response = await agent.run(
             prompt='Search Google for "Narada AI" and tell me how many results were found.',
             critic=critic,
         )
 
         print("Agent response:", response.text)
         print("Critic result:", response.critic_result.validation_passed)
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":
