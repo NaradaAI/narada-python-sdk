@@ -285,6 +285,7 @@ class PythonExtensionActionEvent(BaseModel):
     kind: Literal["extensionAction"] = "extensionAction"
     ts_start: int
     ts_end: int
+    action_execution_id: str | None = None
     # Matches the snake_case `name` discriminator on ExtensionActionRequest
     # (e.g. "go_to_url", "get_screenshot"). Carried as a plain string rather
     # than a Literal so adding a new extension action in the future does not

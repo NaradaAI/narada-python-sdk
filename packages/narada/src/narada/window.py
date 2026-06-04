@@ -340,9 +340,6 @@ class BaseBrowserWindow(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         execution_mode: _RemoteDispatchExecutionMode = "client",
         cloud_browser_session_name: str | None = None,
-        cloud_browser_app_origin_override: str | None = None,
-        cloud_browser_extension_s3_bucket: str | None = None,
-        cloud_browser_extension_s3_key: str | None = None,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
@@ -371,9 +368,6 @@ class BaseBrowserWindow(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         execution_mode: _RemoteDispatchExecutionMode = "client",
         cloud_browser_session_name: str | None = None,
-        cloud_browser_app_origin_override: str | None = None,
-        cloud_browser_extension_s3_bucket: str | None = None,
-        cloud_browser_extension_s3_key: str | None = None,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
@@ -402,9 +396,6 @@ class BaseBrowserWindow(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         execution_mode: _RemoteDispatchExecutionMode = "client",
         cloud_browser_session_name: str | None = None,
-        cloud_browser_app_origin_override: str | None = None,
-        cloud_browser_extension_s3_bucket: str | None = None,
-        cloud_browser_extension_s3_key: str | None = None,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
@@ -433,9 +424,6 @@ class BaseBrowserWindow(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         execution_mode: _RemoteDispatchExecutionMode = "client",
         cloud_browser_session_name: str | None = None,
-        cloud_browser_app_origin_override: str | None = None,
-        cloud_browser_extension_s3_bucket: str | None = None,
-        cloud_browser_extension_s3_key: str | None = None,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
@@ -464,9 +452,6 @@ class BaseBrowserWindow(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         execution_mode: _RemoteDispatchExecutionMode = "client",
         cloud_browser_session_name: str | None = None,
-        cloud_browser_app_origin_override: str | None = None,
-        cloud_browser_extension_s3_bucket: str | None = None,
-        cloud_browser_extension_s3_key: str | None = None,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> Response:
@@ -496,12 +481,6 @@ class BaseBrowserWindow(ABC):
             body["executionMode"] = execution_mode
         if cloud_browser_session_name is not None:
             body["cloudBrowserSessionName"] = cloud_browser_session_name
-        if cloud_browser_app_origin_override is not None:
-            body["cloudBrowserAppOriginOverride"] = cloud_browser_app_origin_override
-        if cloud_browser_extension_s3_bucket is not None:
-            body["cloudBrowserExtensionS3Bucket"] = cloud_browser_extension_s3_bucket
-        if cloud_browser_extension_s3_key is not None:
-            body["cloudBrowserExtensionS3Key"] = cloud_browser_extension_s3_key
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id

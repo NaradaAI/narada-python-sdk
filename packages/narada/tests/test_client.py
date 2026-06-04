@@ -153,7 +153,7 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
 
 
 @pytest.mark.asyncio
-async def test_remote_dispatch_forwards_managed_cloud_browser_overrides(
+async def test_remote_dispatch_forwards_managed_cloud_browser_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeRemoteDispatchSession.post_calls = []
@@ -170,9 +170,6 @@ async def test_remote_dispatch_forwards_managed_cloud_browser_overrides(
         prompt="Fill the RPA challenge form.",
         execution_mode="cloud_browser",
         cloud_browser_session_name="proof-session",
-        cloud_browser_app_origin_override="https://proof.example.test",
-        cloud_browser_extension_s3_bucket="narada-chrome-extension-test-builds",
-        cloud_browser_extension_s3_key="proof/branch-extension.zip",
         timeout=30,
     )
 
@@ -191,7 +188,4 @@ async def test_remote_dispatch_forwards_managed_cloud_browser_overrides(
         "timeZone": "America/Los_Angeles",
         "executionMode": "cloud_browser",
         "cloudBrowserSessionName": "proof-session",
-        "cloudBrowserAppOriginOverride": "https://proof.example.test",
-        "cloudBrowserExtensionS3Bucket": "narada-chrome-extension-test-builds",
-        "cloudBrowserExtensionS3Key": "proof/branch-extension.zip",
     }

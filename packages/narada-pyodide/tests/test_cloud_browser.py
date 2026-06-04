@@ -885,6 +885,30 @@ def test_parse_action_trace_preserves_run_custom_agent_children(
     assert parsed_trace[0].children[0].message == "TRACE_GUI_CHILD_DONE"
 
 
+def test_python_extension_action_trace_preserves_action_execution_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(CORE_SRC))
+
+    from narada_core.tracing.model import PythonExtensionActionEvent
+
+    parsed_event = PythonExtensionActionEvent.model_validate(
+        {
+            "kind": "extensionAction",
+            "ts_start": 10,
+            "ts_end": 20,
+            "action_execution_id": "action_123",
+            "action_name": "agentic_selector",
+            "request_summary": {"action": "click"},
+            "result_summary": {"status": "success"},
+            "status": "success",
+        }
+    )
+
+    assert parsed_event.action_execution_id == "action_123"
+    assert parsed_event.model_dump()["action_execution_id"] == "action_123"
+
+
 @pytest.mark.asyncio
 async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,

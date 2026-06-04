@@ -325,6 +325,7 @@ class PythonExtensionActionEvent(TypedDict):
     kind: Literal["extensionAction"]
     ts_start: int
     ts_end: int
+    action_execution_id: NotRequired[str]
     action_name: str
     request_summary: dict[str, object]
     result_summary: NotRequired[dict[str, object]]
