@@ -93,14 +93,14 @@ from pyodide.http import pyfetch
 from . import _trace
 from .retry import pyfetch_with_retries
 
-# Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
+# Magic variable injected by the frontend JavaScript bridge that stores the IDs of the current runnables
 # in the stack on the frontend.
 
 logger = logging.getLogger(__name__)
 
 
 def _parent_run_ids() -> list[str]:
-    # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the JavaScript harness.
+    # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the frontend JavaScript bridge.
     # Before we can use it as a regular Python list, we need to call `.to_py()` on it.
     return list(
         cast(
@@ -137,7 +137,7 @@ def _remote_dispatch_parent_request_id() -> str | None:
 
 
 if TYPE_CHECKING:
-    # Magic function injected by the JavaScript harness to get the current user's ID token.
+    # Magic function injected by the frontend JavaScript bridge to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
 
     _narada_request_id: str | None

@@ -11,6 +11,7 @@ from narada.window import (
     create_side_panel_url,
 )
 from narada_core.errors import NaradaTimeoutError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 class _FakeResponse:
@@ -315,14 +316,14 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_side_panel_readiness_uses_visible_page_without_reconnect() -> None:
+async def test_cloud_browser_side_panel_probe_uses_visible_page_without_reconnect() -> None:
     client = Narada(auth_headers={"x-api-key": "test-key"})
     browser = _fake_browser_with_pages([_fake_side_panel_page()])
     client._playwright = SimpleNamespace(
         chromium=SimpleNamespace(connect_over_cdp=AsyncMock())
     )
 
-    await client._ensure_cloud_browser_side_panel_page(
+    visible = await client._probe_cloud_browser_side_panel_page(
         browser=browser,
         config=BrowserConfig(interactive=False),
         browser_window_id="browser-window-123",
@@ -330,12 +331,13 @@ async def test_cloud_browser_side_panel_readiness_uses_visible_page_without_reco
         cdp_auth_headers={"Authorization": "signed-cdp"},
     )
 
+    assert visible is True
     browser.close.assert_not_awaited()
     client._playwright.chromium.connect_over_cdp.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_side_panel_readiness_can_appear_after_reconnect(
+async def test_cloud_browser_side_panel_probe_can_appear_after_reconnect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = Narada(auth_headers={"x-api-key": "test-key"})
@@ -347,7 +349,7 @@ async def test_cloud_browser_side_panel_readiness_can_appear_after_reconnect(
     sleep = AsyncMock()
     monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
 
-    await client._ensure_cloud_browser_side_panel_page(
+    visible = await client._probe_cloud_browser_side_panel_page(
         browser=first_browser,
         config=BrowserConfig(interactive=False),
         browser_window_id="browser-window-123",
@@ -355,17 +357,19 @@ async def test_cloud_browser_side_panel_readiness_can_appear_after_reconnect(
         cdp_auth_headers={"Authorization": "signed-cdp"},
     )
 
+    assert visible is True
     first_browser.close.assert_awaited_once()
     sleep.assert_awaited_once_with(1)
     client._playwright.chromium.connect_over_cdp.assert_awaited_once_with(
         "wss://agentcore.example.test/session-123",
         headers={"Authorization": "signed-cdp"},
+        timeout=10_000,
     )
     second_browser.close.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_side_panel_readiness_times_out_when_page_never_appears(
+async def test_cloud_browser_side_panel_probe_returns_false_when_page_never_appears(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = Narada(auth_headers={"x-api-key": "test-key"})
@@ -377,17 +381,46 @@ async def test_cloud_browser_side_panel_readiness_times_out_when_page_never_appe
     sleep = AsyncMock()
     monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
 
-    with pytest.raises(NaradaTimeoutError):
-        await client._ensure_cloud_browser_side_panel_page(
-            browser=first_browser,
-            config=BrowserConfig(interactive=False),
-            browser_window_id="browser-window-123",
-            cdp_websocket_url="wss://agentcore.example.test/session-123",
-            cdp_auth_headers={"Authorization": "signed-cdp"},
-        )
+    visible = await client._probe_cloud_browser_side_panel_page(
+        browser=first_browser,
+        config=BrowserConfig(interactive=False),
+        browser_window_id="browser-window-123",
+        cdp_websocket_url="wss://agentcore.example.test/session-123",
+        cdp_auth_headers={"Authorization": "signed-cdp"},
+    )
 
-    assert sleep.await_count == 4
-    assert client._playwright.chromium.connect_over_cdp.await_count == 4
+    assert visible is False
+    assert sleep.await_count == 1
+    assert client._playwright.chromium.connect_over_cdp.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_side_panel_probe_returns_false_on_reconnect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Narada(auth_headers={"x-api-key": "test-key"})
+    first_browser = _fake_browser_with_pages([])
+    client._playwright = SimpleNamespace(
+        chromium=SimpleNamespace(
+            connect_over_cdp=AsyncMock(
+                side_effect=PlaywrightTimeoutError("Timed out reconnecting")
+            )
+        )
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
+
+    visible = await client._probe_cloud_browser_side_panel_page(
+        browser=first_browser,
+        config=BrowserConfig(interactive=False),
+        browser_window_id="browser-window-123",
+        cdp_websocket_url="wss://agentcore.example.test/session-123",
+        cdp_auth_headers={"Authorization": "signed-cdp"},
+    )
+
+    assert visible is False
+    first_browser.close.assert_awaited_once()
+    sleep.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio

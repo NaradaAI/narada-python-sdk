@@ -128,9 +128,9 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     monkeypatch.setattr(
         narada, "_wait_for_browser_window_id", wait_for_browser_window_id
     )
-    ensure_side_panel_page = AsyncMock()
+    probe_side_panel_page = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        narada, "_ensure_cloud_browser_side_panel_page", ensure_side_panel_page
+        narada, "_probe_cloud_browser_side_panel_page", probe_side_panel_page
     )
 
     window = await narada._initialize_cloud_browser_window(
@@ -142,7 +142,7 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     )
 
     assert window.browser_window_id == "window-123"
-    ensure_side_panel_page.assert_awaited_once()
+    probe_side_panel_page.assert_awaited_once()
     assert page.goto_calls == [
         {
             "url": "https://example.test/initialize",

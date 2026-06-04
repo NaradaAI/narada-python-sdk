@@ -2,7 +2,7 @@
 
 This module is used internally by narada-pyodide to forward structured
 telemetry (sub-agent invocations, extension actions, side effects) from
-Python code running inside the Pyodide worker to the JavaScript harness,
+Python code running inside the Pyodide worker to the frontend JavaScript runtime,
 which assembles a ``PythonAgentRunTrace`` that surfaces on the Narada
 observability dashboard.
 
@@ -22,7 +22,7 @@ from narada_core.actions.models import ExtensionActionRequest
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    # Injected by the JavaScript harness at worker startup. narada-pyodide is
+    # Injected by the frontend JavaScript runtime at worker startup. narada-pyodide is
     # only ever imported under a Pyodide worker that has registered this
     # builtin; there is no non-Pyodide code path.
     def _narada_emit_trace_event(event_json: str) -> None: ...
@@ -37,7 +37,7 @@ def now_ms() -> int:
 
 
 def emit_trace_event(event: dict[str, Any]) -> None:
-    """Forward a single trace event to the JavaScript harness.
+    """Forward a single trace event to the frontend JavaScript runtime.
 
     The event must be JSON-serialisable and shaped as one of the
     ``PythonTraceEvent`` variants defined in ``narada_core.tracing.model``.
@@ -70,7 +70,7 @@ def dump_model(model: BaseModel) -> dict[str, Any]:
 #
 # Each emitter builds a JSON-serialisable event shaped to match one of the
 # ``PythonTraceEvent`` Pydantic variants in ``narada_core.tracing.model``
-# and forwards it to the JavaScript harness. Optional fields are included
+# and forwards it to the frontend JavaScript runtime. Optional fields are included
 # only when non-None so the JSON stays compact.
 # ---------------------------------------------------------------------------
 

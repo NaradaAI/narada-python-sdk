@@ -362,20 +362,27 @@ class Narada:
             auth_headers=self._auth_headers,
         )
 
-        await self._ensure_cloud_browser_side_panel_page(
+        side_panel_visible = await self._probe_cloud_browser_side_panel_page(
             browser=browser,
             config=config,
             browser_window_id=browser_window_id,
             cdp_websocket_url=cdp_websocket_url,
             cdp_auth_headers=cdp_auth_headers,
         )
+        if not side_panel_visible:
+            logging.warning(
+                "Cloud Browser side panel page was not visible through CDP after "
+                "initialization; continuing because browser window id %s was issued. "
+                "Remote command bridge readiness should be verified separately.",
+                browser_window_id,
+            )
 
         if config.interactive:
             self._print_success_message(browser_window_id)
 
         return cloud_window
 
-    async def _ensure_cloud_browser_side_panel_page(
+    async def _probe_cloud_browser_side_panel_page(
         self,
         *,
         browser: Browser,
@@ -383,18 +390,19 @@ class Narada:
         browser_window_id: str,
         cdp_websocket_url: str,
         cdp_auth_headers: dict[str, str],
-    ) -> None:
-        """Ensure the side-panel app that processes remote-dispatch requests is alive.
+    ) -> bool:
+        """Best-effort check that the extension side-panel page is visible through CDP.
 
         The initialize page opens the extension side panel, but CDP sessions do not always see the
-        side-panel page immediately. Local initialization already reconnects before trusting the
-        side-panel page; cloud initialization needs the same readiness invariant because backend
-        remote-dispatch writes target the returned browser window ID.
+        side-panel page immediately. A browser-window-id sentinel is the required initialization
+        boundary for Cloud Browser. This probe is intentionally non-fatal because AgentCore CDP
+        reconnects can be flaky even after the extension has authenticated and registered its
+        command bridge; callers that need remote control must verify the command bridge separately.
         """
         assert self._playwright is not None
 
         side_panel_url = create_side_panel_url(config, browser_window_id)
-        max_attempts = 5
+        max_attempts = 2
         current_browser = browser
 
         for attempt in range(max_attempts):
@@ -404,18 +412,27 @@ class Narada:
                 None,
             )
             if side_panel_page is not None:
-                return
+                return True
 
             if attempt == max_attempts - 1:
                 break
 
             await current_browser.close()
             await asyncio.sleep(1)
-            current_browser = await self._playwright.chromium.connect_over_cdp(
-                cdp_websocket_url, headers=cdp_auth_headers
-            )
+            try:
+                current_browser = await self._playwright.chromium.connect_over_cdp(
+                    cdp_websocket_url,
+                    headers=cdp_auth_headers,
+                    timeout=10_000,
+                )
+            except (PlaywrightError, PlaywrightTimeoutError):
+                logging.warning(
+                    "Cloud Browser side panel CDP reconnect failed during readiness probe",
+                    exc_info=True,
+                )
+                return False
 
-        raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
+        return False
 
     async def initialize_in_existing_browser_window(
         self, config: BrowserConfig | None = None

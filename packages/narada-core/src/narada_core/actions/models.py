@@ -61,7 +61,9 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     action_trace: tracing_model.ActionTrace | None = None
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
-    execution_trace_context: dict[str, Any] | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
 
 
 class AgenticSelectorClickAction(TypedDict):
