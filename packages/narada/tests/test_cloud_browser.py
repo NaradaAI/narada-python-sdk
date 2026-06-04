@@ -257,7 +257,9 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigat
     env = _build_cloud_environment_with_page(page)
 
     wait_for_browser_window_id = AsyncMock(return_value="browser-window-123")
-    monkeypatch.setattr(env, "_wait_for_browser_window_id", wait_for_browser_window_id)
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
 
     await env._initialize_cloud_browser_window(
         cdp_websocket_url="wss://agentcore.example.test/session-123",
@@ -293,7 +295,9 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_retry_navigat
             "browser-window-123",
         ]
     )
-    monkeypatch.setattr(env, "_wait_for_browser_window_id", wait_for_browser_window_id)
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
 
     await env._initialize_cloud_browser_window(
         cdp_websocket_url="wss://agentcore.example.test/session-123",
