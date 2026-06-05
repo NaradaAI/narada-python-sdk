@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "overall_verdict": {
+      "type": "string",
+      "enum": ["issues_found", "lgtm"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inline_comments": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["path", "line", "body"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["overall_verdict", "summary", "inline_comments"],
+  "additionalProperties": false
+}
