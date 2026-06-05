@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
+import narada.environment as environment_module
 import pytest
-from narada import window as window_module
-from narada.client import Narada
+from narada import CloudBrowserEnvironment, RemoteBrowserEnvironment
 from narada.config import BrowserConfig
-from narada.window import RemoteBrowserWindow
 
 
 class _FakePage:
@@ -119,34 +116,32 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage()
-    narada = Narada(auth_headers={"x-test": "true"})
-    narada._playwright = _FakePlaywright(page)
+    env = CloudBrowserEnvironment(
+        config=BrowserConfig(interactive=False),
+        auth_headers={"x-test": "true"},
+    )
+    env._playwright = _FakePlaywright(page)
 
     async def wait_for_browser_window_id(*args: object, **kwargs: object) -> str:
         return "window-123"
 
     monkeypatch.setattr(
-        narada, "_wait_for_browser_window_id", wait_for_browser_window_id
-    )
-    probe_side_panel_page = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        narada, "_probe_cloud_browser_side_panel_page", probe_side_panel_page
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
     )
 
-    window = await narada._initialize_cloud_browser_window(
-        config=BrowserConfig(interactive=False),
+    await env._initialize_cloud_browser_window(
         cdp_websocket_url="wss://example.test/cdp",
         session_id="session-123",
         login_url="https://example.test/initialize",
         cdp_auth_headers={"authorization": "Bearer test"},
     )
 
-    assert window.browser_window_id == "window-123"
-    probe_side_panel_page.assert_awaited_once()
+    assert env.browser_window_id == "window-123"
+    assert env.cloud_browser_session_id == "session-123"
     assert page.goto_calls == [
         {
             "url": "https://example.test/initialize",
-            "timeout": 60_000,
+            "timeout": 15_000,
             "wait_until": "domcontentloaded",
         }
     ]
@@ -159,17 +154,18 @@ async def test_remote_dispatch_forwards_managed_cloud_browser_request(
     _FakeRemoteDispatchSession.post_calls = []
     _FakeRemoteDispatchSession.get_calls = []
     monkeypatch.setenv("NARADA_API_BASE_URL", "https://api.example.test/fast/v2")
-    monkeypatch.setattr(window_module.aiohttp, "ClientSession", _FakeRemoteDispatchSession)
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", _FakeRemoteDispatchSession
+    )
 
-    window = RemoteBrowserWindow(
+    env = RemoteBrowserEnvironment(
         browser_window_id="sdk-managed-cloud-browser",
+        cloud_browser_session_id="cloud-session-123",
         auth_headers={"x-test": "true"},
     )
 
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="Fill the RPA challenge form.",
-        execution_mode="cloud_browser",
-        cloud_browser_session_name="proof-session",
         timeout=30,
     )
 
@@ -186,6 +182,5 @@ async def test_remote_dispatch_forwards_managed_cloud_browser_request(
         "prompt": "/Operator Fill the RPA challenge form.",
         "browserWindowId": "sdk-managed-cloud-browser",
         "timeZone": "America/Los_Angeles",
-        "executionMode": "cloud_browser",
-        "cloudBrowserSessionName": "proof-session",
+        "cloudBrowserSessionId": "cloud-session-123",
     }
