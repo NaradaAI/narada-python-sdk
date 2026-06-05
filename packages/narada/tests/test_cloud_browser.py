@@ -1,17 +1,16 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
-import narada.client as client_module
 import pytest
-from narada.client import Narada
-from narada.config import BrowserConfig
-from narada.window import (
-    CloudBrowserWindow,
-    RemoteBrowserWindow,
-    create_side_panel_url,
+from narada import (
+    Agent,
+    CloudBrowserEnvironment,
+    LambdaEnvironment,
+    RemoteBrowserEnvironment,
 )
+from narada.config import BrowserConfig
 from narada_core.errors import NaradaTimeoutError
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 class _FakeResponse:
@@ -76,36 +75,23 @@ class _RemoteDispatchFakeClientSession:
         raise AssertionError(f"Unexpected GET URL: {url}")
 
 
-def _fake_browser_with_pages(pages: list[object]) -> SimpleNamespace:
-    return SimpleNamespace(
-        contexts=[SimpleNamespace(pages=pages)],
-        close=AsyncMock(),
+def _build_cloud_environment_with_page(page: AsyncMock) -> CloudBrowserEnvironment:
+    env = CloudBrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
     )
-
-
-def _fake_side_panel_page(
-    browser_window_id: str = "browser-window-123",
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        url=create_side_panel_url(BrowserConfig(interactive=False), browser_window_id)
-    )
-
-
-def _build_client_with_cloud_page(page: AsyncMock) -> Narada:
-    client = Narada(auth_headers={"x-api-key": "test-key"})
-    page.url = "about:blank"
-    browser = _fake_browser_with_pages([page, _fake_side_panel_page()])
-    client._playwright = SimpleNamespace(
+    browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+    env._playwright = SimpleNamespace(
         chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser))
     )
-    return client
+    return env
 
 
 @pytest.mark.asyncio
 async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import narada.window as window_module
+    import narada.environment as environment_module
 
     fake_session = _RemoteDispatchFakeClientSession(
         [
@@ -170,18 +156,20 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
             },
         ]
     )
-    monkeypatch.setattr(window_module.aiohttp, "ClientSession", lambda: fake_session)
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
     sleep = AsyncMock()
-    monkeypatch.setattr(window_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
     observed_input_ids: list[str] = []
 
     async def on_input_required(active_input_request) -> None:
         observed_input_ids.append(active_input_request.input_id)
 
-    window = RemoteBrowserWindow(browser_window_id="bw-1", api_key="test-key")
+    env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
 
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="Summarize",
         timeout=5,
         on_input_required=on_input_required,
@@ -193,10 +181,66 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
 
 
 @pytest.mark.asyncio
-async def test_extensionless_cloud_browser_uses_backend_initialization(
+async def test_dispatch_request_includes_execution_trace_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import narada.client as client_module
+    import narada.environment as environment_module
+
+    trace_context = {
+        "type": "executionTraceInheritanceContext",
+        "schemaVersion": 1,
+        "traceId": "trace-parent",
+        "parentSegmentId": "segment-local",
+    }
+    monkeypatch.setenv("NARADA_EXECUTION_TRACE_CONTEXT", json.dumps(trace_context))
+    fake_session = _RemoteDispatchFakeClientSession(
+        [
+            {
+                "status": "success",
+                "response": {"text": "ok"},
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
+    response = await env._dispatch_request(prompt="Summarize", timeout=5)
+
+    assert response["status"] == "success"
+    assert fake_session.dispatched_body is not None
+    assert fake_session.dispatched_body["executionTraceContext"] == trace_context
+
+
+@pytest.mark.asyncio
+async def test_extension_action_request_includes_action_execution_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _FakeClientSession({"status": "success", "data": None})
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
+    await env.close()
+
+    assert fake_session.posts
+    action_execution_id = fake_session.posts[0]["json"]["actionExecutionId"]
+    assert action_execution_id.startswith("action_")
+
+
+@pytest.mark.asyncio
+async def test_lambda_environment_uses_backend_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
 
     fake_session = _FakeClientSession(
         {
@@ -205,26 +249,19 @@ async def test_extensionless_cloud_browser_uses_backend_initialization(
             "browser_window_id": "browser-window-123",
         }
     )
-    monkeypatch.setattr(client_module.aiohttp, "ClientSession", lambda: fake_session)
-
-    async def fail_if_client_initializes(*args, **kwargs):
-        raise AssertionError(
-            "extensionless cloud sessions should initialize server-side"
-        )
-
-    narada = Narada(auth_headers={"x-api-key": "test-key"})
     monkeypatch.setattr(
-        narada, "_initialize_cloud_browser_window", fail_if_client_initializes
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
 
-    window = await narada.open_and_initialize_cloud_browser_window(
+    env = LambdaEnvironment(
+        auth_headers={"x-api-key": "test-key"},
         session_name="fast-session",
         session_timeout=300,
-        require_extension=False,
     )
+    await env.start()
 
-    assert window.browser_window_id == "browser-window-123"
-    assert window.cloud_browser_session_id == "session-123"
+    assert env.session_id == "session-123"
+    assert env.cloud_browser_session_id == "session-123"
     assert len(fake_session.posts) == 1
     post = fake_session.posts[0]
     assert post["url"].endswith(
@@ -239,19 +276,49 @@ async def test_extensionless_cloud_browser_uses_backend_initialization(
 
 
 @pytest.mark.asyncio
-async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_login_navigation(
+async def test_lambda_environment_exposes_downloaded_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    downloaded_files = [
+        environment_module.SessionDownloadItem(
+            file_name="report.pdf",
+            size=42,
+            download_url="https://example.com/report.pdf",
+        )
+    ]
+    get_downloads = AsyncMock(return_value=downloaded_files)
+    monkeypatch.setattr(
+        environment_module,
+        "_get_cloud_browser_downloads",
+        get_downloads,
+    )
+
+    env = LambdaEnvironment(auth_headers={"x-api-key": "test-key"})
+    env._session_id = "session-123"
+
+    assert await env.get_downloaded_files() == downloaded_files
+    get_downloads.assert_awaited_once_with(
+        base_url=env._base_url,
+        auth_headers={"x-api-key": "test-key"},
+        session_id="session-123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = AsyncMock()
-    client = _build_client_with_cloud_page(page)
+    env = _build_cloud_environment_with_page(page)
 
     wait_for_browser_window_id = AsyncMock(return_value="browser-window-123")
     monkeypatch.setattr(
-        client, "_wait_for_browser_window_id", wait_for_browser_window_id
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
     )
 
-    window = await client._initialize_cloud_browser_window(
-        config=BrowserConfig(interactive=False),
+    await env._initialize_cloud_browser_window(
         cdp_websocket_url="wss://agentcore.example.test/session-123",
         session_id="session-123",
         login_url="https://app.narada.ai/chat?customToken=test-token",
@@ -260,7 +327,7 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_login_n
 
     page.goto.assert_awaited_once_with(
         "https://app.narada.ai/chat?customToken=test-token",
-        timeout=60_000,
+        timeout=15_000,
         wait_until="domcontentloaded",
     )
     wait_for_browser_window_id.assert_awaited_once_with(
@@ -268,17 +335,16 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_login_n
         BrowserConfig(interactive=False),
         timeout=30_000,
     )
-    assert window.browser_window_id == "browser-window-123"
-    assert window.cloud_browser_session_id == "session-123"
-    client._playwright.chromium.connect_over_cdp.return_value.close.assert_not_awaited()
+    assert env.browser_window_id == "browser-window-123"
+    assert env.cloud_browser_session_id == "session-123"
 
 
 @pytest.mark.asyncio
-async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_navigation(
+async def test_cloud_browser_environment_uses_domcontentloaded_for_retry_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = AsyncMock()
-    client = _build_client_with_cloud_page(page)
+    env = _build_cloud_environment_with_page(page)
 
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
@@ -287,11 +353,10 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
         ]
     )
     monkeypatch.setattr(
-        client, "_wait_for_browser_window_id", wait_for_browser_window_id
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
     )
 
-    window = await client._initialize_cloud_browser_window(
-        config=BrowserConfig(interactive=False),
+    await env._initialize_cloud_browser_window(
         cdp_websocket_url="wss://agentcore.example.test/session-123",
         session_id="session-123",
         login_url="https://app.narada.ai/chat?customToken=test-token",
@@ -301,141 +366,32 @@ async def test_initialize_cloud_browser_window_uses_domcontentloaded_for_retry_n
     assert page.goto.await_args_list == [
         call(
             "https://app.narada.ai/chat?customToken=test-token",
-            timeout=60_000,
+            timeout=15_000,
             wait_until="domcontentloaded",
         ),
         call(
             "https://app.narada.ai/chat?customToken=test-token",
-            timeout=60_000,
+            timeout=15_000,
             wait_until="domcontentloaded",
         ),
     ]
     assert wait_for_browser_window_id.await_count == 2
-    assert window.browser_window_id == "browser-window-123"
-    client._playwright.chromium.connect_over_cdp.return_value.close.assert_not_awaited()
+    assert env.browser_window_id == "browser-window-123"
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_side_panel_probe_uses_visible_page_without_reconnect() -> None:
-    client = Narada(auth_headers={"x-api-key": "test-key"})
-    browser = _fake_browser_with_pages([_fake_side_panel_page()])
-    client._playwright = SimpleNamespace(
-        chromium=SimpleNamespace(connect_over_cdp=AsyncMock())
-    )
-
-    visible = await client._probe_cloud_browser_side_panel_page(
-        browser=browser,
-        config=BrowserConfig(interactive=False),
-        browser_window_id="browser-window-123",
-        cdp_websocket_url="wss://agentcore.example.test/session-123",
-        cdp_auth_headers={"Authorization": "signed-cdp"},
-    )
-
-    assert visible is True
-    browser.close.assert_not_awaited()
-    client._playwright.chromium.connect_over_cdp.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_cloud_browser_side_panel_probe_can_appear_after_reconnect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = Narada(auth_headers={"x-api-key": "test-key"})
-    first_browser = _fake_browser_with_pages([])
-    second_browser = _fake_browser_with_pages([_fake_side_panel_page()])
-    client._playwright = SimpleNamespace(
-        chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=second_browser))
-    )
-    sleep = AsyncMock()
-    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
-
-    visible = await client._probe_cloud_browser_side_panel_page(
-        browser=first_browser,
-        config=BrowserConfig(interactive=False),
-        browser_window_id="browser-window-123",
-        cdp_websocket_url="wss://agentcore.example.test/session-123",
-        cdp_auth_headers={"Authorization": "signed-cdp"},
-    )
-
-    assert visible is True
-    first_browser.close.assert_awaited_once()
-    sleep.assert_awaited_once_with(1)
-    client._playwright.chromium.connect_over_cdp.assert_awaited_once_with(
-        "wss://agentcore.example.test/session-123",
-        headers={"Authorization": "signed-cdp"},
-        timeout=10_000,
-    )
-    second_browser.close.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_cloud_browser_side_panel_probe_returns_false_when_page_never_appears(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = Narada(auth_headers={"x-api-key": "test-key"})
-    first_browser = _fake_browser_with_pages([])
-    reconnect_browser = _fake_browser_with_pages([])
-    client._playwright = SimpleNamespace(
-        chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=reconnect_browser))
-    )
-    sleep = AsyncMock()
-    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
-
-    visible = await client._probe_cloud_browser_side_panel_page(
-        browser=first_browser,
-        config=BrowserConfig(interactive=False),
-        browser_window_id="browser-window-123",
-        cdp_websocket_url="wss://agentcore.example.test/session-123",
-        cdp_auth_headers={"Authorization": "signed-cdp"},
-    )
-
-    assert visible is False
-    assert sleep.await_count == 1
-    assert client._playwright.chromium.connect_over_cdp.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_cloud_browser_side_panel_probe_returns_false_on_reconnect_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = Narada(auth_headers={"x-api-key": "test-key"})
-    first_browser = _fake_browser_with_pages([])
-    client._playwright = SimpleNamespace(
-        chromium=SimpleNamespace(
-            connect_over_cdp=AsyncMock(
-                side_effect=PlaywrightTimeoutError("Timed out reconnecting")
-            )
-        )
-    )
-    sleep = AsyncMock()
-    monkeypatch.setattr(client_module.asyncio, "sleep", sleep)
-
-    visible = await client._probe_cloud_browser_side_panel_page(
-        browser=first_browser,
-        config=BrowserConfig(interactive=False),
-        browser_window_id="browser-window-123",
-        cdp_websocket_url="wss://agentcore.example.test/session-123",
-        cdp_auth_headers={"Authorization": "signed-cdp"},
-    )
-
-    assert visible is False
-    first_browser.close.assert_awaited_once()
-    sleep.assert_awaited_once_with(1)
-
-
-@pytest.mark.asyncio
-async def test_window_agent_exposes_workflow_trace_alias(
+async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow_trace = {"step_type": "workflow", "children": []}
-    window = CloudBrowserWindow(
+    env = RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         auth_headers={"x-api-key": "test-key"},
     )
     monkeypatch.setattr(
-        window,
-        "dispatch_request",
+        env,
+        "_dispatch_request",
         AsyncMock(
             return_value={
                 "requestId": "request-123",
@@ -452,7 +408,7 @@ async def test_window_agent_exposes_workflow_trace_alias(
         ),
     )
 
-    response = await window.agent(prompt="return a trace")
+    response = await Agent(environment=env).run("return a trace")
 
     assert response.workflow_trace == workflow_trace
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace

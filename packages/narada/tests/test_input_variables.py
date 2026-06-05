@@ -1,16 +1,15 @@
 from io import BytesIO
 
 import pytest
-from narada.window import BaseBrowserWindow, CloudBrowserWindow, RemoteBrowserWindow
+from narada import RemoteBrowserEnvironment
 
 
 @pytest.mark.asyncio
 async def test_input_variable_files_normalize_to_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    window = BaseBrowserWindow(
+    env = RemoteBrowserEnvironment(
         auth_headers={},
-        base_url="https://api.example.test",
         browser_window_id="browser-window-123",
     )
     upload_calls = []
@@ -19,14 +18,12 @@ async def test_input_variable_files_normalize_to_current_file_variable_shape(
         upload_calls.append(file)
         return {"key": "user-user-123/20260426000000000000-report.txt"}
 
-    monkeypatch.setattr(window, "_upload_file_impl", fake_upload_file_impl)
+    monkeypatch.setattr(env, "_upload_file_impl", fake_upload_file_impl)
 
     file_obj = BytesIO(b"hello")
     file_obj.name = "/tmp/report.txt"
 
-    normalized = await window._normalize_input_variables(
-        input_variables={"doc": file_obj}
-    )
+    normalized = await env._normalize_input_variables(input_variables={"doc": file_obj})
 
     assert upload_calls == [file_obj]
     assert normalized == {
@@ -39,17 +36,13 @@ async def test_input_variable_files_normalize_to_current_file_variable_shape(
     }
 
 
-def test_cloud_browser_windows_expose_session_id_for_remote_dispatch() -> None:
-    cloud_window = CloudBrowserWindow(
-        auth_headers={},
-        browser_window_id="browser-window-123",
-        session_id="session-123",
-    )
-    remote_window = RemoteBrowserWindow(
+def test_cloud_backed_remote_environment_exposes_session_id_for_remote_dispatch() -> (
+    None
+):
+    remote_env = RemoteBrowserEnvironment(
         auth_headers={},
         browser_window_id="browser-window-456",
         cloud_browser_session_id="session-456",
     )
 
-    assert cloud_window.cloud_browser_session_id == "session-123"
-    assert remote_window.cloud_browser_session_id == "session-456"
+    assert remote_env.cloud_browser_session_id == "session-456"

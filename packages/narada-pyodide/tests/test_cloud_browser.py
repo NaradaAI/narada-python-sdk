@@ -8,6 +8,10 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from narada_core.actions.models import (
+    DEFAULT_HITL_TIMEOUT_SECONDS,
+    PromptForUserInputVariable,
+)
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -42,6 +46,12 @@ class _FakeJsProxy:
 
     def to_py(self) -> object:
         return self._value
+
+
+def _sdk_config_response() -> _FakeResponse:
+    return _FakeResponse(
+        json_data={"packages": {"narada-pyodide": {"min_required_version": "0.0.1"}}}
+    )
 
 
 def _clear_modules() -> None:
@@ -83,110 +93,116 @@ def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMoc
     import importlib
 
     narada_pkg = importlib.import_module("narada")
-    client_module = importlib.import_module("narada.client")
-    window_module = importlib.import_module("narada.window")
-    window_module._narada_parent_run_ids = _FakeJsProxy([])
-    window_module._narada_request_id = None
+    env_module = importlib.import_module("narada.environment")
+    env_module._narada_parent_run_ids = _FakeJsProxy([])
+    env_module._narada_request_id = None
     monkeypatch.setattr(builtins, "_narada_request_id", None, raising=False)
-    window_module._narada_get_id_token = AsyncMock(return_value="frontend-id-token")
-    return narada_pkg, client_module, window_module
+    env_module._narada_get_id_token = AsyncMock(return_value="frontend-id-token")
+    return narada_pkg, env_module
 
 
 @pytest.mark.asyncio
-async def test_open_and_initialize_cloud_browser_window_maps_response(
+async def test_cloud_browser_environment_maps_backend_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
         "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-maps-123"
     )
     pyfetch = AsyncMock(
-        return_value=_FakeResponse(
-            json_data={
-                "session_id": "session-123",
-                "session_name": "demo",
-                "browser_window_id": "browser-window-123",
-            }
-        )
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(
+                json_data={
+                    "session_id": "session-123",
+                    "session_name": "demo",
+                    "browser_window_id": "browser-window-123",
+                }
+            ),
+        ]
     )
-    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    client = narada_pkg.Narada(api_key="test-api-key")
-    window = await client.open_and_initialize_cloud_browser_window(
+    env = narada_pkg.CloudBrowserEnvironment(
+        api_key="test-api-key",
         session_name="demo",
         session_timeout=321,
-        require_extension=False,
     )
+    await env.start()
 
-    assert isinstance(window, narada_pkg.CloudBrowserWindow)
-    assert window.browser_window_id == "browser-window-123"
-    assert window.cloud_browser_session_id == "session-123"
+    assert env.browser_window_id == "browser-window-123"
+    assert env.cloud_browser_session_id == "session-123"
 
-    call = pyfetch.await_args
-    assert call is not None
-    assert call.args[0].endswith(
+    create_call = pyfetch.await_args_list[1]
+    assert create_call.args[0].endswith(
         "/cloud-browser/create-and-initialize-cloud-browser-session"
     )
-    assert call.kwargs["method"] == "POST"
-    assert call.kwargs["headers"] == {
+    assert create_call.kwargs["method"] == "POST"
+    assert create_call.kwargs["headers"] == {
         "Content-Type": "application/json",
         "x-api-key": "test-api-key",
     }
-    assert json.loads(call.kwargs["body"]) == {
+    assert json.loads(create_call.kwargs["body"]) == {
         "session_name": "demo",
         "session_timeout": 321,
-        "require_extension": False,
+        "require_extension": True,
         "initiator_remote_dispatch_request_id": "request-maps-123",
     }
 
 
 @pytest.mark.asyncio
-async def test_open_and_initialize_cloud_browser_window_requires_initiator_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", raising=False)
-    pyfetch = AsyncMock()
-    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-
-    client = narada_pkg.Narada(api_key="test-api-key")
-    with pytest.raises(ValueError, match="NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID"):
-        await client.open_and_initialize_cloud_browser_window()
-
-    pyfetch.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_open_and_initialize_cloud_browser_window_includes_initiator_request(
+async def test_lambda_environment_uses_extensionless_initialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
-        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", " request-local-123 "
+        "NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-lambda-123"
     )
     pyfetch = AsyncMock(
-        return_value=_FakeResponse(
-            json_data={
-                "session_id": "session-123",
-                "session_name": "demo",
-                "browser_window_id": "browser-window-123",
-            }
-        )
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(
+                json_data={
+                    "session_id": "session-123",
+                    "browser_window_id": "browser-window-123",
+                }
+            ),
+        ]
     )
-    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    client = narada_pkg.Narada(api_key="test-api-key")
-    await client.open_and_initialize_cloud_browser_window()
+    env = narada_pkg.LambdaEnvironment(
+        api_key="test-api-key",
+        session_name="lambda-session",
+        session_timeout=300,
+    )
+    await env.start()
 
-    call = pyfetch.await_args
-    assert call is not None
-    assert json.loads(call.kwargs["body"]) == {
-        "session_name": None,
-        "session_timeout": None,
-        "require_extension": True,
-        "initiator_remote_dispatch_request_id": "request-local-123",
+    assert env.session_id == "session-123"
+    create_call = pyfetch.await_args_list[1]
+    assert json.loads(create_call.kwargs["body"]) == {
+        "session_name": "lambda-session",
+        "session_timeout": 300,
+        "require_extension": False,
+        "initiator_remote_dispatch_request_id": "request-lambda-123",
     }
 
 
 @pytest.mark.asyncio
-async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer_auth(
+async def test_cloud_browser_environment_requires_initiator_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", raising=False)
+    pyfetch = AsyncMock(side_effect=[_sdk_config_response()])
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.CloudBrowserEnvironment(api_key="test-api-key")
+    with pytest.raises(ValueError, match="NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID"):
+        await env.start()
+
+    assert pyfetch.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_environment_supports_frontend_bearer_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("NARADA_API_KEY", raising=False)
@@ -198,11 +214,7 @@ async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer
 
     pyfetch = AsyncMock(
         side_effect=[
-            _FakeResponse(
-                json_data={
-                    "packages": {"narada-pyodide": {"min_required_version": "0.0.1"}}
-                }
-            ),
+            _sdk_config_response(),
             _FakeResponse(
                 json_data={
                     "session_id": "session-456",
@@ -213,50 +225,23 @@ async def test_open_and_initialize_cloud_browser_window_supports_frontend_bearer
             _FakeResponse(json_data={"success": True}),
         ]
     )
-    narada_pkg, _, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    async with narada_pkg.Narada() as client:
-        window = await client.open_and_initialize_cloud_browser_window(
-            session_name="demo",
-            session_timeout=321,
-            require_extension=True,
-        )
+    env = narada_pkg.CloudBrowserEnvironment(session_name="demo", session_timeout=321)
+    await env.start()
+    await env.close()
 
-    assert isinstance(window, narada_pkg.CloudBrowserWindow)
-    assert window.browser_window_id == "browser-window-456"
-    assert window.cloud_browser_session_id == "session-456"
-
-    sdk_config_call, create_call = pyfetch.await_args_list
-    assert sdk_config_call.args[0].endswith("/sdk/config")
-    assert sdk_config_call.kwargs["headers"] == {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer frontend-id-token",
-        "X-Narada-User-ID": "user-123",
-        "X-Narada-Env": "dev",
-    }
-    assert create_call.args[0].endswith(
-        "/cloud-browser/create-and-initialize-cloud-browser-session"
-    )
-    assert create_call.kwargs["headers"] == {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer frontend-id-token",
-        "X-Narada-User-ID": "user-123",
-        "X-Narada-Env": "dev",
-    }
-
-    await window.close()
-    stop_call = pyfetch.await_args_list[-1]
-    assert stop_call.args[0].endswith("/cloud-browser/stop-cloud-browser-session")
-    assert stop_call.kwargs["headers"] == {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer frontend-id-token",
-        "X-Narada-User-ID": "user-123",
-        "X-Narada-Env": "dev",
-    }
+    for call in pyfetch.await_args_list:
+        assert call.kwargs["headers"] == {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer frontend-id-token",
+            "X-Narada-User-ID": "user-123",
+            "X-Narada-Env": "dev",
+        }
 
 
 @pytest.mark.asyncio
-async def test_open_and_initialize_cloud_browser_window_raises_when_version_is_unknown(
+async def test_cloud_browser_environment_raises_when_version_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -266,58 +251,42 @@ async def test_open_and_initialize_cloud_browser_window_raises_when_version_is_u
             }
         )
     )
-    narada_pkg, client_module, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    monkeypatch.setattr(client_module, "__version__", "unknown")
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    monkeypatch.setattr(env_module, "__version__", "unknown")
 
+    env = narada_pkg.CloudBrowserEnvironment(api_key="test-api-key")
     with pytest.raises(InvalidVersion) as exc_info:
-        async with narada_pkg.Narada(api_key="test-api-key"):
-            pass
+        await env.start()
 
     assert "Invalid version: 'unknown'" in str(exc_info.value)
     assert pyfetch.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_close_stops_cloud_session(
+async def test_remote_browser_environment_close_stops_cloud_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(return_value=_FakeResponse(json_data={"success": True}))
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    await window.close()
+    await env.close()
 
     call = pyfetch.await_args
     assert call is not None
     assert call.args[0].endswith("/cloud-browser/stop-cloud-browser-session")
     assert call.kwargs["method"] == "POST"
-    assert call.kwargs["headers"] == {
-        "x-api-key": "test-api-key",
-        "Content-Type": "application/json",
-    }
     assert json.loads(call.kwargs["body"]) == {"session_id": "session-123"}
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
+async def test_remote_browser_environment_dispatch_omits_parent_run_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    inherited_trace_context = {
-        "type": "executionTraceInheritanceContext",
-        "schemaVersion": 1,
-        "traceId": "trace-parent",
-        "parentSegmentId": "segment-local",
-        "parentScopeId": "scope-python",
-        "segmentKind": "remote-dispatch",
-    }
-    monkeypatch.setenv(
-        "NARADA_EXECUTION_TRACE_CONTEXT",
-        json.dumps(inherited_trace_context),
-    )
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "req-123"}),
@@ -331,30 +300,26 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(prompt="hello from cloud browser")
+    response = await env._dispatch_request(prompt="hello from cloud browser")
 
     assert response["status"] == "success"
-    post_call = pyfetch.await_args_list[0]
-    assert post_call.args[0].endswith("/remote-dispatch")
-    assert post_call.kwargs["method"] == "POST"
-    payload = json.loads(post_call.kwargs["body"])
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
     assert payload["browserWindowId"] == "browser-window-123"
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
-    assert payload["executionTraceContext"] == inherited_trace_context
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_dispatch_request_waits_through_active_input_required(
+async def test_dispatch_request_waits_through_active_input_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -412,17 +377,17 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     sleep = AsyncMock()
     on_input_required = AsyncMock()
-    monkeypatch.setattr(window_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(env_module.asyncio, "sleep", sleep)
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="hello from cloud browser",
         on_input_required=on_input_required,
     )
@@ -434,89 +399,10 @@ async def test_cloud_browser_window_dispatch_request_waits_through_active_input_
     active_input_request = on_input_required.await_args.args[0]
     assert active_input_request.input_id == "input-123"
     assert active_input_request.action.name == "prompt_for_user_input"
-    first_poll_call = pyfetch.await_args_list[1]
-    second_poll_call = pyfetch.await_args_list[3]
-    assert first_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
-    assert second_poll_call.args[0].endswith("/remote-dispatch/responses/req-123")
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_dispatch_request_keeps_parent_request_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_REQUEST_ID", "parent-request-123")
-    pyfetch = AsyncMock(
-        side_effect=[
-            _FakeResponse(json_data={"requestId": "child-request-123"}),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "completedAt": "2026-05-08T00:00:00+00:00",
-                    "response": None,
-                    "activeInputRequest": None,
-                }
-            ),
-        ]
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "ui-run-456", raising=False)
-
-    window = window_module.CloudBrowserWindow(
-        browser_window_id="browser-window-123",
-        session_id="session-123",
-        api_key="test-api-key",
-    )
-    response = await window.dispatch_request(prompt="hello from cloud browser")
-
-    assert response["status"] == "success"
-    post_call = pyfetch.await_args_list[0]
-    payload = json.loads(post_call.kwargs["body"])
-    assert payload["parentRequestId"] == "parent-request-123"
-    assert "parentRunIds" not in payload
-
-
-@pytest.mark.asyncio
-async def test_window_agent_keeps_parent_request_id_from_remote_dispatch_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_REQUEST_ID", "parent-request-123")
-    pyfetch = AsyncMock(
-        side_effect=[
-            _FakeResponse(json_data={"requestId": "child-request-123"}),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "response": {
-                        "text": "done",
-                        "output": {"type": "text", "content": "done"},
-                    },
-                    "completedAt": "2026-05-08T00:00:00+00:00",
-                    "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
-                }
-            ),
-        ]
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "ui-run-456", raising=False)
-
-    window = window_module.CloudBrowserWindow(
-        browser_window_id="browser-window-123",
-        session_id="session-123",
-        api_key="test-api-key",
-    )
-    response = await window.agent(prompt="run gui child", agent="/$USER/gui-child")
-
-    assert response.status == "success"
-    post_call = pyfetch.await_args_list[0]
-    payload = json.loads(post_call.kwargs["body"])
-    assert payload["parentRequestId"] == "parent-request-123"
-
-
-@pytest.mark.asyncio
-async def test_window_agent_does_not_send_ui_request_id_as_parent_request_id(
+async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -536,24 +422,62 @@ async def test_window_agent_does_not_send_ui_request_id_as_parent_request_id(
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    monkeypatch.setattr(builtins, "_narada_request_id", "ui-run-456", raising=False)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "parent-request-123", raising=False
+    )
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.agent(prompt="run gui child", agent="/$USER/gui-child")
+    response = await narada_pkg.Agent(environment=env, kind="/$USER/gui-child").run(
+        "run gui child"
+    )
 
     assert response.status == "success"
-    post_call = pyfetch.await_args_list[0]
-    payload = json.loads(post_call.kwargs["body"])
-    assert "parentRequestId" not in payload
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["parentRequestId"] == "parent-request-123"
 
 
 @pytest.mark.asyncio
-async def test_window_agent_exposes_workflow_trace_alias(
+async def test_agent_run_forwards_clear_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).run("fresh task", clear_chat=True)
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow_trace = {"step_type": "workflow", "children": []}
@@ -575,7 +499,7 @@ async def test_window_agent_exposes_workflow_trace_alias(
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     emitted_events: list[str] = []
     monkeypatch.setattr(
         sys.modules["narada._trace"],
@@ -584,12 +508,12 @@ async def test_window_agent_exposes_workflow_trace_alias(
         raising=False,
     )
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.agent(prompt="return a trace")
+    response = await narada_pkg.Agent(environment=env).run("return a trace")
 
     assert response.workflow_trace == workflow_trace
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
@@ -604,7 +528,7 @@ async def test_window_agent_exposes_workflow_trace_alias(
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures(
+async def test_dispatch_request_retries_poll_fetch_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -622,7 +546,7 @@ async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     sleep_delays: list[float] = []
 
     async def fake_sleep(delay: float) -> None:
@@ -631,12 +555,12 @@ async def test_cloud_browser_window_dispatch_request_retries_poll_fetch_failures
     retry_module = sys.modules["narada.retry"]
     monkeypatch.setattr(retry_module.asyncio, "sleep", fake_sleep)
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(prompt="hello from cloud browser")
+    response = await env._dispatch_request(prompt="hello from cloud browser")
 
     assert response["status"] == "success"
     assert pyfetch.await_count == 4
@@ -684,7 +608,7 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
             ),
         ]
     )
-    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     emitted_events: list[str] = []
     monkeypatch.setattr(
         sys.modules["narada._trace"],
@@ -693,14 +617,14 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
         raising=False,
     )
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="hello from cloud browser",
-        agent=narada_pkg.Agent.OPERATOR,
+        agent=narada_pkg.AgentKind.OPERATOR,
     )
 
     assert response["status"] == "success"
@@ -712,9 +636,19 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
+async def test_dispatch_request_emits_success_text_and_execution_trace_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "schemaVersion": 1,
+        "label": "cloud child",
+        "traceId": "trace-parent",
+        "segmentId": "segment-cloud",
+        "executionTraceS3Key": "s3://trace/segment-cloud/index.json",
+        "executionTraceSegmentS3Key": "s3://trace/segment-cloud/index.json",
+        "status": "completed",
+    }
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "req-123"}),
@@ -725,23 +659,14 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
                     "response": {
                         "text": "TRACE_CORE_AGENT_DONE",
                         "actionTrace": [],
-                        "executionTraceContext": {
-                            "type": "executionTraceContext",
-                            "schemaVersion": 1,
-                            "label": "cloud child",
-                            "traceId": "trace-parent",
-                            "segmentId": "segment-cloud",
-                            "executionTraceS3Key": "s3://trace/segment-cloud/index.json",
-                            "executionTraceSegmentS3Key": "s3://trace/segment-cloud/index.json",
-                            "status": "completed",
-                        },
+                        "executionTraceContext": execution_trace_context,
                     },
                     "activeInputRequest": None,
                 }
             ),
         ]
     )
-    narada_pkg, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
     emitted_events: list[str] = []
     monkeypatch.setattr(
         sys.modules["narada._trace"],
@@ -750,167 +675,28 @@ async def test_dispatch_request_emits_success_text_in_sub_agent_trace(
         raising=False,
     )
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="reply with marker",
-        agent=narada_pkg.Agent.CORE_AGENT,
+        agent=narada_pkg.AgentKind.CORE_AGENT,
     )
 
     from narada_core.tracing.model import PythonSubAgentCallEvent
 
     assert response["status"] == "success"
     assert len(emitted_events) == 1
-    event = json.loads(emitted_events[0])
-    parsed_event = PythonSubAgentCallEvent.model_validate(event)
+    parsed_event = PythonSubAgentCallEvent.model_validate(json.loads(emitted_events[0]))
     assert parsed_event.agent_type == "coreAgent"
     assert parsed_event.text == "TRACE_CORE_AGENT_DONE"
-    assert parsed_event.execution_trace_context is not None
-    assert parsed_event.execution_trace_context["segmentId"] == "segment-cloud"
+    assert parsed_event.execution_trace_context == execution_trace_context
 
 
 @pytest.mark.asyncio
-async def test_extension_action_request_and_trace_share_action_execution_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pyfetch = AsyncMock(
-        return_value=_FakeResponse(
-            json_data={
-                "status": "success",
-                "data": json.dumps({"url": "https://example.com"}),
-            }
-        )
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    emitted_events: list[str] = []
-    monkeypatch.setattr(
-        sys.modules["narada._trace"],
-        "_narada_emit_trace_event",
-        emitted_events.append,
-        raising=False,
-    )
-
-    window = window_module.RemoteBrowserWindow(
-        browser_window_id="browser-window-123",
-        api_key="test-api-key",
-    )
-    assert await window.get_url() == "https://example.com"
-
-    request_body = json.loads(pyfetch.await_args.kwargs["body"])
-    assert request_body["actionExecutionId"].startswith("action_")
-    assert len(emitted_events) == 1
-    trace_event = json.loads(emitted_events[0])
-    assert trace_event["kind"] == "extensionAction"
-    assert trace_event["action_name"] == "get_url"
-    assert trace_event["action_execution_id"] == request_body["actionExecutionId"]
-
-
-@pytest.mark.asyncio
-async def test_dispatch_request_emits_input_required_sub_agent_trace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pyfetch = AsyncMock(
-        side_effect=[
-            _FakeResponse(json_data={"requestId": "req-123"}),
-            _FakeResponse(
-                json_data={
-                    "status": "input-required",
-                    "completedAt": "2026-05-08T00:00:00+00:00",
-                    "response": {
-                        "text": "TRACE_INPUT_REQUIRED",
-                        "output": {"type": "text", "content": "TRACE_INPUT_REQUIRED"},
-                    },
-                    "activeInputRequest": None,
-                }
-            ),
-        ]
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    emitted_events: list[str] = []
-    monkeypatch.setattr(
-        sys.modules["narada._trace"],
-        "_narada_emit_trace_event",
-        emitted_events.append,
-        raising=False,
-    )
-
-    window = window_module.CloudBrowserWindow(
-        browser_window_id="browser-window-123",
-        session_id="session-123",
-        api_key="test-api-key",
-    )
-    response = await window.dispatch_request(prompt="needs input")
-
-    from narada_core.tracing.model import PythonSubAgentCallEvent
-
-    assert response["status"] == "input-required"
-    assert len(emitted_events) == 1
-    parsed_event = PythonSubAgentCallEvent.model_validate(json.loads(emitted_events[0]))
-    assert parsed_event.status == "input-required"
-    assert parsed_event.text == "TRACE_INPUT_REQUIRED"
-
-
-def test_parse_action_trace_preserves_run_custom_agent_children(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.syspath_prepend(str(CORE_SRC))
-
-    from narada_core.tracing.model import parse_action_trace
-
-    parsed_trace = parse_action_trace(
-        [
-            {
-                "step_type": "runCustomAgent",
-                "url": "https://example.com",
-                "workflow_id": "workflow-parent",
-                "workflow_name": "Parent workflow",
-                "status": "success",
-                "children": [
-                    {
-                        "step_type": "print",
-                        "url": "https://example.com",
-                        "message": "TRACE_GUI_CHILD_DONE",
-                    }
-                ],
-            }
-        ]
-    )
-
-    assert parsed_trace[0].step_type == "runCustomAgent"
-    assert parsed_trace[0].children is not None
-    assert parsed_trace[0].children[0].step_type == "print"
-    assert parsed_trace[0].children[0].message == "TRACE_GUI_CHILD_DONE"
-
-
-def test_python_extension_action_trace_preserves_action_execution_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.syspath_prepend(str(CORE_SRC))
-
-    from narada_core.tracing.model import PythonExtensionActionEvent
-
-    parsed_event = PythonExtensionActionEvent.model_validate(
-        {
-            "kind": "extensionAction",
-            "ts_start": 10,
-            "ts_end": 20,
-            "action_execution_id": "action_123",
-            "action_name": "agentic_selector",
-            "request_summary": {"action": "click"},
-            "result_summary": {"status": "success"},
-            "status": "success",
-        }
-    )
-
-    assert parsed_event.action_execution_id == "action_123"
-    assert parsed_event.model_dump()["action_execution_id"] == "action_123"
-
-
-@pytest.mark.asyncio
-async def test_cloud_browser_window_dispatch_request_preserves_current_file_variable_shape(
+async def test_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -926,11 +712,11 @@ async def test_cloud_browser_window_dispatch_request_preserves_current_file_vari
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
     file_variable = {
@@ -941,7 +727,7 @@ async def test_cloud_browser_window_dispatch_request_preserves_current_file_vari
         "itemId": "workflow-123",
     }
 
-    response = await window.dispatch_request(
+    response = await env._dispatch_request(
         prompt="summarize {{ $doc }}",
         input_variables={"doc": file_variable},
     )
@@ -952,7 +738,39 @@ async def test_cloud_browser_window_dispatch_request_preserves_current_file_vari
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_window_get_downloaded_files_returns_presigned_urls(
+async def test_dispatch_request_rejects_file_uploads_in_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+
+    pyfetch = AsyncMock()
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    # Reading file contents from disk is not possible in the browser, so passing a file-like
+    # object (rather than an already-uploaded reference) must fail fast instead of attempting
+    # an upload over the network.
+    file_obj = BytesIO(b"hello")
+    file_obj.name = "report.txt"
+
+    with pytest.raises(
+        NotImplementedError, match="not supported in the browser environment"
+    ):
+        await env._dispatch_request(
+            prompt="summarize {{ $doc }}",
+            input_variables={"doc": file_obj},
+        )
+
+    pyfetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_downloads_return_presigned_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -973,34 +791,73 @@ async def test_cloud_browser_window_get_downloaded_files_returns_presigned_urls(
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.CloudBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
-        session_id="session-123",
+        cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    files = await window.get_downloaded_files()
+    files = await env.get_downloaded_files()
 
     assert files == [
-        window_module.SessionDownloadItem(
+        env_module.SessionDownloadItem(
             file_name="report.pdf",
             size=42,
             download_url="https://example.com/report.pdf",
         )
     ]
-    assert pyfetch.await_count == 2
     first_call, second_call = pyfetch.await_args_list
-    assert "session_id=session-123" in first_call.args[0]
     assert first_call.args[0].endswith(
         "/cloud-browser/replay/downloads?session_id=session-123"
     )
-    assert "session_id=session-123" in second_call.args[0]
     assert "key=downloads%2Fsession-123%2Freport.pdf" in second_call.args[0]
 
 
 @pytest.mark.asyncio
-async def test_remote_browser_window_prompt_for_user_input_uses_hitl_default_timeout(
+async def test_lambda_environment_downloads_return_presigned_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(
+                json_data={
+                    "downloaded_files": [
+                        {
+                            "file_name": "report.pdf",
+                            "key": "downloads/session-123/report.pdf",
+                            "size": 42,
+                        }
+                    ]
+                }
+            ),
+            _FakeResponse(
+                json_data={"presigned_url": "https://example.com/report.pdf"}
+            ),
+        ]
+    )
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.LambdaEnvironment(api_key="test-api-key")
+    env._session_id = "session-123"
+    files = await env.get_downloaded_files()
+
+    assert files == [
+        env_module.SessionDownloadItem(
+            file_name="report.pdf",
+            size=42,
+            download_url="https://example.com/report.pdf",
+        )
+    ]
+    first_call, second_call = pyfetch.await_args_list
+    assert first_call.args[0].endswith(
+        "/cloud-browser/replay/downloads?session_id=session-123"
+    )
+    assert "key=downloads%2Fsession-123%2Freport.pdf" in second_call.args[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -1011,30 +868,51 @@ async def test_remote_browser_window_prompt_for_user_input_uses_hitl_default_tim
             }
         )
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.RemoteBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
-    values = await window.prompt_for_user_input(
+    agent = narada_pkg.Agent(environment=env)
+    values = await agent.prompt_for_user_input(
         step_id="input-step",
         variables=[
-            window_module.PromptForUserInputVariable(
-                name="name", type="string", required=True
-            ),
+            PromptForUserInputVariable(name="name", type="string", required=True),
         ],
     )
 
     assert values == {"name": "Narada"}
-    call = pyfetch.await_args
-    assert call is not None
-    payload = json.loads(call.kwargs["body"])
-    assert payload["timeout"] == window_module.DEFAULT_HITL_TIMEOUT_SECONDS
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
 
 
 @pytest.mark.asyncio
-async def test_remote_browser_window_user_approval_respects_explicit_timeout(
+async def test_agentic_mouse_action_preserves_resize_window_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).agentic_mouse_action(
+        action={"type": "click"},
+        recorded_click={"x": 500, "y": 300, "viewport": {"width": 1280, "height": 720}},
+        fallback_operator_query="click the target",
+        resize_window=False,
+    )
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"]["resize_window"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_user_approval_respects_explicit_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -1042,13 +920,13 @@ async def test_remote_browser_window_user_approval_respects_explicit_timeout(
             json_data={"status": "success", "data": '{"approved":true}'}
         )
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.RemoteBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
-    approved = await window.user_approval(
+    approved = await narada_pkg.Agent(environment=env).user_approval(
         step_id="approval-step",
         prompt_message="Proceed?",
         approve_label="Approve",
@@ -1057,36 +935,62 @@ async def test_remote_browser_window_user_approval_respects_explicit_timeout(
     )
 
     assert approved is True
-    call = pyfetch.await_args
-    assert call is not None
-    payload = json.loads(call.kwargs["body"])
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["timeout"] == 600
 
 
 @pytest.mark.asyncio
-async def test_remote_browser_window_without_cloud_session_keeps_extension_action_close(
+async def test_remote_browser_environment_without_cloud_session_uses_extension_close(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
         return_value=_FakeResponse(json_data={"status": "success", "data": None})
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
 
-    window = window_module.RemoteBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
-    await window.close()
+    await env.close()
 
-    call = pyfetch.await_args
-    assert call is not None
-    assert call.args[0].endswith("/extension-actions")
-    assert call.kwargs["method"] == "POST"
-    payload = json.loads(call.kwargs["body"])
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["browserWindowId"] == "browser-window-123"
     assert payload["action"]["name"] == "close_window"
     assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_javascript_on_page_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": '{"result":{"title":"Example Domain","count":3}}',
+            }
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    result = await narada_pkg.Agent(environment=env).execute_javascript_on_page(
+        code="(() => ({ title: document.title, count: 3 }))()",
+    )
+
+    assert result == {"title": "Example Domain", "count": 3}
+    call = pyfetch.await_args
+    assert call is not None
+    payload = json.loads(call.kwargs["body"])
+    assert payload["action"] == {
+        "name": "execute_javascript_on_page",
+        "code": "(() => ({ title: document.title, count: 3 }))()",
+    }
 
 
 @pytest.mark.asyncio
@@ -1098,82 +1002,60 @@ async def test_extension_action_includes_remote_dispatch_context(
     pyfetch = AsyncMock(
         return_value=_FakeResponse(json_data={"status": "success", "data": None})
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.RemoteBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
-    await window.close()
+    await env.close()
 
-    call = pyfetch.await_args
-    assert call is not None
-    payload = json.loads(call.kwargs["body"])
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["requestId"] == "request-123"
     assert payload["apiKeyId"] == "api-key-123"
+    assert payload["actionExecutionId"].startswith("action_")
 
 
 @pytest.mark.asyncio
-async def test_extension_action_prefers_remote_dispatch_request_id_over_parent_request_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # In a nested remote-dispatch run, the env-injected request id (the request the
-    # external caller polls and the frontend status reporter targets) differs from the
-    # builtins parent request id (a separate observability dispatch id). The env value
-    # must win so input-required status is reported to the request the caller is polling.
-    monkeypatch.setenv(
-        "NARADA_REMOTE_DISPATCH_REQUEST_ID", "remote-dispatch-request-123"
-    )
-    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_API_KEY_ID", "api-key-123")
-    pyfetch = AsyncMock(
-        return_value=_FakeResponse(json_data={"status": "success", "data": None})
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    monkeypatch.setattr(
-        builtins, "_narada_request_id", "observability-dispatch-456", raising=False
-    )
-
-    window = window_module.RemoteBrowserWindow(
-        browser_window_id="browser-window-123",
-        api_key="test-api-key",
-    )
-    await window.close()
-
-    call = pyfetch.await_args
-    assert call is not None
-    payload = json.loads(call.kwargs["body"])
-    assert payload["requestId"] == "remote-dispatch-request-123"
-    assert payload["apiKeyId"] == "api-key-123"
-
-
-@pytest.mark.asyncio
-async def test_remote_browser_window_extension_action_keeps_parent_request_id(
+async def test_extension_action_request_and_trace_share_action_execution_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
-        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": json.dumps({"url": "https://example.com"}),
+            }
+        )
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["outer-run", "inner-run"])
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
     monkeypatch.setattr(
-        builtins, "_narada_request_id", "parent-request-123", raising=False
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
     )
 
-    window = window_module.RemoteBrowserWindow(
+    env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
-    await window.close()
+    assert (
+        await narada_pkg.Agent(environment=env).get_url()
+    ).url == "https://example.com"
 
-    call = pyfetch.await_args
-    assert call is not None
-    payload = json.loads(call.kwargs["body"])
-    assert payload["requestId"] == "parent-request-123"
-    assert "parentRunIds" not in payload
+    request_body = json.loads(pyfetch.await_args.kwargs["body"])
+    assert request_body["actionExecutionId"].startswith("action_")
+    assert len(emitted_events) == 1
+    trace_event = json.loads(emitted_events[0])
+    assert trace_event["kind"] == "extensionAction"
+    assert trace_event["action_name"] == "get_url"
+    assert trace_event["action_execution_id"] == request_body["actionExecutionId"]
 
 
 @pytest.mark.asyncio
-async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids_and_trace_context(
+async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
@@ -1191,6 +1073,7 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids_
     )
     pyfetch = AsyncMock(
         side_effect=[
+            _sdk_config_response(),
             _FakeResponse(json_data={"requestId": "req-1"}),
             _FakeResponse(
                 json_data={
@@ -1211,21 +1094,21 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids_
             ),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
 
-    window = window_module.LocalBrowserWindow()
+    env = narada_pkg.BrowserEnvironment()
 
-    window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    first_response = await window.dispatch_request(prompt="first prompt")
+    env_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
+    first_response = await env._dispatch_request(prompt="first prompt")
 
-    window_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
-    second_response = await window.dispatch_request(prompt="second prompt")
+    env_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
+    second_response = await env._dispatch_request(prompt="second prompt")
 
     assert first_response["status"] == "success"
     assert second_response["status"] == "success"
 
-    first_post = json.loads(pyfetch.await_args_list[0].kwargs["body"])
-    second_post = json.loads(pyfetch.await_args_list[2].kwargs["body"])
+    first_post = json.loads(pyfetch.await_args_list[1].kwargs["body"])
+    second_post = json.loads(pyfetch.await_args_list[3].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
     assert first_post["executionTraceContext"] == {
@@ -1238,88 +1121,26 @@ async def test_local_browser_window_dispatch_request_uses_latest_parent_run_ids_
 
 
 @pytest.mark.asyncio
-async def test_local_browser_window_dispatch_request_includes_parent_request_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
-    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
-    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_REQUEST_ID", "parent-request-123")
-    pyfetch = AsyncMock(
-        side_effect=[
-            _FakeResponse(json_data={"requestId": "child-request-123"}),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "completedAt": "2026-05-08T00:00:00+00:00",
-                    "response": None,
-                    "activeInputRequest": None,
-                }
-            ),
-        ]
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "ui-run-456", raising=False)
-
-    window = window_module.LocalBrowserWindow()
-    response = await window.dispatch_request(prompt="child prompt")
-
-    assert response["status"] == "success"
-    post_payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
-    assert post_payload["parentRequestId"] == "parent-request-123"
-    assert post_payload["parentRunIds"] == ["run-a"]
-
-
-@pytest.mark.asyncio
-async def test_local_browser_window_dispatch_request_omits_ui_parent_request_id(
+async def test_local_browser_environment_extension_action_includes_parent_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
     monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
     pyfetch = AsyncMock(
         side_effect=[
-            _FakeResponse(json_data={"requestId": "child-request-123"}),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "completedAt": "2026-05-08T00:00:00+00:00",
-                    "response": None,
-                    "activeInputRequest": None,
-                }
-            ),
+            _sdk_config_response(),
+            _FakeResponse(json_data={"status": "success", "data": None}),
         ]
     )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    monkeypatch.setattr(builtins, "_narada_request_id", "ui-run-456", raising=False)
-
-    window = window_module.LocalBrowserWindow()
-    response = await window.dispatch_request(prompt="child prompt")
-
-    assert response["status"] == "success"
-    post_payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
-    assert "parentRequestId" not in post_payload
-    assert post_payload["parentRunIds"] == ["run-a"]
-
-
-@pytest.mark.asyncio
-async def test_local_browser_window_extension_action_includes_parent_request_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
-    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
-    pyfetch = AsyncMock(
-        return_value=_FakeResponse(json_data={"status": "success", "data": None})
-    )
-    _, _, window_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    window_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
     monkeypatch.setattr(
         builtins, "_narada_request_id", "parent-request-123", raising=False
     )
 
-    window = window_module.LocalBrowserWindow()
-    await window.close()
+    env = narada_pkg.BrowserEnvironment()
+    await env.close()
 
-    post_payload = json.loads(pyfetch.await_args.kwargs["body"])
+    post_payload = json.loads(pyfetch.await_args_list[1].kwargs["body"])
     assert post_payload["requestId"] == "parent-request-123"
     assert post_payload["parentRunIds"] == ["run-a"]

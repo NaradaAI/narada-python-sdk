@@ -1,18 +1,17 @@
 import asyncio
 
-from narada import Narada, NaradaTimeoutError
+from narada import Agent, BrowserEnvironment, NaradaTimeoutError
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
+    try:
         max_attempts = 2
         for attempt in range(max_attempts):
             try:
-                response = await window.agent(
+                response = await agent.run(
                     prompt='Search for "random number between 1 and 5" on Google and extract the generated number from the search result page. Output just the number.',
                     # Force a timeout on the first attempt to demonstrate timeout handling.
                     timeout=3 if attempt == 0 else 120,
@@ -28,7 +27,9 @@ async def main() -> None:
 
                 # Reinitialize the UI agent to cancel any inflight requests. This keeps the browser
                 # pages untouched so we don't lose any progress.
-                await window.reinitialize()
+                await agent.reset_agent_state()
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

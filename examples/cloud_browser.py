@@ -1,58 +1,59 @@
 import asyncio
 
-from narada import Narada
-from narada.window import RemoteBrowserWindow
+from narada import Agent, CloudBrowserEnvironment, RemoteBrowserEnvironment
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a cloud browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_cloud_browser_window(
-            session_name="my-cloud-browser-session",  # Optional: label the session
-            session_timeout=3600,  # Optional: session timeout in seconds
-        )
-
-    # Run a task in this browser window.
-    response = await window.agent(
-        prompt=(
-            'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
-            "page, then tell me who the authors are."
-        )
+    # Create a cloud browser environment. It initializes lazily on the first action.
+    env = CloudBrowserEnvironment(
+        session_name="my-cloud-browser-session",  # Optional: label the session
+        session_timeout=3600,  # Optional: session timeout in seconds
     )
+    agent = Agent(environment=env)
 
-    print("Response:", response.model_dump_json(indent=2))
+    cloud_browser_session_id = None
+    browser_window_id = None
 
-    # The cloud session is still running after exiting the context manager.
-    # You can save the session ID for later reconnection or management.
-    cloud_browser_session_id = window.cloud_browser_session_id
-    browser_window_id = window.browser_window_id
-
-    # Change these to test the different options below.
-    stop_session_now = False
-
-    # The cloud session runs independently. If you want to stop it after the task is
-    # complete, you can explicitly close it. The session will also auto-expire after the
-    # configured session_timeout.
-    if stop_session_now:
-        print(
-            f"Stopping cloud session {cloud_browser_session_id} through original window"
+    try:
+        # Run a task in this cloud browser.
+        response = await agent.run(
+            prompt=(
+                'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
+                "page, then tell me who the authors are."
+            )
         )
-        await window.close()
-    else:
-        # Create a `RemoteBrowserWindow` instance with the session ID to manage the session later.
-        print(
-            f"Stopping cloud session {cloud_browser_session_id} through RemoteBrowserWindow"
-        )
-        remote_window = RemoteBrowserWindow(
-            cloud_browser_session_id=cloud_browser_session_id,
-            browser_window_id=browser_window_id,
-        )
-        await remote_window.close()  # This will stop the cloud session.
 
-    # Get files downloaded during the session
-    downloaded_files = await window.get_downloaded_files()
-    print(f"Downloaded files {downloaded_files}")
+        print("Response:", response.model_dump_json(indent=2))
+
+        # The cloud session keeps running until explicitly stopped or it times out.
+        # Save these IDs for later reconnection or management.
+        cloud_browser_session_id = env.cloud_browser_session_id
+        browser_window_id = env.browser_window_id
+
+        # Get files downloaded during the session.
+        downloaded_files = await env.get_downloaded_files()
+        print(f"Downloaded files {downloaded_files}")
+
+    finally:
+        # Change this to test stopping through the original environment versus
+        # reconnecting with a remote environment.
+        stop_session_through_original_environment = False
+
+        if cloud_browser_session_id is None or browser_window_id is None:
+            await env.close()
+        elif stop_session_through_original_environment:
+            print(f"Stopping cloud session {cloud_browser_session_id}")
+            await env.close()
+        else:
+            # Create a RemoteBrowserEnvironment with the session ID to manage the session later.
+            print(
+                f"Stopping cloud session {cloud_browser_session_id} through RemoteBrowserEnvironment"
+            )
+            remote_env = RemoteBrowserEnvironment(
+                cloud_browser_session_id=cloud_browser_session_id,
+                browser_window_id=browser_window_id,
+            )
+            await remote_env.close()  # This will stop the cloud session.
 
     ############################################################################
     # IMPORTANT: The cloud browser continues accruing costs until the session  #
