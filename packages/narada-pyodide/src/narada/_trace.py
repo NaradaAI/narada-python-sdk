@@ -2,7 +2,7 @@
 
 This module is used internally by narada-pyodide to forward structured
 telemetry (sub-agent invocations, extension actions, side effects) from
-Python code running inside the Pyodide worker to the JavaScript harness,
+Python code running inside the Pyodide worker to the frontend JavaScript runtime,
 which assembles a ``PythonAgentRunTrace`` that surfaces on the Narada
 observability dashboard.
 
@@ -23,7 +23,7 @@ from narada_core.actions.models import ExtensionActionRequest
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    # Injected by the JavaScript harness at worker startup. narada-pyodide is
+    # Injected by the frontend JavaScript runtime at worker startup. narada-pyodide is
     # only ever imported under a Pyodide worker that has registered this
     # builtin; there is no non-Pyodide code path.
     def _narada_emit_trace_event(event_json: str) -> None: ...
@@ -38,7 +38,7 @@ def now_ms() -> int:
 
 
 def emit_trace_event(event: dict[str, Any]) -> None:
-    """Forward a single trace event to the JavaScript harness.
+    """Forward a single trace event to the frontend JavaScript runtime.
 
     The event must be JSON-serialisable and shaped as one of the
     ``PythonTraceEvent`` variants defined in ``narada_core.tracing.model``.
@@ -71,7 +71,7 @@ def dump_model(model: BaseModel) -> dict[str, Any]:
 #
 # Each emitter builds a JSON-serialisable event shaped to match one of the
 # ``PythonTraceEvent`` Pydantic variants in ``narada_core.tracing.model``
-# and forwards it to the JavaScript harness. Optional fields are included
+# and forwards it to the frontend JavaScript runtime. Optional fields are included
 # only when non-None so the JSON stays compact.
 # ---------------------------------------------------------------------------
 
@@ -91,6 +91,7 @@ def emit_sub_agent_call(
     text: str | None = None,
     error_message: str | None = None,
     action_trace_raw: list[dict[str, Any]] | None = None,
+    execution_trace_context: dict[str, Any] | None = None,
 ) -> None:
     event: dict[str, Any] = {
         "kind": "subAgentCall",
@@ -108,12 +109,15 @@ def emit_sub_agent_call(
         event["error_message"] = error_message
     if action_trace_raw is not None:
         event["action_trace"] = action_trace_raw
+    if execution_trace_context is not None:
+        event["execution_trace_context"] = execution_trace_context
     emit_trace_event(event)
 
 
 def emit_extension_action(
     *,
     ts_start: int,
+    action_execution_id: str,
     request: ExtensionActionRequest,
     status: ExtensionActionStatus,
     response: BaseModel | None = None,
@@ -123,6 +127,7 @@ def emit_extension_action(
         "kind": "extensionAction",
         "ts_start": ts_start,
         "ts_end": now_ms(),
+        "action_execution_id": action_execution_id,
         "action_name": request.name,
         "request_summary": dump_model(request),
         "status": status,

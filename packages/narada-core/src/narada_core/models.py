@@ -318,12 +318,14 @@ class PythonSubAgentCallEvent(TypedDict):
     text: NotRequired[str]
     error_message: NotRequired[str]
     action_trace: NotRequired[ActionTrace]
+    execution_trace_context: NotRequired[dict[str, object]]
 
 
 class PythonExtensionActionEvent(TypedDict):
     kind: Literal["extensionAction"]
     ts_start: int
     ts_end: int
+    action_execution_id: NotRequired[str]
     action_name: str
     request_summary: dict[str, object]
     result_summary: NotRequired[dict[str, object]]
@@ -412,6 +414,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
+    executionTraceContext: NotRequired[dict[str, object]]
     workflowTrace: NotRequired[dict[str, Any]]
 
 

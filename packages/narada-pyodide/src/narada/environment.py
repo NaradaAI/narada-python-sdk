@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import time
+import uuid
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -61,14 +62,14 @@ from . import _trace
 from .retry import pyfetch_with_retries
 from .version import __version__
 
-# Magic variable injected by the JavaScript harness that stores the IDs of the current runnables
+# Magic variable injected by the frontend runtime that stores the IDs of the current runnables
 # in the stack on the frontend.
 
 logger = logging.getLogger(__name__)
 
 
 def _parent_run_ids() -> list[str]:
-    # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the JavaScript harness.
+    # `_narada_parent_run_ids` is a Pyodide `JsProxy` object injected by the frontend runtime.
     # Before we can use it as a regular Python list, we need to call `.to_py()` on it.
     return list(
         cast(
@@ -86,8 +87,18 @@ def _parent_request_id() -> str | None:
     return parent_request_id if isinstance(parent_request_id, str) else None
 
 
+def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
+    raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
+    if not raw:
+        return None
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("NARADA_EXECUTION_TRACE_CONTEXT must be a JSON object")
+    return value
+
+
 if TYPE_CHECKING:
-    # Magic function injected by the JavaScript harness to get the current user's ID token.
+    # Magic function injected by the frontend runtime to get the current user's ID token.
     async def _narada_get_id_token() -> str: ...
 
     _narada_request_id: str | None
@@ -573,6 +584,9 @@ class Environment(ABC):
         parent_request_id = self._current_parent_request_id()
         if parent_request_id is not None:
             body["parentRequestId"] = parent_request_id
+        execution_trace_context = _load_execution_trace_context_from_env()
+        if execution_trace_context is not None:
+            body["executionTraceContext"] = execution_trace_context
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
@@ -714,6 +728,11 @@ class Environment(ABC):
                         if response_content is not None
                         else None
                     ),
+                    execution_trace_context=(
+                        response_content.get("executionTraceContext")
+                        if response_content is not None
+                        else None
+                    ),
                 )
                 return cast(Response, response)
             else:
@@ -786,12 +805,14 @@ class Environment(ABC):
         # Trace instrumentation: every exit path emits an ``extensionAction``
         # trace event with a status matching the outcome. See `_trace.py`.
         trace_start_ms = _trace.now_ms()
+        action_execution_id = f"action_{uuid.uuid4().hex}"
 
         try:
             headers = await self._get_auth_headers()
 
             body = {
                 "action": request.model_dump(),
+                "actionExecutionId": action_execution_id,
                 "browserWindowId": browser_window_id,
             }
             remote_dispatch_request_id = os.environ.get(
@@ -846,6 +867,7 @@ class Environment(ABC):
             if response_model is None:
                 _trace.emit_extension_action(
                     ts_start=trace_start_ms,
+                    action_execution_id=action_execution_id,
                     request=request,
                     status="success",
                 )
@@ -855,6 +877,7 @@ class Environment(ABC):
             parsed_response = response_model.model_validate_json(response.data)
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="success",
                 response=parsed_response,
@@ -864,6 +887,7 @@ class Environment(ABC):
         except NaradaTimeoutError:
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="timeout",
                 error_message="Extension action timed out",
@@ -872,6 +896,7 @@ class Environment(ABC):
         except Exception as err:
             _trace.emit_extension_action(
                 ts_start=trace_start_ms,
+                action_execution_id=action_execution_id,
                 request=request,
                 status="error",
                 error_message=str(err),

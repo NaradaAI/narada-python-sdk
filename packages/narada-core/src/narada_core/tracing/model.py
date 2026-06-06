@@ -265,6 +265,7 @@ class PythonSubAgentCallEvent(BaseModel):
     text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
+    execution_trace_context: dict[str, Any] | None = None
 
     @field_validator("agent_type", mode="before")
     @classmethod
@@ -284,6 +285,10 @@ class PythonExtensionActionEvent(BaseModel):
     kind: Literal["extensionAction"] = "extensionAction"
     ts_start: int
     ts_end: int
+    # Correlates one Python SDK/Pyodide extension action with the frontend
+    # request body (`actionExecutionId`), the execution-trace event refs, and
+    # any evidence frame captured for that browser action.
+    action_execution_id: str | None = None
     # Matches the snake_case `name` discriminator on ExtensionActionRequest
     # (e.g. "go_to_url", "get_screenshot"). Carried as a plain string rather
     # than a Literal so adding a new extension action in the future does not

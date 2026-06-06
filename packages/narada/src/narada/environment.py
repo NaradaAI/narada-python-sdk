@@ -100,6 +100,16 @@ _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
 
 
+def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
+    raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
+    if not raw:
+        return None
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("NARADA_EXECUTION_TRACE_CONTEXT must be a JSON object")
+    return value
+
+
 async def _notify_input_required_callback(
     callback: InputRequiredCallback | None,
     response: _RemoteDispatchPollResponse,
@@ -710,6 +720,9 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        execution_trace_context = _load_execution_trace_context_from_env()
+        if execution_trace_context is not None:
+            body["executionTraceContext"] = execution_trace_context
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
@@ -843,8 +856,10 @@ class Environment(ABC):
             raise NaradaError(
                 f"{type(self).__name__} does not support browser extension actions"
             )
+        action_execution_id = f"action_{uuid4().hex}"
         body = {
             "action": request.model_dump(),
+            "actionExecutionId": action_execution_id,
             "browserWindowId": browser_window_id,
         }
         remote_dispatch_request_id = os.environ.get(_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR)

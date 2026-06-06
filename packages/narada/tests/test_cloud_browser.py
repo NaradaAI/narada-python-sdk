@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
@@ -177,6 +178,62 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
     assert response["status"] == "success"
     assert observed_input_ids == ["input-1", "input-2"]
     assert sleep.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_dispatch_request_includes_execution_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    trace_context = {
+        "type": "executionTraceInheritanceContext",
+        "schemaVersion": 1,
+        "traceId": "trace-parent",
+        "parentSegmentId": "segment-local",
+    }
+    monkeypatch.setenv("NARADA_EXECUTION_TRACE_CONTEXT", json.dumps(trace_context))
+    fake_session = _RemoteDispatchFakeClientSession(
+        [
+            {
+                "status": "success",
+                "response": {"text": "ok"},
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
+    response = await env._dispatch_request(prompt="Summarize", timeout=5)
+
+    assert response["status"] == "success"
+    assert fake_session.dispatched_body is not None
+    assert fake_session.dispatched_body["executionTraceContext"] == trace_context
+
+
+@pytest.mark.asyncio
+async def test_extension_action_request_includes_action_execution_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _FakeClientSession({"status": "success", "data": None})
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
+    await env.close()
+
+    assert fake_session.posts
+    action_execution_id = fake_session.posts[0]["json"]["actionExecutionId"]
+    assert action_execution_id.startswith("action_")
 
 
 @pytest.mark.asyncio

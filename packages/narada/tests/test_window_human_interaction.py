@@ -4,12 +4,11 @@ from http import HTTPStatus
 from typing import Any
 
 import pytest
+from narada import Agent, RemoteBrowserEnvironment
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
 )
-
-from narada import Agent, RemoteBrowserEnvironment
 
 
 class _FakeResponse:
