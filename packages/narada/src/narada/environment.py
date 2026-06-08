@@ -1374,6 +1374,7 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
         *,
         browser_window_id: str,
         cloud_browser_session_id: str | None = None,
+        stop_cloud_browser_session_on_close: bool = True,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
     ) -> None:
@@ -1383,6 +1384,7 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
             browser_window_id=browser_window_id,
         )
         self._cloud_browser_session_id = cloud_browser_session_id
+        self._stop_cloud_browser_session_on_close = stop_cloud_browser_session_on_close
 
     @property
     def _validates_sdk_config(self) -> bool:
@@ -1396,13 +1398,16 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         """Closes the remote browser environment.
 
-        If this window is backed by a cloud browser session, this also stops the cloud
-        session.
+        If this window is backed by an SDK-owned cloud browser session, this also stops the
+        cloud session.
         """
         if self._cloud_browser_session_id is None:
             return await self._run_extension_action(
                 CloseWindowRequest(), timeout=timeout
             )
+
+        if not self._stop_cloud_browser_session_on_close:
+            return
 
         await _stop_cloud_browser_session(
             base_url=self._base_url,
@@ -1628,7 +1633,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaTimeoutError:
+            except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
@@ -1770,6 +1775,50 @@ class LambdaEnvironment(Environment):
             auth_headers=self._auth_headers,
             session_id=self.session_id,
         )
+
+
+async def initialize_existing_cloud_browser_session(
+    *,
+    cdp_websocket_url: str,
+    session_id: str,
+    login_url: str,
+    cdp_auth_headers: dict[str, str],
+    config: BrowserConfig | None = None,
+    api_key: str | None = None,
+    auth_headers: dict[str, str] | None = None,
+) -> RemoteBrowserEnvironment:
+    """Initialize a backend-owned AgentCore Browser session.
+
+    This is for services that already created the cloud-browser session and need
+    the SDK's CDP/bootstrap flow only. The returned remote environment can be
+    used for dispatch and management, but this helper does not stop the session.
+    """
+    cloud_env = CloudBrowserEnvironment(
+        api_key=api_key,
+        auth_headers=auth_headers,
+        config=config,
+    )
+    try:
+        await cloud_env._validate_sdk_config()
+        cloud_env._playwright_context_manager = async_playwright()
+        cloud_env._playwright = (
+            await cloud_env._playwright_context_manager.__aenter__()
+        )
+        await cloud_env._initialize_cloud_browser_window(
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            login_url=login_url,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+        return RemoteBrowserEnvironment(
+            api_key=api_key,
+            auth_headers=auth_headers,
+            browser_window_id=cloud_env.browser_window_id,
+            cloud_browser_session_id=session_id,
+            stop_cloud_browser_session_on_close=False,
+        )
+    finally:
+        await cloud_env._stop_playwright()
 
 
 async def _fetch_presigned_download_url(
