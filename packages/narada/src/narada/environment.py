@@ -1801,9 +1801,7 @@ async def initialize_existing_cloud_browser_session(
     try:
         await cloud_env._validate_sdk_config()
         cloud_env._playwright_context_manager = async_playwright()
-        cloud_env._playwright = (
-            await cloud_env._playwright_context_manager.__aenter__()
-        )
+        cloud_env._playwright = await cloud_env._playwright_context_manager.__aenter__()
         await cloud_env._initialize_cloud_browser_window(
             cdp_websocket_url=cdp_websocket_url,
             session_id=session_id,
