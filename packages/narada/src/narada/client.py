@@ -341,7 +341,7 @@ class Narada:
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaTimeoutError:
+            except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
