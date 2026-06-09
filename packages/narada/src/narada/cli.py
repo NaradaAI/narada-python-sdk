@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from narada.workbench import (
+    _redact_sensitive_text,
     default_api_base_url,
     default_auth_headers,
     materialize_execution_trace_context,
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"error: {_redact_sensitive_text(str(exc))}", file=sys.stderr)
         return 1
 
 
