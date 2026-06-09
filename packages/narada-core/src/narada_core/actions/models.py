@@ -22,6 +22,9 @@ from narada_core.tracing import model as tracing_model
 DEFAULT_HITL_TIMEOUT_SECONDS = 300
 
 _StructuredOutputT = TypeVar("_StructuredOutputT")
+type JsonValue = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 
 class AgentUsage(BaseModel):
@@ -64,6 +67,9 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     action_trace: tracing_model.ActionTrace | None = None
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
 
 
 class AgenticSelectorClickAction(TypedDict):
@@ -406,6 +412,15 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class ExecuteJavaScriptOnPageRequest(BaseModel):
+    name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
+    code: str
+
+
+class ExecuteJavaScriptOnPageResponse(BaseModel):
+    result: JsonValue
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -436,6 +451,17 @@ class UserApprovalResponse(BaseModel):
     approved: bool
 
 
+ActiveInputAction = Annotated[
+    PromptForUserInputRequest | UserApprovalRequest,
+    Field(discriminator="name"),
+]
+
+
+class ActiveInputRequest(BaseModel):
+    input_id: str = Field(alias="inputId")
+    action: ActiveInputAction
+
+
 type ExtensionActionRequest = (
     AgenticSelectorRequest
     | AgenticMatchingSelectorsFinderRequest
@@ -452,6 +478,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
     | GetUrlRequest
+    | ExecuteJavaScriptOnPageRequest
     | PromptForUserInputRequest
     | UserApprovalRequest
 )

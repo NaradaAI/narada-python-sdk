@@ -4,7 +4,7 @@ from http import HTTPStatus
 from typing import Any
 
 import pytest
-from narada.window import RemoteBrowserWindow
+from narada import Agent, RemoteBrowserEnvironment
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
@@ -57,10 +57,16 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
             }
         ]
     )
-    monkeypatch.setattr("narada.window.aiohttp.ClientSession", lambda: fake_session)
-    window = RemoteBrowserWindow(browser_window_id="bw-1", api_key="test-key")
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
 
-    values = await window.prompt_for_user_input(
+    values = await agent.prompt_for_user_input(
         step_id="input-step",
         variables=[
             PromptForUserInputVariable(name="name", type="string", required=True),
@@ -83,10 +89,16 @@ async def test_user_approval_respects_explicit_timeout(
             }
         ]
     )
-    monkeypatch.setattr("narada.window.aiohttp.ClientSession", lambda: fake_session)
-    window = RemoteBrowserWindow(browser_window_id="bw-1", api_key="test-key")
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
 
-    approved = await window.user_approval(
+    approved = await agent.user_approval(
         step_id="approval-step",
         prompt_message="Proceed?",
         approve_label="Approve",
@@ -96,3 +108,35 @@ async def test_user_approval_respects_explicit_timeout(
 
     assert approved is True
     assert fake_session.post_bodies[0]["timeout"] == 600
+
+
+@pytest.mark.asyncio
+async def test_execute_javascript_on_page_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": '{"result":{"title":"Example Domain","count":3}}',
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.execute_javascript_on_page(
+        code="(() => ({ title: document.title, count: 3 }))()",
+    )
+
+    assert result == {"title": "Example Domain", "count": 3}
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "execute_javascript_on_page",
+        "code": "(() => ({ title: document.title, count: 3 }))()",
+    }

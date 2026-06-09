@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel, create_model
 
 from narada_core.actions.models import AgentUsage, CriticResult
-from narada_core.models import Agent, CriticConfig
+from narada_core.models import AgentKind, CriticConfig
 from narada_core.tracing.model import parse_action_trace
 
 _VALIDATION_VAR = "narada_validation_passed"
@@ -38,7 +38,7 @@ async def run_critic(
 
     critic_dispatch_response = await dispatch_request(
         prompt=critic.get("prompt", _DEFAULT_CRITIC_PROMPT),
-        agent=Agent.PRODUCTIVITY,
+        agent=AgentKind.PRODUCTIVITY,
         output_schema=CriticOutputModel,
         critic_context={
             "agentPrompt": original_prompt,

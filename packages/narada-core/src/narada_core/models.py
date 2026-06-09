@@ -5,26 +5,28 @@ from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, Typ
 
 from pydantic import BaseModel, Field
 
+from narada_core.actions.models import ActiveInputRequest
 
-class Agent(Enum):
+
+class AgentKind(Enum):
     PRODUCTIVITY = 1
     OPERATOR = 2
     CORE_AGENT = 3
 
     def prompt_prefix(self) -> str:
         match self:
-            case Agent.PRODUCTIVITY:
+            case AgentKind.PRODUCTIVITY:
                 return ""
-            case Agent.OPERATOR:
+            case AgentKind.OPERATOR:
                 return "/Operator "
-            case Agent.CORE_AGENT:
+            case AgentKind.CORE_AGENT:
                 return "/coreAgent "
 
 
 class ReasoningEffort(StrEnum):
     """Controls how much reasoning the Core Agent uses before responding.
 
-    Only `Agent.CORE_AGENT` supports this option; other agents raise `ValueError`.
+    Only `AgentKind.CORE_AGENT` supports this option; other agents raise `ValueError`.
     """
 
     NONE = "none"
@@ -316,12 +318,14 @@ class PythonSubAgentCallEvent(TypedDict):
     text: NotRequired[str]
     error_message: NotRequired[str]
     action_trace: NotRequired[ActionTrace]
+    execution_trace_context: NotRequired[dict[str, object]]
 
 
 class PythonExtensionActionEvent(TypedDict):
     kind: Literal["extensionAction"]
     ts_start: int
     ts_end: int
+    action_execution_id: NotRequired[str]
     action_name: str
     request_summary: dict[str, object]
     result_summary: NotRequired[dict[str, object]]
@@ -395,10 +399,22 @@ type APAActionTrace = list[ApaStepTrace]
 type ActionTrace = OperatorActionTrace | APAActionTrace
 
 
+class TextResponseOutput(TypedDict):
+    type: Literal["text"]
+    content: str
+
+
+class StructuredResponseOutput(TypedDict, Generic[_MaybeStructuredOutput]):
+    type: Literal["structured"]
+    content: _MaybeStructuredOutput
+
+
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
+    output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
+    executionTraceContext: NotRequired[dict[str, object]]
     workflowTrace: NotRequired[dict[str, Any]]
 
 
@@ -409,11 +425,22 @@ class Usage(TypedDict):
 
 class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     requestId: str
-    status: Literal["success", "error"]
+    status: Literal["success", "error", "input-required"]
     response: ResponseContent[_MaybeStructuredOutput] | None
     createdAt: str
     completedAt: str | None
     usage: Usage
+    activeInputRequest: ActiveInputRequest | None
+
+
+class _RemoteDispatchPollResponse(TypedDict):
+    requestId: str
+    status: Literal["pending", "input-required", "success", "error"]
+    response: dict[str, Any] | None
+    createdAt: str
+    completedAt: str | None
+    usage: Usage | None
+    activeInputRequest: ActiveInputRequest | None
 
 
 class File(TypedDict):
