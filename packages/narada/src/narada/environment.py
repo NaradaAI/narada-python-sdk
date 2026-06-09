@@ -172,6 +172,7 @@ class SessionDownloadItem:
     file_name: str
     size: int
     download_url: str
+    source_key: str | None = None
 
 
 @dataclass
@@ -1470,14 +1471,33 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_timeout: int | None = None,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        base_url: str | None = None,
+        dev_app_origin_override: str | None = None,
+        dev_extension_s3_bucket: str | None = None,
+        dev_extension_s3_key: str | None = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
             auth_headers=auth_headers,
+            base_url=base_url,
         )
         self._config = config or BrowserConfig()
         self._session_name = session_name
         self._session_timeout = session_timeout
+        dev_overrides = (
+            dev_app_origin_override,
+            dev_extension_s3_bucket,
+            dev_extension_s3_key,
+        )
+        if any(dev_overrides) and not all(dev_overrides):
+            raise ValueError(
+                "dev Cloud Browser overrides require app origin, extension S3 bucket, "
+                "and extension S3 key"
+            )
+        self._dev_app_origin_override = dev_app_origin_override
+        self._dev_extension_s3_bucket = dev_extension_s3_bucket
+        self._dev_extension_s3_key = dev_extension_s3_key
+        self._initialization_url: str | None = None
         self._session_id: str | None = None
         self._context: BrowserContext | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
@@ -1505,8 +1525,8 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
         Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
         Playwright over CDP, opens ``login_url``, and waits for
-        ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
-        interactive prompts and related behavior.
+        ``#narada-browser-window-id`` (extension install/sign-in retries apply).
+        ``config`` controls interactive prompts and related behavior.
         """
         self._playwright_context_manager = async_playwright()
         self._playwright = await self._playwright_context_manager.__aenter__()
@@ -1516,7 +1536,26 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             "session_name": self._session_name,
             "session_timeout": self._session_timeout,
         }
-        endpoint_url = f"{self._base_url}/cloud-browser/create-cloud-browser-session"
+        has_dev_overrides = any(
+            (
+                self._dev_app_origin_override,
+                self._dev_extension_s3_bucket,
+                self._dev_extension_s3_key,
+            )
+        )
+        if has_dev_overrides:
+            request_body.update(
+                {
+                    "app_origin_override": self._dev_app_origin_override,
+                    "extension_s3_bucket": self._dev_extension_s3_bucket,
+                    "extension_s3_key": self._dev_extension_s3_key,
+                }
+            )
+        endpoint_url = (
+            f"{self._base_url}/cloud-browser/dev/create-cloud-browser-session"
+            if has_dev_overrides
+            else f"{self._base_url}/cloud-browser/create-cloud-browser-session"
+        )
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -1548,8 +1587,8 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
+        self._initialization_url = login_url
 
-        # Connect to browser via CDP with authentication headers and log the user in.
         try:
             await self._initialize_cloud_browser_window(
                 cdp_websocket_url=cdp_websocket_url,
@@ -1558,7 +1597,6 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 cdp_auth_headers=cdp_auth_headers,
             )
         except Exception:
-            # Clean up the session if CDP connection fails
             try:
                 async with aiohttp.ClientSession() as cleanup_session:
                     async with cleanup_session.post(
@@ -1582,7 +1620,6 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 logging.warning(
                     "Error cleaning up session %s: %s", session_id, cleanup_error
                 )
-            # Re-raise the original connection error
             raise
 
     async def _stop_playwright(self) -> None:
@@ -1628,7 +1665,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
     ) -> None:
         assert self._playwright is not None
 
-        # Connect to browser via CDP with authentication headers
+        # Connect to browser via CDP with authentication headers.
         browser = await self._playwright.chromium.connect_over_cdp(
             cdp_websocket_url, headers=cdp_auth_headers
         )
@@ -1656,6 +1693,14 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
+            except NaradaExtensionUnauthenticatedError:
+                if attempt == max_attempts - 1:
+                    raise
+                logging.info("Waiting for Narada extension to sign in...")
+                await asyncio.sleep(1)
+                await initialization_page.goto(
+                    login_url, timeout=15_000, wait_until="domcontentloaded"
+                )
             except NaradaTimeoutError:
                 if attempt == max_attempts - 1:
                     raise
@@ -1667,10 +1712,89 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
         self._browser_window_id = browser_window_id
         self._session_id = session_id
-        self._context = context
+
+        # The initialization page only proves that the extension is installed,
+        # signed in, and can report a browser window id. Browser workbench
+        # commands are handled by the side-panel app, so we must also prove that
+        # page is mounted before releasing local Playwright control.
+        side_panel_page = await self._find_or_reconnect_cloud_side_panel_page(
+            browser=browser,
+            cdp_websocket_url=cdp_websocket_url,
+            cdp_auth_headers=cdp_auth_headers,
+            browser_window_id=browser_window_id,
+        )
+        self._context = side_panel_page.context
 
         if self._config.interactive:
             self._print_success_message(browser_window_id)
+
+    @staticmethod
+    def _is_side_panel_page_url(url: str, *, browser_window_id: str) -> bool:
+        parsed_url = urlsplit(url)
+        if parsed_url.scheme != "chrome-extension":
+            return False
+        if parsed_url.path != "/sidepanel.html":
+            return False
+        query = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+        if "browserWindowId" not in query:
+            return True
+        return query.get("browserWindowId") == browser_window_id
+
+    async def _wait_for_cloud_side_panel_page(
+        self,
+        context: BrowserContext,
+        *,
+        browser_window_id: str,
+        timeout_ms: int,
+    ) -> Page:
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            side_panel_page = next(
+                (
+                    page
+                    for page in context.pages
+                    if isinstance(page.url, str)
+                    if self._is_side_panel_page_url(
+                        page.url, browser_window_id=browser_window_id
+                    )
+                ),
+                None,
+            )
+            if side_panel_page is not None:
+                return side_panel_page
+            await asyncio.sleep(0.25)
+
+        visible_urls = [page.url for page in context.pages]
+        raise NaradaTimeoutError(
+            "Timed out waiting for Narada Cloud Browser side panel "
+            f"for browser window {browser_window_id!r}. Visible page URLs: {visible_urls!r}"
+        )
+
+    async def _find_or_reconnect_cloud_side_panel_page(
+        self,
+        *,
+        browser: Browser,
+        cdp_websocket_url: str,
+        cdp_auth_headers: dict[str, str],
+        browser_window_id: str,
+    ) -> Page:
+        context = browser.contexts[0]
+        try:
+            return await self._wait_for_cloud_side_panel_page(
+                context, browser_window_id=browser_window_id, timeout_ms=2_000
+            )
+        except NaradaTimeoutError:
+            # Mirrors the existing local-browser attach flow: Chrome side panels
+            # are not always visible to an already-established CDP connection.
+            await browser.close()
+
+        browser = await self._playwright.chromium.connect_over_cdp(
+            cdp_websocket_url, headers=cdp_auth_headers
+        )
+        context = browser.contexts[0]
+        return await self._wait_for_cloud_side_panel_page(
+            context, browser_window_id=browser_window_id, timeout_ms=15_000
+        )
 
     @override
     async def _close_impl(self, *, timeout: int | None = None) -> None:
@@ -1705,6 +1829,51 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             f"browser_window_id={self.browser_window_id}"
             ")"
         )
+
+
+class Narada(CloudBrowserEnvironment):
+    """Backward-compatible SDK facade.
+
+    New CPython code should prefer explicit environment classes such as
+    ``BrowserEnvironment`` and ``CloudBrowserEnvironment``. Some existing
+    integrations still use ``async with Narada(...)`` as a lightweight client
+    wrapper around the SDK browser initialization helpers. Entering the context
+    prepares local Playwright only; it intentionally does not create a cloud
+    session because those callers may own session lifecycle themselves.
+    """
+
+    async def __aenter__(self) -> Narada:
+        if self._playwright_context_manager is None:
+            self._playwright_context_manager = async_playwright()
+            self._playwright = await self._playwright_context_manager.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        await self._stop_playwright()
+
+    async def _initialize_cloud_browser_window(
+        self,
+        *,
+        config: BrowserConfig | None = None,
+        cdp_websocket_url: str,
+        session_id: str,
+        login_url: str,
+        cdp_auth_headers: dict[str, str],
+    ) -> Narada:
+        if config is not None:
+            self._config = config
+        await super()._initialize_cloud_browser_window(
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            login_url=login_url,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+        return self
 
 
 class LambdaEnvironment(Environment):
@@ -1859,6 +2028,7 @@ async def _get_cloud_browser_downloads(
             file_name=item["file_name"],
             size=item["size"],
             download_url=presigned_urls[i],
+            source_key=item.get("key"),
         )
         for i, item in enumerate(files)
     ]
@@ -1871,25 +2041,19 @@ async def _stop_cloud_browser_session(
     session_id: str,
     timeout: int | None = None,
 ) -> None:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{base_url}/cloud-browser/stop-cloud-browser-session",
-                headers=auth_headers,
-                json={"session_id": session_id},
-                timeout=aiohttp.ClientTimeout(total=timeout or 40),
-            ) as resp:
-                if resp.ok:
-                    response_data = await resp.json()
-                    if not response_data.get("success"):
-                        logger.warning(
-                            "Failed to stop session: %s",
-                            response_data.get("message"),
-                        )
-                else:
-                    logger.warning("Failed to stop session: %s", resp.status)
-    except Exception as e:
-        logger.warning("Error calling stop session endpoint: %s", e)
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{base_url}/cloud-browser/stop-cloud-browser-session",
+            headers=auth_headers,
+            json={"session_id": session_id},
+            timeout=aiohttp.ClientTimeout(total=timeout or 40),
+        ) as resp:
+            if not resp.ok:
+                raise RuntimeError(f"Failed to stop session: HTTP {resp.status}")
+            response_data = await resp.json()
+            if not response_data.get("success"):
+                message = response_data.get("message") or "unknown error"
+                raise RuntimeError(f"Failed to stop session: {message}")
 
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:

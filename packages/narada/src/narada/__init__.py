@@ -17,7 +17,7 @@ from narada_core.models import (
     ResponseContent,
 )
 
-from narada.agent import Agent
+from narada.agent import Agent, LocalBrowserWindow
 from narada.config import BrowserConfig, ProxyConfig
 from narada.environment import (
     BaseBrowserEnvironment,
@@ -25,12 +25,17 @@ from narada.environment import (
     CloudBrowserEnvironment,
     Environment,
     LambdaEnvironment,
+    Narada,
     RemoteBrowserEnvironment,
     SessionDownloadItem,
 )
 from narada.tracing import TraceSession, trace
 from narada.utils import download_file, render_html
 from narada.version import __version__
+
+Agent.PRODUCTIVITY = AgentKind.PRODUCTIVITY  # type: ignore[attr-defined]
+Agent.OPERATOR = AgentKind.OPERATOR  # type: ignore[attr-defined]
+Agent.CORE_AGENT = AgentKind.CORE_AGENT  # type: ignore[attr-defined]
 
 __all__ = [
     "__version__",
@@ -47,6 +52,8 @@ __all__ = [
     "Environment",
     "File",
     "LambdaEnvironment",
+    "LocalBrowserWindow",
+    "Narada",
     "NaradaError",
     "NaradaExtensionMissingError",
     "NaradaExtensionUnauthenticatedError",

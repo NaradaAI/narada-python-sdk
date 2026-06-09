@@ -19,6 +19,7 @@ from narada.browser_workbench import (
     env_open,
 )
 from narada.cli import main
+from narada.environment import SessionDownloadItem
 from narada.workbench import score_proof_root, verify_proof_root
 from narada_core.actions.models import (
     BrowserActionResponse,
@@ -98,12 +99,16 @@ def _write_env_record(
 
 class _FakeRemoteEnvironment:
     calls: list[Any] = []
+    instances: list["_FakeRemoteEnvironment"] = []
     fail_screenshot: bool = False
+    fail_close: bool = False
     download_path: Path | None = None
     stale_download_path: Path | None = None
+    cloud_downloads: list[SessionDownloadItem] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        self.__class__.instances.append(self)
 
     async def _run_extension_action(
         self, request: Any, response_model: Any = None, **kwargs: Any
@@ -172,6 +177,14 @@ class _FakeRemoteEnvironment:
     async def close(self, *, timeout: int | None = None) -> None:
         del timeout
         self.__class__.calls.append("close")
+        if self.__class__.fail_close:
+            raise RuntimeError(
+                "stop failed with signed URL https://example.test/?X-Amz-Signature=secret"
+            )
+
+    async def get_downloaded_files(self) -> list[SessionDownloadItem]:
+        self.__class__.calls.append("get_downloaded_files")
+        return self.__class__.cloud_downloads
 
 
 class _FakeLocalEnvironment:
@@ -190,12 +203,41 @@ class _FakeLocalEnvironment:
         return None
 
 
+class _FakeCloudEnvironment:
+    instances: list["_FakeCloudEnvironment"] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.browser_window_id = "cloud-window-1"
+        self._session_id = "cloud-session-1"
+        self._config = kwargs["config"]
+        self._initialization_url = (
+            kwargs.get("dev_app_origin_override") or "https://dev-app.narada.ai"
+        ) + "/initialize?customToken=test"
+        self.stopped_playwright = False
+        self.__class__.instances.append(self)
+
+    @property
+    def cloud_browser_session_id(self) -> str:
+        return self._session_id
+
+    async def start(self) -> None:
+        return None
+
+    async def _stop_playwright(self) -> None:
+        self.stopped_playwright = True
+
+
 @pytest.fixture(autouse=True)
 def reset_fake_remote_environment() -> None:
     _FakeRemoteEnvironment.calls = []
+    _FakeRemoteEnvironment.instances = []
     _FakeRemoteEnvironment.download_path = None
     _FakeRemoteEnvironment.stale_download_path = None
+    _FakeRemoteEnvironment.cloud_downloads = []
+    _FakeRemoteEnvironment.fail_close = False
     _FakeLocalEnvironment.instances = []
+    _FakeCloudEnvironment.instances = []
 
 
 @pytest.mark.asyncio
@@ -349,6 +391,221 @@ async def test_browser_downloads_filters_stale_profile_downloads(
 
 
 @pytest.mark.asyncio
+async def test_browser_downloads_materializes_cloud_replay_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    async def fake_download_to_file(url: str, destination: Path) -> int:
+        assert url == "https://signed.example/download.txt?X-Amz-Signature=secret"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"cloud download bytes")
+        return len(b"cloud download bytes")
+
+    monkeypatch.setattr(browser_module, "_download_to_file", fake_download_to_file)
+    proof_root = tmp_path / "proof"
+    _write_env_record(
+        proof_root,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+    _FakeRemoteEnvironment.cloud_downloads = [
+        SessionDownloadItem(
+            file_name="cloud-download.txt",
+            size=20,
+            download_url="https://signed.example/download.txt?X-Amz-Signature=secret",
+            source_key="cloud-browser/session/download.txt",
+        )
+    ]
+
+    result = await browser_downloads(env_id="cloud-dev", proof_root=proof_root)
+
+    assert result.status == "passed"
+    download = result.payload["downloads"][0]
+    assert download["source"] == "cloud-browser-replay"
+    assert download["sourceS3Key"] == "cloud-browser/session/download.txt"
+    assert download["redactedDownloadUrl"] == "https://signed.example/download.txt"
+    assert (proof_root / download["path"]).read_bytes() == b"cloud download bytes"
+    assert download["sha256"] == hashlib.sha256(b"cloud download bytes").hexdigest()
+    root_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in proof_root.rglob("*")
+        if path.is_file() and path.suffix not in {".png"}
+    )
+    assert "X-Amz-Signature=secret" not in root_text
+    assert score_proof_root(proof_root)["status"] == "passed"
+    assert verify_proof_root(proof_root)["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_browser_downloads_cloud_without_materialized_bytes_needs_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    async def fake_download_to_file(url: str, destination: Path) -> int:
+        del url
+        del destination
+        raise RuntimeError("signed URL expired")
+
+    monkeypatch.setattr(browser_module, "_download_to_file", fake_download_to_file)
+    proof_root = tmp_path / "proof"
+    _write_env_record(
+        proof_root,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+    _FakeRemoteEnvironment.cloud_downloads = [
+        SessionDownloadItem(
+            file_name="cloud-download.txt",
+            size=20,
+            download_url="https://signed.example/download.txt?X-Amz-Signature=secret",
+            source_key="cloud-browser/session/download.txt",
+        )
+    ]
+
+    result = await browser_downloads(env_id="cloud-dev", proof_root=proof_root)
+
+    assert result.status == "needs_review"
+    assert result.payload["downloads"][0]["downloadStatus"] == "failed"
+    assert "X-Amz-Signature=secret" not in json.dumps(result.payload)
+    score = score_proof_root(proof_root)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning.get("command") == "browser.downloads"
+        and warning.get("warning") == "cloud_download_fetch_failed"
+        for warning in score["warnings"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_browser_downloads_cloud_partial_materialization_needs_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    async def fake_download_to_file(url: str, destination: Path) -> int:
+        if "missing" in url:
+            raise RuntimeError("signed URL expired")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"cloud download bytes")
+        return len(b"cloud download bytes")
+
+    monkeypatch.setattr(browser_module, "_download_to_file", fake_download_to_file)
+    proof_root = tmp_path / "proof"
+    _write_env_record(
+        proof_root,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+    _FakeRemoteEnvironment.cloud_downloads = [
+        SessionDownloadItem(
+            file_name="cloud-download.txt",
+            size=20,
+            download_url="https://signed.example/download.txt?X-Amz-Signature=secret",
+            source_key="cloud-browser/session/download.txt",
+        ),
+        SessionDownloadItem(
+            file_name="missing.txt",
+            size=20,
+            download_url="https://signed.example/missing.txt?X-Amz-Signature=secret",
+            source_key="cloud-browser/session/missing.txt",
+        ),
+    ]
+
+    result = await browser_downloads(env_id="cloud-dev", proof_root=proof_root)
+
+    assert result.status == "needs_review"
+    assert [row["downloadStatus"] for row in result.payload["downloads"]] == [
+        "downloaded",
+        "failed",
+    ]
+    score = score_proof_root(proof_root)
+    assert score["status"] == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_browser_downloads_cloud_duplicate_names_do_not_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    async def fake_download_to_file(url: str, destination: Path) -> int:
+        content = url.encode("utf-8")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        return len(content)
+
+    monkeypatch.setattr(browser_module, "_download_to_file", fake_download_to_file)
+    proof_root = tmp_path / "proof"
+    _write_env_record(
+        proof_root,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+    _FakeRemoteEnvironment.cloud_downloads = [
+        SessionDownloadItem(
+            file_name="duplicate.txt",
+            size=20,
+            download_url="https://signed.example/one.txt",
+            source_key="cloud-browser/session/one.txt",
+        ),
+        SessionDownloadItem(
+            file_name="duplicate.txt",
+            size=20,
+            download_url="https://signed.example/two.txt",
+            source_key="cloud-browser/session/two.txt",
+        ),
+    ]
+
+    result = await browser_downloads(env_id="cloud-dev", proof_root=proof_root)
+
+    assert result.status == "passed"
+    paths = [row["path"] for row in result.payload["downloads"]]
+    assert paths[0].endswith("/000-duplicate.txt")
+    assert paths[1].endswith("/001-duplicate.txt")
+    assert paths[0] != paths[1]
+    assert (proof_root / paths[0]).read_text(encoding="utf-8") == (
+        "https://signed.example/one.txt"
+    )
+    assert (proof_root / paths[1]).read_text(encoding="utf-8") == (
+        "https://signed.example/two.txt"
+    )
+
+
+@pytest.mark.asyncio
 async def test_env_open_and_close_write_cleanup_status(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -385,8 +642,13 @@ async def test_env_open_and_close_write_cleanup_status(
     assert cleanup["localBrowserProcessStatus"] == "already_exited"
     assert cleanup["localBrowserCdpPortStatus"] == "closed"
     assert (tmp_path / "browser" / "environments" / "dev-closed.json").exists()
-    assert score_proof_root(tmp_path)["status"] == "passed"
-    assert verify_proof_root(tmp_path)["verified"] is True
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning["code"] == "browser_workbench_no_materialized_evidence"
+        for warning in score["warnings"]
+    )
+    assert verify_proof_root(tmp_path)["verified"] is False
 
 
 @pytest.mark.asyncio
@@ -413,6 +675,187 @@ async def test_env_open_can_adopt_existing_browser_window_id(
         "https://fixture.test/current"
     )
     assert _FakeLocalEnvironment.instances == []
+
+
+@pytest.mark.asyncio
+async def test_env_open_can_create_cloud_browser_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "CloudBrowserEnvironment", _FakeCloudEnvironment
+    )
+
+    opened = await env_open(
+        name="cloud-dev",
+        kind="cloud",
+        proof_root=tmp_path,
+        base_url="https://api.test/fast/v2",
+        session_name="m5-cloud-test",
+        session_timeout=900,
+    )
+
+    record = opened.payload["environment"]
+    assert record["kind"] == "cloud"
+    assert record["ownership"] == "sdk-created"
+    assert record["browserWindowId"] == "cloud-window-1"
+    assert record["cloudBrowserSessionId"] == "cloud-session-1"
+    assert record["sessionName"] == "m5-cloud-test"
+    assert record["sessionTimeout"] == 900
+    assert _FakeCloudEnvironment.instances[0].kwargs["base_url"] == (
+        "https://api.test/fast/v2"
+    )
+    assert record["initializationUrlOrigin"] == "https://dev-app.narada.ai"
+    assert _FakeCloudEnvironment.instances[0].stopped_playwright is True
+    lifecycle = (
+        tmp_path / "browser" / "cloud-sessions" / "cloud-session-1" / "status.jsonl"
+    )
+    assert lifecycle.exists()
+    assert (
+        json.loads(lifecycle.read_text(encoding="utf-8").splitlines()[0])["ownership"]
+        == "sdk-created"
+    )
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning["code"] == "cleanup_status_not_terminal"
+        for warning in score["warnings"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_env_open_then_close_keeps_lifecycle_artifacts_immutable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "CloudBrowserEnvironment", _FakeCloudEnvironment
+    )
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    await env_open(name="cloud-dev", kind="cloud", proof_root=tmp_path)
+    await env_close(env_id="cloud-dev", proof_root=tmp_path)
+
+    lifecycle = (
+        tmp_path / "browser" / "cloud-sessions" / "cloud-session-1" / "status.jsonl"
+    )
+    event_files = sorted(
+        (tmp_path / "browser" / "cloud-sessions" / "cloud-session-1" / "events").glob(
+            "*.json"
+        )
+    )
+    assert [
+        json.loads(line)["event"] for line in lifecycle.read_text().splitlines()
+    ] == [
+        "env.open",
+        "env.close",
+    ]
+    assert len(event_files) == 2
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning["code"] == "browser_workbench_no_materialized_evidence"
+        for warning in score["warnings"]
+    )
+    assert verify_proof_root(tmp_path)["verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_env_open_cloud_forwards_dev_branch_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "CloudBrowserEnvironment", _FakeCloudEnvironment
+    )
+
+    opened = await env_open(
+        name="cloud-dev",
+        kind="cloud",
+        proof_root=tmp_path,
+        base_url="https://api.test/fast/v2",
+        dev_app_origin_override="https://branch.example.test",
+        dev_extension_s3_bucket="narada-chrome-extension-test-builds",
+        dev_extension_s3_key="proof/m5-extension.zip",
+    )
+
+    record = opened.payload["environment"]
+    instance = _FakeCloudEnvironment.instances[0]
+    assert instance.kwargs["dev_app_origin_override"] == "https://branch.example.test"
+    assert (
+        instance.kwargs["dev_extension_s3_bucket"]
+        == "narada-chrome-extension-test-builds"
+    )
+    assert instance.kwargs["dev_extension_s3_key"] == "proof/m5-extension.zip"
+    assert record["initializationUrlOrigin"] == "https://branch.example.test"
+    assert record["devAppOriginOverride"] == "https://branch.example.test"
+    assert record["devExtensionS3Bucket"] == "narada-chrome-extension-test-builds"
+    assert record["devExtensionS3Key"] == "proof/m5-extension.zip"
+
+
+@pytest.mark.asyncio
+async def test_env_open_dev_cloud_overrides_require_cloud_kind(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="dev overrides require --kind cloud"):
+        await env_open(
+            name="dev",
+            kind="local",
+            proof_root=tmp_path,
+            dev_app_origin_override="https://branch.example.test",
+        )
+
+
+@pytest.mark.asyncio
+async def test_env_open_dev_extension_override_requires_bucket_and_key(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="must be provided together"):
+        await env_open(
+            name="cloud-dev",
+            kind="cloud",
+            proof_root=tmp_path,
+            dev_extension_s3_bucket="narada-chrome-extension-test-builds",
+        )
+
+
+@pytest.mark.asyncio
+async def test_env_open_can_adopt_cloud_browser_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    opened = await env_open(
+        name="cloud-dev",
+        kind="cloud",
+        proof_root=tmp_path,
+        browser_window_id="cloud-window-adopted",
+        cloud_browser_session_id="cloud-session-adopted",
+        base_url="https://api.test/fast/v2",
+    )
+
+    record = opened.payload["environment"]
+    assert record["kind"] == "cloud"
+    assert record["ownership"] == "adopted"
+    assert record["browserWindowId"] == "cloud-window-adopted"
+    assert record["cloudBrowserSessionId"] == "cloud-session-adopted"
+    assert _FakeRemoteEnvironment.instances[0].kwargs["cloud_browser_session_id"] == (
+        "cloud-session-adopted"
+    )
+
+
+@pytest.mark.asyncio
+async def test_env_open_cloud_adoption_requires_session_id(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="cloud adoption requires"):
+        await env_open(
+            name="cloud-dev",
+            kind="cloud",
+            proof_root=tmp_path,
+            browser_window_id="cloud-window-adopted",
+        )
 
 
 @pytest.mark.asyncio
@@ -660,6 +1103,125 @@ async def test_env_close_fails_if_sdk_created_local_cdp_port_stays_open(
     assert any(taint["code"] == "cleanup_failed" for taint in score["taints"])
 
 
+@pytest.mark.asyncio
+async def test_env_close_stops_sdk_created_cloud_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    _write_env_record(
+        tmp_path,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+
+    closed = await env_close(env_id="cloud-dev", proof_root=tmp_path)
+
+    assert closed.status == "passed"
+    assert closed.payload["environment"]["status"] == "closed"
+    assert "close" in _FakeRemoteEnvironment.calls
+    cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
+    assert cleanup["cloudBrowserSessionId"] == "cloud-session-1"
+    assert cleanup["cloudBrowserOwnership"] == "sdk-created"
+    lifecycle = (
+        tmp_path / "browser" / "cloud-sessions" / "cloud-session-1" / "status.jsonl"
+    )
+    assert any(
+        json.loads(line)["status"] == "closed"
+        for line in lifecycle.read_text(encoding="utf-8").splitlines()
+    )
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning["code"] == "browser_workbench_no_materialized_evidence"
+        for warning in score["warnings"]
+    )
+    assert verify_proof_root(tmp_path)["verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_env_close_failure_records_failed_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    _FakeRemoteEnvironment.fail_close = True
+    _write_env_record(
+        tmp_path,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-1",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-1",
+            "ownership": "sdk-created",
+        },
+    )
+
+    closed = await env_close(env_id="cloud-dev", proof_root=tmp_path)
+
+    assert closed.status == "failed"
+    assert closed.payload["environment"]["status"] == "close_failed"
+    cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
+    assert cleanup["status"] == "failed"
+    assert "X-Amz-Signature=secret" not in cleanup["error"]
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "tainted"
+    assert any(taint["code"] == "cleanup_failed" for taint in score["taints"])
+
+
+@pytest.mark.asyncio
+async def test_env_close_detaches_adopted_cloud_session_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    _write_env_record(
+        tmp_path,
+        env_id="cloud-dev",
+        browser_window_id="cloud-window-adopted",
+        extra={
+            "kind": "cloud",
+            "cloudBrowserSessionId": "cloud-session-adopted",
+            "ownership": "adopted",
+            "adoptedBrowserWindow": True,
+        },
+    )
+
+    closed = await env_close(env_id="cloud-dev", proof_root=tmp_path)
+
+    assert closed.status == "passed"
+    assert closed.payload["environment"]["status"] == "detached"
+    assert "close" not in _FakeRemoteEnvironment.calls
+    command_rows = [
+        json.loads(line)
+        for line in (tmp_path / "commands.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(
+        row.get("command") == "env.close"
+        and "adopted_cloud_browser_not_stopped" in row.get("warnings", [])
+        for row in command_rows
+    )
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "needs_review"
+    assert any(
+        warning["code"] == "browser_workbench_no_materialized_evidence"
+        for warning in score["warnings"]
+    )
+
+
 def test_cli_browser_find_requires_proof_root() -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["workbench", "browser", "find", "dev", "--snapshot-id", "snap"])
@@ -892,6 +1454,30 @@ async def test_browser_workbench_open_cleanup_status_is_review_gated(
 
 
 @pytest.mark.asyncio
+async def test_browser_workbench_metadata_only_root_cannot_verify_clean(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(browser_module, "BrowserEnvironment", _FakeLocalEnvironment)
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+
+    await env_open(name="dev", kind="local", proof_root=tmp_path)
+    await env_close(env_id="dev", proof_root=tmp_path)
+
+    score = score_proof_root(tmp_path)
+    verified = verify_proof_root(tmp_path)
+
+    assert score["status"] == "needs_review"
+    assert verified["verified"] is False
+    assert any(
+        warning["code"] == "browser_workbench_no_materialized_evidence"
+        for warning in score["warnings"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_browser_workbench_score_verify_do_not_amplify_warning_codes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -905,6 +1491,7 @@ async def test_browser_workbench_score_verify_do_not_amplify_warning_codes(
     record["adoptedBrowserWindow"] = True
     env_path.write_text(json.dumps(record), encoding="utf-8")
 
+    await browser_snapshot(env_id="dev", proof_root=tmp_path)
     await env_close(env_id="dev", proof_root=tmp_path)
     browser_module.append_command(
         tmp_path,

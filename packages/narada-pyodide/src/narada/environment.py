@@ -218,6 +218,7 @@ class SessionDownloadItem:
     file_name: str
     size: int
     download_url: str
+    source_key: str | None = None
 
 
 class Environment(ABC):
@@ -728,6 +729,18 @@ class Environment(ABC):
                     and response_content is not None
                     else None
                 )
+                action_trace_raw: list[dict[str, Any]] | None = None
+                if response_content is not None:
+                    explicit_action_trace = response_content.get("actionTrace")
+                    if isinstance(explicit_action_trace, list):
+                        action_trace_raw = explicit_action_trace
+                    else:
+                        workflow_trace = response_content.get("workflowTrace")
+                        if isinstance(workflow_trace, dict) and isinstance(
+                            workflow_trace.get("children"), list
+                        ):
+                            action_trace_raw = workflow_trace["children"]
+
                 _trace.emit_sub_agent_call(
                     ts_start=trace_start_ms,
                     agent_type=agent_type_str,
@@ -736,11 +749,7 @@ class Environment(ABC):
                     request_id=request_id,
                     text=trace_text,
                     error_message=trace_error,
-                    action_trace_raw=(
-                        response_content.get("actionTrace")
-                        if response_content is not None
-                        else None
-                    ),
+                    action_trace_raw=action_trace_raw,
                     execution_trace_context=(
                         response_content.get("executionTraceContext")
                         if response_content is not None
@@ -1296,6 +1305,7 @@ async def _get_cloud_browser_downloads(
             file_name=item["file_name"],
             size=item["size"],
             download_url=presigned_urls[index],
+            source_key=item.get("key"),
         )
         for index, item in enumerate(files)
     ]

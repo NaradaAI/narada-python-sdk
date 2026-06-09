@@ -230,6 +230,12 @@ async def _env_open(args: argparse.Namespace) -> int:
         profile_directory=args.profile_directory,
         attach_to_existing=args.attach_to_existing,
         browser_window_id=args.browser_window_id,
+        cloud_browser_session_id=args.cloud_browser_session_id,
+        session_name=args.session_name,
+        session_timeout=args.session_timeout,
+        dev_app_origin_override=args.dev_app_origin_override,
+        dev_extension_s3_bucket=args.dev_extension_s3_bucket,
+        dev_extension_s3_key=args.dev_extension_s3_key,
     )
     _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
     return 0 if result.status == "passed" else 1
@@ -398,6 +404,12 @@ def build_parser() -> argparse.ArgumentParser:
     env_open_parser.add_argument("--profile-directory")
     env_open_parser.add_argument("--attach-to-existing", action="store_true")
     env_open_parser.add_argument("--browser-window-id")
+    env_open_parser.add_argument("--cloud-browser-session-id")
+    env_open_parser.add_argument("--session-name")
+    env_open_parser.add_argument("--session-timeout", type=int)
+    env_open_parser.add_argument("--dev-app-origin-override")
+    env_open_parser.add_argument("--dev-extension-s3-bucket")
+    env_open_parser.add_argument("--dev-extension-s3-key")
     env_open_parser.add_argument("--json", action="store_true")
     env_open_parser.set_defaults(handler=lambda args: asyncio.run(_env_open(args)))
 

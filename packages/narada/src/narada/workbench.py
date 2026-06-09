@@ -796,6 +796,7 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     failures: list[dict[str, Any]] = []
     taints: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
+    needs_review = False
 
     manifest_path = root / "manifest.json"
     manifest_kind = "trace"
@@ -1071,6 +1072,17 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 }
             )
     browser_artifact_rows: list[dict[str, Any]] = []
+    browser_evidence_roles = {
+        "browser-download",
+        "browser-screenshot",
+        "browser-snapshot-elements",
+        "browser-snapshot-frames",
+        "browser-snapshot-html",
+        "browser-snapshot-summary",
+        "browser-snapshot-visible-text",
+        "cloud-browser-download",
+    }
+    materialized_browser_evidence_count = 0
     if browser_index_path.exists():
         browser_artifact_rows = _load_jsonl(browser_index_path)
         for row in browser_artifact_rows:
@@ -1102,6 +1114,11 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                         "path": local_path_value,
                     }
                 )
+            if row.get("role") in browser_evidence_roles:
+                materialized_browser_evidence_count += 1
+    if is_browser_workbench_root and materialized_browser_evidence_count == 0:
+        needs_review = True
+        warnings.append({"code": "browser_workbench_no_materialized_evidence"})
 
     redaction_report = _write_redaction_report(root) if write else _scan_redaction(root)
     for finding in redaction_report["findings"]:
@@ -1123,7 +1140,6 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     commands_path = root / "commands.jsonl"
     if commands_path.exists():
         command_rows = _load_jsonl(commands_path)
-        needs_review = False
         if not command_rows:
             failures.append({"code": "empty_command_ledger"})
         materialize_commands = [
@@ -1328,9 +1344,6 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                                 "path": relative_path,
                             }
                         )
-    else:
-        needs_review = False
-
     cleanup_path = root / "cleanup" / "status.json"
     if cleanup_path.exists():
         cleanup = _load_json(cleanup_path)

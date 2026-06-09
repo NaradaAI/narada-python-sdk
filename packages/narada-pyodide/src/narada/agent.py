@@ -59,6 +59,7 @@ from pydantic import BaseModel
 
 from narada.environment import (
     BaseBrowserEnvironment,
+    BrowserEnvironment,
     Environment,
     InputRequiredCallback,
 )
@@ -578,5 +579,72 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             GetScreenshotRequest(),
             GetScreenshotResponse,
+            timeout=timeout,
+        )
+
+
+class LocalBrowserWindow(Agent[Any]):
+    """Backward-compatible browser-window helper for Python APA code.
+
+    Older Agent Studio Python workflows instantiate ``LocalBrowserWindow()`` and
+    call ``window.agent(...)``. The environment-based SDK keeps the same runtime
+    behavior by binding a normal ``Agent`` to the injected browser window.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(environment=BrowserEnvironment(), kind=AgentKind.OPERATOR)
+
+    async def agent(
+        self,
+        *,
+        prompt: str,
+        agent: AgentKind | str = AgentKind.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
+        clear_chat: bool | None = None,
+        generate_gif: bool | None = None,
+        output_schema: type[BaseModel] | None = None,
+        previous_request_id: str | None = None,
+        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
+        additional_context: dict[str, str] | None = None,
+        attachment: File | IO[Any] | None = None,
+        time_zone: str = "America/Los_Angeles",
+        user_resource_credentials: UserResourceCredentials | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        secret_variables: dict[str, str] | None = None,
+        input_variables: Mapping[str, Any] | None = None,
+        variables: Mapping[str, Any] | None = None,
+        callback_url: str | None = None,
+        callback_secret: str | None = None,
+        callback_headers: Mapping[str, Any] | None = None,
+        on_input_required: InputRequiredCallback | None = None,
+        critic: CriticConfig | None = None,
+        timeout: int = 1000,
+    ) -> AgentResponse:
+        if variables is not None and input_variables is not None:
+            raise ValueError("Pass either `variables` or `input_variables`, not both.")
+
+        scoped_agent = Agent(environment=self.environment, kind=agent)
+        return await scoped_agent.run(
+            prompt,
+            reasoning=reasoning,
+            clear_chat=clear_chat,
+            generate_gif=generate_gif,
+            output_schema=output_schema,
+            previous_request_id=previous_request_id,
+            chat_history=chat_history,
+            additional_context=additional_context,
+            attachment=attachment,
+            time_zone=time_zone,
+            user_resource_credentials=user_resource_credentials,
+            mcp_servers=mcp_servers,
+            secret_variables=secret_variables,
+            input_variables=input_variables
+            if input_variables is not None
+            else variables,
+            callback_url=callback_url,
+            callback_secret=callback_secret,
+            callback_headers=callback_headers,
+            on_input_required=on_input_required,
+            critic=critic,
             timeout=timeout,
         )
