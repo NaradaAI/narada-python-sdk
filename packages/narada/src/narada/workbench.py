@@ -14,6 +14,14 @@ from urllib.parse import urlsplit, urlunsplit
 import aiohttp
 from narada_core.execution_trace import ExecutionTraceContext
 
+from narada._workbench_contract import (
+    BINARY_SCAN_SUFFIXES,
+    CLEAN_COMMAND_STATUSES,
+    REDACTION_REPORT_JSON,
+    REDACTION_REPORT_MD,
+    REQUIRED_PROOF_FILES,
+)
+
 DEFAULT_API_BASE_URL = "https://api.narada.ai/fast/v2"
 
 _SIGNED_URL_PATTERNS = (
@@ -25,8 +33,18 @@ _SIGNED_URL_PATTERNS = (
 _SECRET_PATTERNS = (
     re.compile(r"Authorization:\s*Bearer\s+\S+", re.IGNORECASE),
     re.compile(r'"authorization"\s*:\s*"Bearer\s+[^"]+"', re.IGNORECASE),
+    re.compile(r"\bcookie\s*:\s*[^\n\r]+", re.IGNORECASE),
+    re.compile(r'"cookie"\s*:\s*"[^"]+"', re.IGNORECASE),
     re.compile(r"x-api-key\s*[:=]\s*['\"]?[^'\"\s,}]+", re.IGNORECASE),
     re.compile(r"NARADA_API_KEY\s*=\s*['\"]?[^'\"\s,}]+", re.IGNORECASE),
+    re.compile(
+        r'"(?:plaintextKey|apiKey|accessToken|refreshToken|idToken|authToken|token)"\s*:\s*"[^"]+"',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:plaintextKey|apiKey|accessToken|refreshToken|idToken|authToken|token)\s*[:=]\s*['\"]?[^'\"\s,}]+",
+        re.IGNORECASE,
+    ),
     re.compile(r"callbackSecret\s*[:=]\s*['\"]?[^'\"\s,}]+", re.IGNORECASE),
     re.compile(r"secretVariables\s*[:=]", re.IGNORECASE),
     re.compile(r"NARADA_TEST_SECRET_SHOULD_FAIL"),
@@ -79,11 +97,6 @@ _NON_TERMINAL_STATUSES = (
 _CLEAN_SOURCE_AUTHORITIES = (
     "remote-dispatch-response-api",
     "agent-run-response",
-)
-_CLEAN_COMMAND_STATUSES = (
-    "passed",
-    "materialized",
-    "not_applicable",
 )
 
 
@@ -156,9 +169,48 @@ def _redact_url(value: str) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, "", ""))
 
 
+def _url_origin(value: str) -> str:
+    split = urlsplit(value)
+    return urlunsplit((split.scheme, split.netloc, "", "", ""))
+
+
+def _redact_sensitive_text(value: str) -> str:
+    redacted = value
+    for marker in _SIGNED_URL_PATTERNS:
+        redacted = re.sub(
+            rf"(\S*{re.escape(marker)}\S*)",
+            "[REDACTED_SIGNED_URL]",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub("[REDACTED_SECRET]", redacted)
+    return redacted
+
+
 def _frame_dir(root: Path, frame: dict[str, Any], index: int) -> Path:
     frame_id = str(frame.get("frameId") or f"frame_{index}")
     return root / "trace" / "frames" / _safe_slug(frame_id)
+
+
+def _frame_summary(frame: dict[str, Any]) -> dict[str, Any]:
+    page = frame.get("page") if isinstance(frame.get("page"), dict) else {}
+    return {
+        "schemaVersion": 1,
+        "frameId": frame.get("frameId"),
+        "sequence": frame.get("sequence"),
+        "capturedAt": frame.get("capturedAt"),
+        "reason": frame.get("reason"),
+        "page": {
+            "url": page.get("url"),
+            "title": page.get("title"),
+        },
+        "eventIds": frame.get("eventIds")
+        if isinstance(frame.get("eventIds"), list)
+        else [],
+        "hasHtmlRef": bool(frame.get("htmlS3Key")),
+        "hasScreenshotRef": bool(frame.get("screenshotS3Key")),
+    }
 
 
 def _is_failed_status(value: Any) -> bool:
@@ -179,6 +231,10 @@ def _is_non_terminal_status(value: Any) -> bool:
 
 def _is_clean_source_authority(value: Any) -> bool:
     return isinstance(value, str) and value in _CLEAN_SOURCE_AUTHORITIES
+
+
+def _status_exit_code(status: str) -> int:
+    return 0 if status in CLEAN_COMMAND_STATUSES or status == "passed" else 1
 
 
 def _source_run_problems(source_run: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -353,7 +409,9 @@ async def materialize_execution_trace_context(
     if isinstance(frames, list):
         for index, frame in enumerate(frames, start=1):
             if isinstance(frame, dict):
-                _write_json(_frame_dir(proof_root, frame, index) / "frame.json", frame)
+                frame_root = _frame_dir(proof_root, frame, index)
+                _write_json(frame_root / "frame.json", frame)
+                _write_json(frame_root / "summary.json", _frame_summary(frame))
 
     artifact_rows: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -400,7 +458,26 @@ async def materialize_execution_trace_context(
                 trace_root / "artifacts" / f"{role}_{role_counts[role]}{extension}"
             )
 
-        data = await _download_bytes(download_url, session_factory=session_factory)
+        try:
+            data = await _download_bytes(download_url, session_factory=session_factory)
+        except Exception as exc:
+            failures.append(f"artifact_download_failed:{source_key}")
+            warnings.append(f"Failed to download artifact for role {role}")
+            artifact_rows.append(
+                {
+                    "role": role,
+                    "sourceS3Key": source_key,
+                    "localPath": None,
+                    "downloadStatus": "failed",
+                    "errorType": type(exc).__name__,
+                    "contentType": artifact.get("contentType"),
+                    "sensitive": bool(artifact.get("sensitive", True)),
+                    "frameId": artifact.get("frameId"),
+                    "label": artifact.get("label"),
+                    "redactedDownloadUrl": _redact_url(download_url),
+                }
+            )
+            continue
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(data)
         artifact_rows.append(
@@ -408,6 +485,7 @@ async def materialize_execution_trace_context(
                 "role": role,
                 "sourceS3Key": source_key,
                 "localPath": _relative(local_path, proof_root),
+                "downloadStatus": "downloaded",
                 "sha256": _sha256_bytes(data),
                 "bytes": len(data),
                 "contentType": artifact.get("contentType"),
@@ -418,20 +496,29 @@ async def materialize_execution_trace_context(
             }
         )
 
-    _write_jsonl(trace_root / "artifacts" / "index.jsonl", artifact_rows)
-
+    artifact_index_path = trace_root / "artifacts" / "index.jsonl"
+    _write_jsonl(artifact_index_path, artifact_rows)
+    artifact_index_hash = _sha256_file(artifact_index_path)
+    redaction_report = _write_redaction_report(proof_root)
+    for finding in redaction_report["findings"]:
+        if finding["severity"] == "failure":
+            failures.append(f"redaction:{finding['code']}:{finding['path']}")
+        elif finding["severity"] == "taint":
+            taints.append(f"redaction:{finding['code']}:{finding['path']}")
     manifest = {
         "schemaVersion": 1,
         "runId": proof_root.name,
         "label": label or validated.label,
         "createdAt": _now_iso(),
         "apiBaseUrl": base_url or default_api_base_url(),
-        "status": "tainted" if taints else "materialized",
+        "apiBaseUrlOrigin": _url_origin(base_url or default_api_base_url()),
+        "status": "failed" if failures else ("tainted" if taints else "materialized"),
         "traceContext": validated.model_dump(mode="json"),
         "traceId": validated.traceId,
         "sourceRun": source_run,
         "traceContextHash": _sha256_json(validated.model_dump(mode="json")),
         "resolvedTraceHash": _sha256_json(resolved_trace),
+        "artifactIndexHash": artifact_index_hash,
         "traceContextStatus": validated.status,
         "traceManifestStatus": (resolved_trace.get("manifest") or {}).get("status")
         if isinstance(resolved_trace.get("manifest"), dict)
@@ -484,8 +571,17 @@ async def materialize_execution_trace_context(
             "traceId": validated.traceId,
             "contextHash": manifest["traceContextHash"],
             "resolvedTraceHash": manifest["resolvedTraceHash"],
+            "artifactIndexHash": manifest["artifactIndexHash"],
             "sourceRunStatus": source_run.get("status"),
+            "sourceRunAuthority": source_run.get("authority"),
         },
+        inputs={
+            "sourceType": "context",
+            "apiBaseUrlOrigin": manifest["apiBaseUrlOrigin"],
+        },
+    )
+    _update_manifest_hash(
+        proof_root, "commandLedgerHash", proof_root / "commands.jsonl"
     )
     return MaterializedTrace(path=proof_root, manifest=manifest, report=report)
 
@@ -540,6 +636,7 @@ def append_command(
     *,
     command: str,
     status: str,
+    exit_code: int | None = None,
     artifacts: list[dict[str, Any]] | None = None,
     warnings: list[str] | None = None,
     taints: list[str] | None = None,
@@ -553,6 +650,7 @@ def append_command(
         "runId": proof_root.name,
         "command": command,
         "status": status,
+        "exitCode": _status_exit_code(status) if exit_code is None else exit_code,
         "startedAt": now,
         "completedAt": now,
         "ids": ids or {},
@@ -566,15 +664,6 @@ def append_command(
     with commands_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
     return row
-
-
-def _iter_text_files(root: Path) -> Iterable[Path]:
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}:
-            continue
-        yield path
 
 
 def _load_json(path: Path) -> Any:
@@ -591,25 +680,108 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _scan_redaction(root: Path) -> dict[str, Any]:
+    scanned_text_files: list[str] = []
+    skipped_binary_files: list[str] = []
+    findings: list[dict[str, Any]] = []
+
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative_path = _relative(path, root)
+        if path.suffix.lower() in BINARY_SCAN_SUFFIXES:
+            skipped_binary_files.append(relative_path)
+            continue
+        scanned_text_files.append(relative_path)
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        text_lower = text.lower()
+        for marker_index, marker in enumerate(_SIGNED_URL_PATTERNS, start=1):
+            if marker in text_lower:
+                findings.append(
+                    {
+                        "code": "signed_url_leak",
+                        "severity": "failure",
+                        "path": relative_path,
+                        "markerId": f"signed-url-marker-{marker_index}",
+                    }
+                )
+        for pattern_index, pattern in enumerate(_SECRET_PATTERNS, start=1):
+            if pattern.search(text):
+                findings.append(
+                    {
+                        "code": "secret_leak",
+                        "severity": "failure",
+                        "path": relative_path,
+                        "patternId": f"secret-pattern-{pattern_index}",
+                    }
+                )
+        for pattern_index, pattern in enumerate(_SELF_REVIEW_PATTERNS, start=1):
+            if pattern.search(text):
+                findings.append(
+                    {
+                        "code": "workflow_self_review_marker",
+                        "severity": "taint",
+                        "path": relative_path,
+                        "patternId": f"self-review-pattern-{pattern_index}",
+                    }
+                )
+        for pattern_index, pattern in enumerate(_STATIC_ANSWER_PATTERNS, start=1):
+            if pattern.search(text):
+                findings.append(
+                    {
+                        "code": "static_answer_marker",
+                        "severity": "failure",
+                        "path": relative_path,
+                        "patternId": f"static-answer-pattern-{pattern_index}",
+                    }
+                )
+
+    status = (
+        "failed"
+        if any(finding["severity"] == "failure" for finding in findings)
+        else ("tainted" if findings else "passed")
+    )
+    return {
+        "schemaVersion": 1,
+        "status": status,
+        "scannedTextFiles": scanned_text_files,
+        "skippedBinaryFiles": skipped_binary_files,
+        "findings": findings,
+    }
+
+
+def _write_redaction_report(root: Path) -> dict[str, Any]:
+    report = _scan_redaction(root)
+    _write_json(root / REDACTION_REPORT_JSON, report)
+    (root / REDACTION_REPORT_MD).write_text(
+        "# Redaction Report\n\n"
+        f"Status: {report['status']}\n\n"
+        f"Scanned text files: {len(report['scannedTextFiles'])}\n\n"
+        f"Skipped binary files: {len(report['skippedBinaryFiles'])}\n\n"
+        f"Findings: {len(report['findings'])}\n",
+        encoding="utf-8",
+    )
+    return report
+
+
+def _update_manifest_hash(root: Path, field_name: str, path: Path) -> None:
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        return
+    loaded = _load_json(manifest_path)
+    if not isinstance(loaded, dict):
+        return
+    loaded[field_name] = _sha256_file(path)
+    _write_json(manifest_path, loaded)
+
+
 def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str, Any]:
     root = Path(proof_root)
     failures: list[dict[str, Any]] = []
     taints: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
-    required_files = [
-        "manifest.json",
-        "commands.jsonl",
-        "trace/context.json",
-        "trace/resolved.json",
-        "trace/events.jsonl",
-        "trace/scopes.jsonl",
-        "trace/timeline.json",
-        "trace/artifacts/index.jsonl",
-        "reports/materialization-report.json",
-        "cleanup/status.json",
-    ]
-    for relative_path in required_files:
+    for relative_path in REQUIRED_PROOF_FILES:
         if not (root / relative_path).exists():
             failures.append({"code": "missing_required_file", "path": relative_path})
 
@@ -622,6 +794,7 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     manifest_path = root / "manifest.json"
     context_path = root / "trace" / "context.json"
     resolved_path = root / "trace" / "resolved.json"
+    index_path = root / "trace" / "artifacts" / "index.jsonl"
     if manifest_path.exists():
         loaded = _load_json(manifest_path)
         manifest = loaded if isinstance(loaded, dict) else None
@@ -740,6 +913,17 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 failures.append({"code": "manifest_resolved_trace_hash_missing"})
             elif manifest.get("resolvedTraceHash") != _sha256_json(resolved_trace):
                 failures.append({"code": "manifest_resolved_trace_hash_mismatch"})
+        if index_path.exists():
+            if not manifest.get("artifactIndexHash"):
+                failures.append({"code": "manifest_artifact_index_hash_missing"})
+            elif manifest.get("artifactIndexHash") != _sha256_file(index_path):
+                failures.append({"code": "manifest_artifact_index_hash_mismatch"})
+        commands_path = root / "commands.jsonl"
+        if commands_path.exists():
+            if not manifest.get("commandLedgerHash"):
+                failures.append({"code": "manifest_command_ledger_hash_missing"})
+            elif manifest.get("commandLedgerHash") != _sha256_file(commands_path):
+                failures.append({"code": "manifest_command_ledger_hash_mismatch"})
         for failure in manifest.get("failures") or []:
             failures.append({"code": "manifest_failure", "failure": failure})
         if manifest.get("status") == "tainted":
@@ -776,13 +960,20 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 }
             )
 
-    index_path = root / "trace" / "artifacts" / "index.jsonl"
     if index_path.exists():
         artifact_rows = _load_jsonl(index_path)
         seen_artifact_keys: set[str] = set()
         for row in artifact_rows:
             local_path_value = row.get("localPath")
             source_key = row.get("sourceS3Key")
+            if row.get("downloadStatus") == "failed":
+                failures.append(
+                    {
+                        "code": "artifact_download_failed",
+                        "sourceS3Key": source_key,
+                        "role": row.get("role"),
+                    }
+                )
             if not isinstance(local_path_value, str) or not local_path_value:
                 failures.append({"code": "artifact_missing_local_path", "row": row})
                 continue
@@ -839,26 +1030,22 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 }
             )
 
-    for text_path in _iter_text_files(root):
-        text = text_path.read_text(encoding="utf-8", errors="ignore")
-        text_lower = text.lower()
-        relative_path = _relative(text_path, root)
-        for marker in _SIGNED_URL_PATTERNS:
-            if marker in text_lower:
-                failures.append(
-                    {"code": "signed_url_leak", "path": relative_path, "marker": marker}
-                )
-        for pattern in _SECRET_PATTERNS:
-            if pattern.search(text):
-                failures.append({"code": "secret_leak", "path": relative_path})
-        for pattern in _SELF_REVIEW_PATTERNS:
-            if pattern.search(text):
-                taints.append(
-                    {"code": "workflow_self_review_marker", "path": relative_path}
-                )
-        for pattern in _STATIC_ANSWER_PATTERNS:
-            if pattern.search(text):
-                failures.append({"code": "static_answer_marker", "path": relative_path})
+    redaction_report = _write_redaction_report(root) if write else _scan_redaction(root)
+    for finding in redaction_report["findings"]:
+        if finding["severity"] == "failure":
+            failures.append(
+                {
+                    "code": finding["code"],
+                    "path": finding["path"],
+                }
+            )
+        elif finding["severity"] == "taint":
+            taints.append(
+                {
+                    "code": finding["code"],
+                    "path": finding["path"],
+                }
+            )
 
     commands_path = root / "commands.jsonl"
     if commands_path.exists():
@@ -871,7 +1058,7 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         if not materialize_commands:
             failures.append({"code": "missing_materialize_command"})
         for row in materialize_commands:
-            if row.get("status") not in _CLEAN_COMMAND_STATUSES:
+            if row.get("status") not in CLEAN_COMMAND_STATUSES:
                 continue
             ids = row.get("ids")
             if not isinstance(ids, dict):
@@ -882,6 +1069,7 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                     ("traceId", "traceId"),
                     ("contextHash", "traceContextHash"),
                     ("resolvedTraceHash", "resolvedTraceHash"),
+                    ("artifactIndexHash", "artifactIndexHash"),
                 ):
                     if not ids.get(field_name):
                         failures.append(
@@ -912,7 +1100,7 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
             row_status = row.get("status")
             if (
                 row.get("command") == "trace.materialize"
-                and row_status not in _CLEAN_COMMAND_STATUSES
+                and row_status not in CLEAN_COMMAND_STATUSES
             ):
                 taints.append(
                     {
@@ -944,12 +1132,14 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         "artifactCount": len(artifact_rows),
     }
     if write:
-        _write_json(root / "scorer" / "score.json", score)
+        score_path = root / "scorer" / "score.json"
+        proof_status_path = root / "reports" / "proof-status.json"
+        _write_json(score_path, score)
         (root / "scorer" / "score.md").write_text(
             f"# Score\n\nStatus: {status}\n\nFailures: {len(failures)}\n\nTaints: {len(taints)}\n",
             encoding="utf-8",
         )
-        _write_json(root / "reports" / "proof-status.json", score)
+        _write_json(proof_status_path, score)
         (root / "reports" / "proof-status.md").write_text(
             f"# Proof Status\n\nStatus: {status}\n",
             encoding="utf-8",
@@ -961,7 +1151,13 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
             artifacts=[{"path": "scorer/score.json", "role": "score"}],
             warnings=[warning["code"] for warning in warnings],
             taints=[taint["code"] for taint in taints],
+            ids={
+                "scoreHash": _sha256_file(score_path),
+                "proofStatusHash": _sha256_file(proof_status_path),
+            },
         )
+        _update_manifest_hash(root, "commandLedgerHash", root / "commands.jsonl")
+        _write_redaction_report(root)
     return score
 
 
@@ -973,7 +1169,8 @@ def verify_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str
     }
     if write:
         root = Path(proof_root)
-        _write_json(root / "reports" / "verification-report.json", verified)
+        verification_report_path = root / "reports" / "verification-report.json"
+        _write_json(verification_report_path, verified)
         (root / "reports" / "verification-report.md").write_text(
             f"# Verification Report\n\nVerified: {str(verified['verified']).lower()}\n\nStatus: {score['status']}\n",
             encoding="utf-8",
@@ -990,5 +1187,28 @@ def verify_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str
                 },
             ],
             taints=[taint["code"] for taint in score["taints"]],
+            ids={"verificationReportHash": _sha256_file(verification_report_path)},
         )
+        _update_manifest_hash(root, "commandLedgerHash", root / "commands.jsonl")
+        final_redaction_report = _write_redaction_report(root)
+        if final_redaction_report["findings"]:
+            final_status = (
+                "failed"
+                if any(
+                    finding["severity"] == "failure"
+                    for finding in final_redaction_report["findings"]
+                )
+                else "tainted"
+            )
+            verified = {
+                **verified,
+                "status": final_status,
+                "verified": False,
+                "redactionFindingsAfterVerify": final_redaction_report["findings"],
+            }
+            _write_json(verification_report_path, verified)
+            (root / "reports" / "verification-report.md").write_text(
+                f"# Verification Report\n\nVerified: false\n\nStatus: {final_status}\n",
+                encoding="utf-8",
+            )
     return verified

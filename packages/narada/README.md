@@ -133,10 +133,14 @@ narada workbench verify ./narada-runs/run-1 --json
 ```
 
 The materializer uses Narada's backend ownership checks and short-lived artifact URLs. It writes
-hash-linked local artifacts and redacted reports; it does not require local AWS credentials.
+hash-linked local artifacts, frame summaries, a redaction report, and command/proof reports; it does
+not require local AWS credentials and does not persist signed artifact URLs.
 `--request-id` is the preferred proof path because it binds the trace to the authoritative
 remote-dispatch run status. A raw context file can materialize trace artifacts, but it is not a
-clean run-success proof unless the caller provides explicit source-run status.
+clean run-success proof unless it is backed by trusted source-run provenance. Missing referenced
+artifacts are recorded in the artifact index as partial downloads and fail verification. Missing or
+stale command-ledger hash binding also fails verification, so post-run command mutations cannot
+silently remain clean.
 For a one-off run, `await agent.run("/me/workflow-v3", trace=True)` materializes the returned
 trace immediately and sets `response.execution_trace_path` to the local proof root.
 

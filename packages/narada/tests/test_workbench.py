@@ -156,6 +156,14 @@ class _FakeSession:
         return _FakeResponse(body=self.downloads[url])
 
 
+class _MissingArtifactSession(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        del self.downloads[
+            "https://signed.example.test/frame.html?X-Amz-Signature=secret"
+        ]
+
+
 @pytest.mark.asyncio
 async def test_materializer_writes_proof_root_without_signed_url_leaks(
     tmp_path: Path,
@@ -177,8 +185,10 @@ async def test_materializer_writes_proof_root_without_signed_url_leaks(
     assert result.path == tmp_path
     assert (tmp_path / "manifest.json").exists()
     assert (tmp_path / "trace" / "resolved.json").exists()
+    assert (tmp_path / "reports" / "redaction-report.json").exists()
     assert (tmp_path / "trace" / "frames" / "frame-1" / "page.html").exists()
     assert (tmp_path / "trace" / "frames" / "frame-1" / "screenshot.png").exists()
+    assert (tmp_path / "trace" / "frames" / "frame-1" / "summary.json").exists()
     assert (
         "X-Amz-Signature"
         not in (tmp_path / "trace" / "artifacts" / "index.jsonl").read_text()
@@ -187,6 +197,37 @@ async def test_materializer_writes_proof_root_without_signed_url_leaks(
     score = score_proof_root(tmp_path)
     assert score["status"] == "passed"
     assert verify_proof_root(tmp_path)["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_materializer_records_missing_referenced_artifact_as_failed(
+    tmp_path: Path,
+) -> None:
+    result = await materialize_execution_trace_context(
+        TRACE_CONTEXT,
+        out=tmp_path,
+        source_run={
+            "type": "remote-dispatch",
+            "authority": "agent-run-response",
+            "status": "success",
+            "requestId": "req-test",
+        },
+        auth_headers={"x-api-key": "test"},
+        base_url="https://api.example.test/fast/v2",
+        session_factory=_MissingArtifactSession,
+    )
+
+    assert result.report["status"] == "failed"
+    artifact_index = (tmp_path / "trace" / "artifacts" / "index.jsonl").read_text()
+    assert "artifact_download_failed" not in artifact_index
+    assert '"downloadStatus": "failed"' in artifact_index
+
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "failed"
+    assert any(
+        failure["code"] == "artifact_download_failed" for failure in score["failures"]
+    )
+    assert verify_proof_root(tmp_path)["verified"] is False
 
 
 @pytest.mark.asyncio
@@ -275,6 +316,55 @@ def _write_clean_minimal_root(root: Path) -> None:
     resolved_hash = hashlib.sha256(
         json.dumps(resolved, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    (root / "trace" / "context.json").write_text(json.dumps(context), encoding="utf-8")
+    (root / "trace" / "resolved.json").write_text(
+        json.dumps(resolved), encoding="utf-8"
+    )
+    (root / "trace" / "events.jsonl").write_text(
+        json.dumps(resolved["events"][0]) + "\n",
+        encoding="utf-8",
+    )
+    (root / "trace" / "scopes.jsonl").write_text("", encoding="utf-8")
+    (root / "trace" / "timeline.json").write_text(
+        json.dumps(resolved["timeline_index"]),
+        encoding="utf-8",
+    )
+    artifact_index = (
+        json.dumps(
+            {
+                "role": "manifest",
+                "sourceS3Key": context["executionTraceS3Key"],
+                "localPath": "trace/artifacts/manifest_1.json",
+                "sha256": manifest_hash,
+                "downloadStatus": "downloaded",
+            }
+        )
+        + "\n"
+    )
+    (root / "trace" / "artifacts" / "index.jsonl").write_text(
+        artifact_index,
+        encoding="utf-8",
+    )
+    artifact_index_hash = hashlib.sha256(artifact_index.encode()).hexdigest()
+    command_ledger = (
+        json.dumps(
+            {
+                "commandId": "cmd_test",
+                "runId": root.name,
+                "command": "trace.materialize",
+                "status": "passed",
+                "exitCode": 0,
+                "ids": {
+                    "traceId": context["traceId"],
+                    "contextHash": context_hash,
+                    "resolvedTraceHash": resolved_hash,
+                    "artifactIndexHash": artifact_index_hash,
+                },
+            }
+        )
+        + "\n"
+    )
+    command_ledger_hash = hashlib.sha256(command_ledger.encode()).hexdigest()
     (root / "manifest.json").write_text(
         json.dumps(
             {
@@ -289,55 +379,31 @@ def _write_clean_minimal_root(root: Path) -> None:
                 },
                 "traceContextHash": context_hash,
                 "resolvedTraceHash": resolved_hash,
+                "artifactIndexHash": artifact_index_hash,
+                "commandLedgerHash": command_ledger_hash,
                 "traceManifestStatus": "completed",
             }
         ),
         encoding="utf-8",
     )
     (root / "commands.jsonl").write_text(
-        json.dumps(
-            {
-                "commandId": "cmd_test",
-                "runId": root.name,
-                "command": "trace.materialize",
-                "status": "passed",
-                "ids": {
-                    "traceId": context["traceId"],
-                    "contextHash": context_hash,
-                    "resolvedTraceHash": resolved_hash,
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (root / "trace" / "context.json").write_text(json.dumps(context), encoding="utf-8")
-    (root / "trace" / "resolved.json").write_text(
-        json.dumps(resolved), encoding="utf-8"
-    )
-    (root / "trace" / "events.jsonl").write_text(
-        json.dumps(resolved["events"][0]) + "\n",
-        encoding="utf-8",
-    )
-    (root / "trace" / "scopes.jsonl").write_text("", encoding="utf-8")
-    (root / "trace" / "timeline.json").write_text(
-        json.dumps(resolved["timeline_index"]),
-        encoding="utf-8",
-    )
-    (root / "trace" / "artifacts" / "index.jsonl").write_text(
-        json.dumps(
-            {
-                "role": "manifest",
-                "sourceS3Key": context["executionTraceS3Key"],
-                "localPath": "trace/artifacts/manifest_1.json",
-                "sha256": manifest_hash,
-            }
-        )
-        + "\n",
+        command_ledger,
         encoding="utf-8",
     )
     (root / "reports" / "materialization-report.json").write_text(
         "{}", encoding="utf-8"
+    )
+    (root / "reports" / "redaction-report.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "passed",
+                "scannedTextFiles": [],
+                "skippedBinaryFiles": [],
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
     )
     (root / "cleanup" / "status.json").write_text(
         json.dumps({"status": "not_applicable"}),
@@ -355,6 +421,14 @@ def test_score_fails_signed_url_leak(tmp_path: Path) -> None:
 
     assert score["status"] == "failed"
     assert any(failure["code"] == "signed_url_leak" for failure in score["failures"])
+    redaction_report = json.loads(
+        (tmp_path / "reports" / "redaction-report.json").read_text()
+    )
+    assert redaction_report["status"] == "failed"
+    assert any(
+        finding["code"] == "signed_url_leak" for finding in redaction_report["findings"]
+    )
+    assert "X-Amz-Signature" not in json.dumps(redaction_report)
 
 
 def test_score_fails_missing_trace_file(tmp_path: Path) -> None:
@@ -506,6 +580,54 @@ def test_score_fails_secret_leak(tmp_path: Path) -> None:
     assert any(failure["code"] == "secret_leak" for failure in score["failures"])
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"plaintextKey": "abc123"}',
+        '{"apiKey": "abc123"}',
+        '{"accessToken": "abc123"}',
+        '{"cookie": "sid=abc123"}',
+        "token=abc123",
+    ],
+)
+def test_score_fails_common_json_secret_fields(tmp_path: Path, payload: str) -> None:
+    _write_clean_minimal_root(tmp_path)
+    (tmp_path / "trace" / "secret.json").write_text(payload, encoding="utf-8")
+
+    score = score_proof_root(tmp_path)
+
+    assert score["status"] == "failed"
+    assert any(failure["code"] == "secret_leak" for failure in score["failures"])
+
+
+def test_score_write_false_does_not_mutate_redaction_report(tmp_path: Path) -> None:
+    _write_clean_minimal_root(tmp_path)
+    redaction_path = tmp_path / "reports" / "redaction-report.json"
+    before = redaction_path.read_text(encoding="utf-8")
+    (tmp_path / "trace" / "secret.json").write_text(
+        '{"plaintextKey": "abc123"}',
+        encoding="utf-8",
+    )
+
+    score = score_proof_root(tmp_path, write=False)
+
+    assert score["status"] == "failed"
+    assert redaction_path.read_text(encoding="utf-8") == before
+
+
+def test_verify_redaction_report_covers_verification_artifacts(tmp_path: Path) -> None:
+    _write_clean_minimal_root(tmp_path)
+
+    verify = verify_proof_root(tmp_path)
+
+    redaction_report = json.loads(
+        (tmp_path / "reports" / "redaction-report.json").read_text()
+    )
+    assert verify["verified"] is True
+    assert "reports/verification-report.json" in redaction_report["scannedTextFiles"]
+    assert "reports/verification-report.md" in redaction_report["scannedTextFiles"]
+
+
 def test_score_fails_lowercase_signed_url_leak(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
     (tmp_path / "trace" / "leak.txt").write_text(
@@ -612,6 +734,50 @@ def test_score_fails_missing_manifest_hash(tmp_path: Path) -> None:
     assert score["status"] == "failed"
     assert any(
         failure["code"] == "manifest_resolved_trace_hash_missing"
+        for failure in score["failures"]
+    )
+
+
+def test_score_fails_artifact_index_hash_mismatch(tmp_path: Path) -> None:
+    _write_clean_minimal_root(tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["artifactIndexHash"] = "wrong"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    score = score_proof_root(tmp_path)
+
+    assert score["status"] == "failed"
+    assert any(
+        failure["code"] == "manifest_artifact_index_hash_mismatch"
+        for failure in score["failures"]
+    )
+
+
+def test_score_fails_missing_command_ledger_hash(tmp_path: Path) -> None:
+    _write_clean_minimal_root(tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    del manifest["commandLedgerHash"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    score = score_proof_root(tmp_path)
+
+    assert score["status"] == "failed"
+    assert any(
+        failure["code"] == "manifest_command_ledger_hash_missing"
+        for failure in score["failures"]
+    )
+
+
+def test_score_fails_command_ledger_hash_mismatch(tmp_path: Path) -> None:
+    _write_clean_minimal_root(tmp_path)
+    with (tmp_path / "commands.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"commandId": "cmd_extra", "status": "passed"}) + "\n")
+
+    score = score_proof_root(tmp_path)
+
+    assert score["status"] == "failed"
+    assert any(
+        failure["code"] == "manifest_command_ledger_hash_mismatch"
         for failure in score["failures"]
     )
 
@@ -736,6 +902,11 @@ def test_score_taints_prior_failed_command(tmp_path: Path) -> None:
             )
             + "\n"
         )
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["commandLedgerHash"] = hashlib.sha256(
+        (tmp_path / "commands.jsonl").read_bytes()
+    ).hexdigest()
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     score = score_proof_root(tmp_path)
 
@@ -885,3 +1056,45 @@ def test_cli_materialize_request_id_uses_request_materializer(
         == 0
     )
     assert calls[0]["request_id"] == "req-123"
+
+
+def test_cli_redacts_sensitive_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import narada.cli as cli_module
+
+    context_file = tmp_path / "context.json"
+    context_file.write_text(
+        json.dumps({"executionTraceContext": TRACE_CONTEXT}), encoding="utf-8"
+    )
+
+    async def fake_materialize(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise ValueError(
+            "failed https://signed.example.test/file?X-Amz-Signature=secret "
+            "Authorization: Bearer abc123"
+        )
+
+    monkeypatch.setattr(
+        cli_module, "materialize_execution_trace_context", fake_materialize
+    )
+
+    assert (
+        main(
+            [
+                "workbench",
+                "trace",
+                "materialize",
+                "--context-file",
+                str(context_file),
+                "--json",
+            ]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert "X-Amz-Signature" not in captured.err
+    assert "Bearer abc123" not in captured.err
+    assert "[REDACTED" in captured.err
