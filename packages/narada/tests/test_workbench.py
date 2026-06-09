@@ -22,7 +22,9 @@ TRACE_CONTEXT = {
 
 
 class _FakeResponse:
-    def __init__(self, *, payload: dict[str, Any] | None = None, body: bytes = b"") -> None:
+    def __init__(
+        self, *, payload: dict[str, Any] | None = None, body: bytes = b""
+    ) -> None:
         self._payload = payload
         self._body = body
 
@@ -97,7 +99,10 @@ class _FakeSession:
                                 "frameS3Key": "user-test/recording-trace-1/execution-trace/frame.json",
                                 "eventLabels": [],
                                 "reason": "test",
-                                "page": {"url": "https://example.test", "title": "Example"},
+                                "page": {
+                                    "url": "https://example.test",
+                                    "title": "Example",
+                                },
                             }
                         ],
                         "aliases": {},
@@ -152,7 +157,9 @@ class _FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_materializer_writes_proof_root_without_signed_url_leaks(tmp_path: Path) -> None:
+async def test_materializer_writes_proof_root_without_signed_url_leaks(
+    tmp_path: Path,
+) -> None:
     result = await materialize_execution_trace_context(
         TRACE_CONTEXT,
         out=tmp_path,
@@ -172,7 +179,10 @@ async def test_materializer_writes_proof_root_without_signed_url_leaks(tmp_path:
     assert (tmp_path / "trace" / "resolved.json").exists()
     assert (tmp_path / "trace" / "frames" / "frame-1" / "page.html").exists()
     assert (tmp_path / "trace" / "frames" / "frame-1" / "screenshot.png").exists()
-    assert "X-Amz-Signature" not in (tmp_path / "trace" / "artifacts" / "index.jsonl").read_text()
+    assert (
+        "X-Amz-Signature"
+        not in (tmp_path / "trace" / "artifacts" / "index.jsonl").read_text()
+    )
 
     score = score_proof_root(tmp_path)
     assert score["status"] == "passed"
@@ -216,7 +226,9 @@ async def test_materializer_taints_missing_source_run_status(tmp_path: Path) -> 
     assert result.report["status"] == "tainted"
     score = score_proof_root(tmp_path)
     assert score["status"] == "tainted"
-    assert any(taint["code"] == "source_run_status_unknown" for taint in score["taints"])
+    assert any(
+        taint["code"] == "source_run_status_unknown" for taint in score["taints"]
+    )
 
 
 def _write_clean_minimal_root(root: Path) -> None:
@@ -300,7 +312,9 @@ def _write_clean_minimal_root(root: Path) -> None:
         encoding="utf-8",
     )
     (root / "trace" / "context.json").write_text(json.dumps(context), encoding="utf-8")
-    (root / "trace" / "resolved.json").write_text(json.dumps(resolved), encoding="utf-8")
+    (root / "trace" / "resolved.json").write_text(
+        json.dumps(resolved), encoding="utf-8"
+    )
     (root / "trace" / "events.jsonl").write_text(
         json.dumps(resolved["events"][0]) + "\n",
         encoding="utf-8",
@@ -322,7 +336,9 @@ def _write_clean_minimal_root(root: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
-    (root / "reports" / "materialization-report.json").write_text("{}", encoding="utf-8")
+    (root / "reports" / "materialization-report.json").write_text(
+        "{}", encoding="utf-8"
+    )
     (root / "cleanup" / "status.json").write_text(
         json.dumps({"status": "not_applicable"}),
         encoding="utf-8",
@@ -331,7 +347,9 @@ def _write_clean_minimal_root(root: Path) -> None:
 
 def test_score_fails_signed_url_leak(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
-    (tmp_path / "trace" / "leak.txt").write_text("X-Amz-Signature=secret", encoding="utf-8")
+    (tmp_path / "trace" / "leak.txt").write_text(
+        "X-Amz-Signature=secret", encoding="utf-8"
+    )
 
     score = score_proof_root(tmp_path)
 
@@ -370,14 +388,18 @@ def test_score_fails_empty_shell_root(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "empty_resolved_trace" for failure in score["failures"])
+    assert any(
+        failure["code"] == "empty_resolved_trace" for failure in score["failures"]
+    )
 
 
 def test_score_fails_resolved_trace_id_mismatch(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
     resolved = json.loads((tmp_path / "trace" / "resolved.json").read_text())
     resolved["manifest"]["traceId"] = "trace-other"
-    (tmp_path / "trace" / "resolved.json").write_text(json.dumps(resolved), encoding="utf-8")
+    (tmp_path / "trace" / "resolved.json").write_text(
+        json.dumps(resolved), encoding="utf-8"
+    )
 
     score = score_proof_root(tmp_path)
 
@@ -405,7 +427,9 @@ def test_score_fails_missing_referenced_artifact(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "artifact_file_missing" for failure in score["failures"])
+    assert any(
+        failure["code"] == "artifact_file_missing" for failure in score["failures"]
+    )
 
 
 def test_score_fails_missing_resolved_artifact_download(tmp_path: Path) -> None:
@@ -464,7 +488,9 @@ def test_score_fails_artifact_path_escape(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "artifact_path_escape" for failure in score["failures"])
+    assert any(
+        failure["code"] == "artifact_path_escape" for failure in score["failures"]
+    )
 
 
 def test_score_fails_secret_leak(tmp_path: Path) -> None:
@@ -482,7 +508,9 @@ def test_score_fails_secret_leak(tmp_path: Path) -> None:
 
 def test_score_fails_lowercase_signed_url_leak(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
-    (tmp_path / "trace" / "leak.txt").write_text("x-amz-signature=secret", encoding="utf-8")
+    (tmp_path / "trace" / "leak.txt").write_text(
+        "x-amz-signature=secret", encoding="utf-8"
+    )
 
     score = score_proof_root(tmp_path)
 
@@ -494,12 +522,16 @@ def test_score_fails_failed_trace_status(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
     resolved = json.loads((tmp_path / "trace" / "resolved.json").read_text())
     resolved["manifest"]["status"] = "failed"
-    (tmp_path / "trace" / "resolved.json").write_text(json.dumps(resolved), encoding="utf-8")
+    (tmp_path / "trace" / "resolved.json").write_text(
+        json.dumps(resolved), encoding="utf-8"
+    )
 
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "trace_status_failed" for failure in score["failures"])
+    assert any(
+        failure["code"] == "trace_status_failed" for failure in score["failures"]
+    )
 
 
 def test_score_fails_missing_source_run(tmp_path: Path) -> None:
@@ -535,7 +567,9 @@ def test_score_taints_unknown_source_run_status(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "tainted"
-    assert any(taint["code"] == "source_run_status_unknown" for taint in score["taints"])
+    assert any(
+        taint["code"] == "source_run_status_unknown" for taint in score["taints"]
+    )
 
 
 def test_score_taints_unverified_source_run_authority(tmp_path: Path) -> None:
@@ -562,7 +596,9 @@ def test_score_fails_non_terminal_source_run_status(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "source_run_not_terminal" for failure in score["failures"])
+    assert any(
+        failure["code"] == "source_run_not_terminal" for failure in score["failures"]
+    )
 
 
 def test_score_fails_missing_manifest_hash(tmp_path: Path) -> None:
@@ -584,7 +620,9 @@ def test_score_fails_materialize_command_hash_mismatch(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
     command = json.loads((tmp_path / "commands.jsonl").read_text().splitlines()[0])
     command["ids"]["resolvedTraceHash"] = "wrong"
-    (tmp_path / "commands.jsonl").write_text(json.dumps(command) + "\n", encoding="utf-8")
+    (tmp_path / "commands.jsonl").write_text(
+        json.dumps(command) + "\n", encoding="utf-8"
+    )
 
     score = score_proof_root(tmp_path)
 
@@ -605,7 +643,9 @@ def test_score_fails_static_answer_marker(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "static_answer_marker" for failure in score["failures"])
+    assert any(
+        failure["code"] == "static_answer_marker" for failure in score["failures"]
+    )
 
 
 def test_score_fails_renamed_answer_map_marker(tmp_path: Path) -> None:
@@ -618,7 +658,9 @@ def test_score_fails_renamed_answer_map_marker(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "failed"
-    assert any(failure["code"] == "static_answer_marker" for failure in score["failures"])
+    assert any(
+        failure["code"] == "static_answer_marker" for failure in score["failures"]
+    )
 
 
 def test_score_fails_missing_materialize_command(tmp_path: Path) -> None:
@@ -647,7 +689,9 @@ def test_score_taints_workflow_self_review_marker(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "tainted"
-    assert any(taint["code"] == "workflow_self_review_marker" for taint in score["taints"])
+    assert any(
+        taint["code"] == "workflow_self_review_marker" for taint in score["taints"]
+    )
 
 
 def test_score_taints_renamed_self_review_marker(tmp_path: Path) -> None:
@@ -660,7 +704,9 @@ def test_score_taints_renamed_self_review_marker(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "tainted"
-    assert any(taint["code"] == "workflow_self_review_marker" for taint in score["taints"])
+    assert any(
+        taint["code"] == "workflow_self_review_marker" for taint in score["taints"]
+    )
 
 
 def test_score_taints_cleanup_failure(tmp_path: Path) -> None:
@@ -694,12 +740,16 @@ def test_score_taints_prior_failed_command(tmp_path: Path) -> None:
     score = score_proof_root(tmp_path)
 
     assert score["status"] == "tainted"
-    assert any(taint["code"] == "materialize_command_not_clean" for taint in score["taints"])
+    assert any(
+        taint["code"] == "materialize_command_not_clean" for taint in score["taints"]
+    )
 
 
 def test_cli_score_returns_nonzero_for_failed_root(tmp_path: Path) -> None:
     _write_clean_minimal_root(tmp_path)
-    (tmp_path / "trace" / "leak.txt").write_text("X-Amz-Credential=secret", encoding="utf-8")
+    (tmp_path / "trace" / "leak.txt").write_text(
+        "X-Amz-Credential=secret", encoding="utf-8"
+    )
 
     assert main(["workbench", "score", str(tmp_path), "--json"]) == 1
 
@@ -711,7 +761,9 @@ def test_cli_materialize_context_file_uses_materializer(
     import narada.cli as cli_module
 
     context_file = tmp_path / "context.json"
-    context_file.write_text(json.dumps({"executionTraceContext": TRACE_CONTEXT}), encoding="utf-8")
+    context_file.write_text(
+        json.dumps({"executionTraceContext": TRACE_CONTEXT}), encoding="utf-8"
+    )
     calls: list[dict[str, Any]] = []
 
     async def fake_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
@@ -723,20 +775,25 @@ def test_cli_materialize_context_file_uses_materializer(
 
         return _Result()
 
-    monkeypatch.setattr(cli_module, "materialize_execution_trace_context", fake_materialize)
+    monkeypatch.setattr(
+        cli_module, "materialize_execution_trace_context", fake_materialize
+    )
 
-    assert main(
-        [
-            "workbench",
-            "trace",
-            "materialize",
-            "--context-file",
-            str(context_file),
-            "--out",
-            str(tmp_path / "proof"),
-            "--json",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "workbench",
+                "trace",
+                "materialize",
+                "--context-file",
+                str(context_file),
+                "--out",
+                str(tmp_path / "proof"),
+                "--json",
+            ]
+        )
+        == 0
+    )
     assert calls[0]["context"] == TRACE_CONTEXT
     assert calls[0]["source_run"] is None
 
@@ -748,7 +805,9 @@ def test_cli_materialize_context_file_with_source_status_is_caller_attested(
     import narada.cli as cli_module
 
     context_file = tmp_path / "context.json"
-    context_file.write_text(json.dumps({"executionTraceContext": TRACE_CONTEXT}), encoding="utf-8")
+    context_file.write_text(
+        json.dumps({"executionTraceContext": TRACE_CONTEXT}), encoding="utf-8"
+    )
     calls: list[dict[str, Any]] = []
 
     async def fake_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
@@ -760,22 +819,27 @@ def test_cli_materialize_context_file_with_source_status_is_caller_attested(
 
         return _Result()
 
-    monkeypatch.setattr(cli_module, "materialize_execution_trace_context", fake_materialize)
+    monkeypatch.setattr(
+        cli_module, "materialize_execution_trace_context", fake_materialize
+    )
 
-    assert main(
-        [
-            "workbench",
-            "trace",
-            "materialize",
-            "--context-file",
-            str(context_file),
-            "--source-status",
-            "completed",
-            "--source-request-id",
-            "req-123",
-            "--json",
-        ]
-    ) == 1
+    assert (
+        main(
+            [
+                "workbench",
+                "trace",
+                "materialize",
+                "--context-file",
+                str(context_file),
+                "--source-status",
+                "completed",
+                "--source-request-id",
+                "req-123",
+                "--json",
+            ]
+        )
+        == 1
+    )
     assert calls[0]["source_run"] == {
         "type": "external",
         "authority": "caller-attested",
@@ -807,14 +871,17 @@ def test_cli_materialize_request_id_uses_request_materializer(
         fake_materialize,
     )
 
-    assert main(
-        [
-            "workbench",
-            "trace",
-            "materialize",
-            "--request-id",
-            "req-123",
-            "--json",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "workbench",
+                "trace",
+                "materialize",
+                "--request-id",
+                "req-123",
+                "--json",
+            ]
+        )
+        == 0
+    )
     assert calls[0]["request_id"] == "req-123"

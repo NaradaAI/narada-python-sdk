@@ -164,7 +164,10 @@ async def test_agent_run_exposes_execution_trace_context(
     response = await Agent(environment=_CountingEnvironment()).run("return trace")
 
     assert response.execution_trace_context == execution_trace_context
-    assert response.model_dump(by_alias=True)["executionTraceContext"] == execution_trace_context
+    assert (
+        response.model_dump(by_alias=True)["executionTraceContext"]
+        == execution_trace_context
+    )
 
 
 @pytest.mark.asyncio
@@ -217,7 +220,9 @@ async def test_trace_context_manager_materializes_registered_response(
     monkeypatch.setattr(
         environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
-    monkeypatch.setattr(trace_module, "materialize_execution_trace_context", fake_materialize)
+    monkeypatch.setattr(
+        trace_module, "materialize_execution_trace_context", fake_materialize
+    )
 
     async with trace("unit-trace", out=tmp_path / "proof") as tr:
         response = await Agent(environment=_CountingEnvironment()).run("return trace")
@@ -277,9 +282,13 @@ async def test_agent_run_trace_true_materializes_single_response(
     monkeypatch.setattr(
         environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
-    monkeypatch.setattr(agent_module, "materialize_execution_trace_context", fake_materialize)
+    monkeypatch.setattr(
+        agent_module, "materialize_execution_trace_context", fake_materialize
+    )
 
-    response = await Agent(environment=_CountingEnvironment()).run("return trace", trace=True)
+    response = await Agent(environment=_CountingEnvironment()).run(
+        "return trace", trace=True
+    )
 
     assert response.execution_trace_path == str(tmp_path / "proof")
     assert calls[0]["context"] == execution_trace_context
@@ -345,8 +354,12 @@ async def test_agent_run_trace_true_inside_trace_context_materializes_once(
     monkeypatch.setattr(
         environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
-    monkeypatch.setattr(agent_module, "materialize_execution_trace_context", fake_agent_materialize)
-    monkeypatch.setattr(trace_module, "materialize_execution_trace_context", fake_context_materialize)
+    monkeypatch.setattr(
+        agent_module, "materialize_execution_trace_context", fake_agent_materialize
+    )
+    monkeypatch.setattr(
+        trace_module, "materialize_execution_trace_context", fake_context_materialize
+    )
 
     async with trace("unit-trace", out=tmp_path / "context-proof") as tr:
         response = await Agent(environment=_CountingEnvironment()).run(

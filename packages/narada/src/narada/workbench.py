@@ -119,7 +119,9 @@ def _default_out_dir(label: str) -> Path:
 
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _write_jsonl(path: Path, rows: Iterable[Any]) -> None:
@@ -291,7 +293,9 @@ async def resolve_execution_trace(
     return await _fetch_json(
         f"{base_url or default_api_base_url()}/execution-trace/resolve",
         method="POST",
-        auth_headers=auth_headers if auth_headers is not None else default_auth_headers(),
+        auth_headers=auth_headers
+        if auth_headers is not None
+        else default_auth_headers(),
         json_body={"executionTraceContext": validated.model_dump(mode="json")},
         session_factory=session_factory,
     )
@@ -308,7 +312,9 @@ async def materialize_execution_trace_context(
     session_factory: Callable[[], Any] = aiohttp.ClientSession,
 ) -> MaterializedTrace:
     validated = ExecutionTraceContext.model_validate(context)
-    proof_root = Path(out) if out is not None else _default_out_dir(label or validated.label)
+    proof_root = (
+        Path(out) if out is not None else _default_out_dir(label or validated.label)
+    )
     preexisting_root = proof_root.exists() and any(proof_root.iterdir())
     proof_root.mkdir(parents=True, exist_ok=True)
     (proof_root / "cleanup").mkdir(parents=True, exist_ok=True)
@@ -339,7 +345,9 @@ async def materialize_execution_trace_context(
     _write_json(trace_root / "resolved.json", resolved_trace)
     _write_jsonl(trace_root / "events.jsonl", resolved_trace.get("events") or [])
     _write_jsonl(trace_root / "scopes.jsonl", resolved_trace.get("scopes") or [])
-    _write_json(trace_root / "timeline.json", resolved_trace.get("timeline_index") or {})
+    _write_json(
+        trace_root / "timeline.json", resolved_trace.get("timeline_index") or {}
+    )
 
     frames = resolved_trace.get("frames") or []
     if isinstance(frames, list):
@@ -388,7 +396,9 @@ async def materialize_execution_trace_context(
                 "screenshot": ".png",
                 "frame": ".json",
             }.get(role, ".bin")
-            local_path = trace_root / "artifacts" / f"{role}_{role_counts[role]}{extension}"
+            local_path = (
+                trace_root / "artifacts" / f"{role}_{role_counts[role]}{extension}"
+            )
 
         data = await _download_bytes(download_url, session_factory=session_factory)
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -439,7 +449,10 @@ async def materialize_execution_trace_context(
     _write_json(proof_root / "manifest.json", manifest)
     _write_json(
         proof_root / "cleanup" / "status.json",
-        {"status": "not_applicable", "reason": "trace materialization opened no environment"},
+        {
+            "status": "not_applicable",
+            "reason": "trace materialization opened no environment",
+        },
     )
     report = {
         "schemaVersion": 1,
@@ -488,15 +501,21 @@ async def materialize_execution_trace_from_request_id(
     resolved_base_url = base_url or default_api_base_url()
     response = await _fetch_json(
         f"{resolved_base_url}/remote-dispatch/responses/{request_id}",
-        auth_headers=auth_headers if auth_headers is not None else default_auth_headers(),
+        auth_headers=auth_headers
+        if auth_headers is not None
+        else default_auth_headers(),
         session_factory=session_factory,
     )
     response_content = response.get("response")
     if not isinstance(response_content, dict):
-        raise ValueError(f"Remote dispatch response {request_id} has no response object")
+        raise ValueError(
+            f"Remote dispatch response {request_id} has no response object"
+        )
     context = response_content.get("executionTraceContext")
     if not isinstance(context, dict):
-        raise ValueError(f"Remote dispatch response {request_id} has no executionTraceContext")
+        raise ValueError(
+            f"Remote dispatch response {request_id} has no executionTraceContext"
+        )
     return await materialize_execution_trace_context(
         context,
         out=out,
@@ -624,9 +643,15 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         trace_id = context.get("traceId")
         resolved_context = resolved_trace.get("context")
         resolved_manifest = resolved_trace.get("manifest")
-        if isinstance(resolved_context, dict) and resolved_context.get("traceId") != trace_id:
+        if (
+            isinstance(resolved_context, dict)
+            and resolved_context.get("traceId") != trace_id
+        ):
             failures.append({"code": "resolved_context_trace_id_mismatch"})
-        if isinstance(resolved_manifest, dict) and resolved_manifest.get("traceId") != trace_id:
+        if (
+            isinstance(resolved_manifest, dict)
+            and resolved_manifest.get("traceId") != trace_id
+        ):
             failures.append({"code": "resolved_manifest_trace_id_mismatch"})
         if not any(
             isinstance(resolved_trace.get(name), list) and resolved_trace.get(name)
@@ -640,14 +665,29 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         ):
             rows = resolved_trace.get(collection_name)
             if rows is None:
-                failures.append({"code": "resolved_collection_missing", "collection": collection_name})
+                failures.append(
+                    {
+                        "code": "resolved_collection_missing",
+                        "collection": collection_name,
+                    }
+                )
                 continue
             if not isinstance(rows, list):
-                failures.append({"code": "resolved_collection_not_list", "collection": collection_name})
+                failures.append(
+                    {
+                        "code": "resolved_collection_not_list",
+                        "collection": collection_name,
+                    }
+                )
                 continue
             for row in rows:
                 if not isinstance(row, dict):
-                    failures.append({"code": "resolved_row_not_object", "collection": collection_name})
+                    failures.append(
+                        {
+                            "code": "resolved_row_not_object",
+                            "collection": collection_name,
+                        }
+                    )
                     continue
                 if row.get("traceId") != trace_id:
                     failures.append(
@@ -657,7 +697,9 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                             "rowId": row.get(id_name),
                         }
                     )
-        expected_artifact_keys = _collect_resolved_trace_artifact_keys(context, resolved_trace)
+        expected_artifact_keys = _collect_resolved_trace_artifact_keys(
+            context, resolved_trace
+        )
 
     if manifest is not None:
         manifest_context = manifest.get("traceContext")
@@ -683,7 +725,10 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 )
         if context is not None and manifest_context != context:
             failures.append({"code": "manifest_context_mismatch"})
-        if context is not None and manifest.get("traceId") not in {None, context.get("traceId")}:
+        if context is not None and manifest.get("traceId") not in {
+            None,
+            context.get("traceId"),
+        }:
             failures.append({"code": "manifest_trace_id_mismatch"})
         if context is not None:
             if not manifest.get("traceContextHash"):
@@ -742,7 +787,9 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 failures.append({"code": "artifact_missing_local_path", "row": row})
                 continue
             if not isinstance(source_key, str) or not source_key:
-                failures.append({"code": "artifact_missing_source_key", "path": local_path_value})
+                failures.append(
+                    {"code": "artifact_missing_source_key", "path": local_path_value}
+                )
             elif expected_artifact_keys and source_key not in expected_artifact_keys:
                 failures.append(
                     {
@@ -754,13 +801,19 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
             elif source_key:
                 seen_artifact_keys.add(source_key)
             if os.path.isabs(local_path_value):
-                failures.append({"code": "artifact_absolute_path", "path": local_path_value})
+                failures.append(
+                    {"code": "artifact_absolute_path", "path": local_path_value}
+                )
             local_path = root / local_path_value
             if not local_path.resolve().is_relative_to(root.resolve()):
-                failures.append({"code": "artifact_path_escape", "path": local_path_value})
+                failures.append(
+                    {"code": "artifact_path_escape", "path": local_path_value}
+                )
                 continue
             if not local_path.exists():
-                failures.append({"code": "artifact_file_missing", "path": local_path_value})
+                failures.append(
+                    {"code": "artifact_file_missing", "path": local_path_value}
+                )
                 continue
             expected_sha = row.get("sha256")
             actual_sha = _sha256_file(local_path)
@@ -774,7 +827,9 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                     }
                 )
             if "downloadUrl" in row:
-                failures.append({"code": "signed_url_persisted", "path": local_path_value})
+                failures.append(
+                    {"code": "signed_url_persisted", "path": local_path_value}
+                )
         missing_artifact_keys = expected_artifact_keys - seen_artifact_keys
         for source_key in sorted(missing_artifact_keys):
             failures.append(
@@ -790,13 +845,17 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         relative_path = _relative(text_path, root)
         for marker in _SIGNED_URL_PATTERNS:
             if marker in text_lower:
-                failures.append({"code": "signed_url_leak", "path": relative_path, "marker": marker})
+                failures.append(
+                    {"code": "signed_url_leak", "path": relative_path, "marker": marker}
+                )
         for pattern in _SECRET_PATTERNS:
             if pattern.search(text):
                 failures.append({"code": "secret_leak", "path": relative_path})
         for pattern in _SELF_REVIEW_PATTERNS:
             if pattern.search(text):
-                taints.append({"code": "workflow_self_review_marker", "path": relative_path})
+                taints.append(
+                    {"code": "workflow_self_review_marker", "path": relative_path}
+                )
         for pattern in _STATIC_ANSWER_PATTERNS:
             if pattern.search(text):
                 failures.append({"code": "static_answer_marker", "path": relative_path})
@@ -840,11 +899,21 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                         )
         for row in command_rows:
             if not row.get("commandId"):
-                failures.append({"code": "command_missing_command_id", "command": row.get("command")})
+                failures.append(
+                    {
+                        "code": "command_missing_command_id",
+                        "command": row.get("command"),
+                    }
+                )
             if not row.get("runId"):
-                failures.append({"code": "command_missing_run_id", "command": row.get("command")})
+                failures.append(
+                    {"code": "command_missing_run_id", "command": row.get("command")}
+                )
             row_status = row.get("status")
-            if row.get("command") == "trace.materialize" and row_status not in _CLEAN_COMMAND_STATUSES:
+            if (
+                row.get("command") == "trace.materialize"
+                and row_status not in _CLEAN_COMMAND_STATUSES
+            ):
                 taints.append(
                     {
                         "code": "materialize_command_not_clean",
@@ -915,7 +984,10 @@ def verify_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str
             status=score["status"],
             artifacts=[
                 {"path": "reports/proof-status.json", "role": "proof-status"},
-                {"path": "reports/verification-report.json", "role": "verification-report"},
+                {
+                    "path": "reports/verification-report.json",
+                    "role": "verification-report",
+                },
             ],
             taints=[taint["code"] for taint in score["taints"]],
         )

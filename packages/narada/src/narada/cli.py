@@ -34,7 +34,9 @@ def _load_context_file(path: Path) -> dict[str, Any]:
         raise ValueError("Context file must contain a JSON object")
     context = payload.get("executionTraceContext") or payload.get("context") or payload
     if not isinstance(context, dict):
-        raise ValueError("Context file must contain executionTraceContext or context object")
+        raise ValueError(
+            "Context file must contain executionTraceContext or context object"
+        )
     return context
 
 

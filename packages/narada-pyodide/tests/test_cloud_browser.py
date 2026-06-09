@@ -525,7 +525,10 @@ async def test_agent_run_exposes_workflow_trace_alias(
     assert response.workflow_trace == workflow_trace
     assert response.execution_trace_context == execution_trace_context
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
-    assert response.model_dump(by_alias=True)["executionTraceContext"] == execution_trace_context
+    assert (
+        response.model_dump(by_alias=True)["executionTraceContext"]
+        == execution_trace_context
+    )
     sub_workflow_events = [
         json.loads(event)
         for event in emitted_events
@@ -1058,9 +1061,9 @@ async def test_agent_run_uses_remote_dispatch_request_as_parent_request_id(
         builtins, "_narada_request_id", "python-worker-request", raising=False
     )
 
-    response = await narada_pkg.Agent(
-        environment=narada_pkg.BrowserEnvironment()
-    ).run("child task")
+    response = await narada_pkg.Agent(environment=narada_pkg.BrowserEnvironment()).run(
+        "child task"
+    )
 
     assert response.text == "done"
     dispatch_call = pyfetch.await_args_list[1]
@@ -1102,9 +1105,9 @@ async def test_agent_run_does_not_use_python_worker_request_as_parent_request_id
         builtins, "_narada_request_id", "python-worker-request", raising=False
     )
 
-    response = await narada_pkg.Agent(
-        environment=narada_pkg.BrowserEnvironment()
-    ).run("child task")
+    response = await narada_pkg.Agent(environment=narada_pkg.BrowserEnvironment()).run(
+        "child task"
+    )
 
     assert response.text == "done"
     dispatch_call = pyfetch.await_args_list[1]
