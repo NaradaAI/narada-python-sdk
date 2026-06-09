@@ -314,6 +314,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
@@ -340,6 +341,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         callback_url: str | None = None,
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
@@ -365,6 +367,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -391,6 +394,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -417,6 +421,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         critic_context: dict[str, Any] | None = None,
         callback_url: str | None = None,
         callback_secret: str | None = None,
@@ -478,6 +483,8 @@ class BaseBrowserWindow(ABC):
             body["inputVariables"] = await self._normalize_input_variables(
                 input_variables=input_variables
             )
+        if test:
+            body["test"] = True
         if critic_context is not None:
             body["criticContext"] = critic_context
         if callback_url is not None:
@@ -562,6 +569,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
@@ -581,6 +589,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         on_input_required: InputRequiredCallback | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -599,6 +608,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
@@ -618,6 +628,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
@@ -637,6 +648,7 @@ class BaseBrowserWindow(ABC):
         mcp_servers: list[McpServer] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
+        test: bool = False,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         timeout: int = 1000,
@@ -658,6 +670,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                test=test,
                 on_input_required=on_input_required,
                 timeout=timeout,
             )
@@ -686,6 +699,7 @@ class BaseBrowserWindow(ABC):
                 mcp_servers=mcp_servers,
                 secret_variables=secret_variables,
                 input_variables=input_variables,
+                test=test,
                 on_input_required=on_input_required,
                 timeout=timeout,
             )

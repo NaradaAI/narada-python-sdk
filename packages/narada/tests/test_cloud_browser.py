@@ -161,11 +161,14 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
 
     response = await window.dispatch_request(
         prompt="Summarize",
+        test=True,
         timeout=5,
         on_input_required=on_input_required,
     )
 
     assert response["status"] == "success"
+    assert fake_session.dispatched_body is not None
+    assert fake_session.dispatched_body["test"] is True
     assert observed_input_ids == ["input-1", "input-2"]
     assert sleep.await_count == 3
 

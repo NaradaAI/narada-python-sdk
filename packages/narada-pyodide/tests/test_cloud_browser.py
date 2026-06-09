@@ -327,7 +327,10 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
         session_id="session-123",
         api_key="test-api-key",
     )
-    response = await window.dispatch_request(prompt="hello from cloud browser")
+    response = await window.dispatch_request(
+        prompt="hello from cloud browser",
+        test=True,
+    )
 
     assert response["status"] == "success"
     post_call = pyfetch.await_args_list[0]
@@ -337,6 +340,7 @@ async def test_cloud_browser_window_dispatch_request_omits_parent_run_ids(
     assert payload["browserWindowId"] == "browser-window-123"
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
+    assert payload["test"] is True
     assert "parentRunIds" not in payload
 
 
