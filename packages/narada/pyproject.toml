@@ -1,13 +1,13 @@
 [project]
 name = "narada"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python client SDK for Narada"
 license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "Narada", email = "support@narada.ai" }]
 requires-python = ">=3.12"
 dependencies = [
-    "narada-core==0.1.0",
+    "narada-core==0.1.1",
     "aiohttp>=3.12.13",
     "playwright>=1.53.0",
     "rich>=14.0.0",
@@ -18,6 +18,9 @@ dependencies = [
 Homepage = "https://github.com/NaradaAI/narada-python-sdk/narada"
 Repository = "https://github.com/NaradaAI/narada-python-sdk"
 Issues = "https://github.com/NaradaAI/narada-python-sdk/issues"
+
+[project.scripts]
+narada = "narada.cli:main"
 
 [build-system]
 requires = ["hatchling"]

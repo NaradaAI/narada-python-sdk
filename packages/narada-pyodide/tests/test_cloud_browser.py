@@ -402,7 +402,7 @@ async def test_dispatch_request_waits_through_active_input_required(
 
 
 @pytest.mark.asyncio
-async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
+async def test_agent_run_does_not_forward_python_worker_request_as_parent_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -439,7 +439,7 @@ async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
 
     assert response.status == "success"
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
-    assert payload["parentRequestId"] == "parent-request-123"
+    assert "parentRequestId" not in payload
 
 
 @pytest.mark.asyncio
@@ -481,6 +481,12 @@ async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow_trace = {"step_type": "workflow", "children": []}
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "label": "Trace",
+        "traceId": "trace-1",
+        "executionTraceS3Key": "user-test/recording-trace-1/execution-trace/index.json",
+    }
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "child-request-123"}),
@@ -491,6 +497,7 @@ async def test_agent_run_exposes_workflow_trace_alias(
                         "text": "done",
                         "output": {"type": "text", "content": "done"},
                         "workflowTrace": workflow_trace,
+                        "executionTraceContext": execution_trace_context,
                     },
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "usage": {"actions": 0, "credits": 0},
@@ -516,7 +523,9 @@ async def test_agent_run_exposes_workflow_trace_alias(
     response = await narada_pkg.Agent(environment=env).run("return a trace")
 
     assert response.workflow_trace == workflow_trace
+    assert response.execution_trace_context == execution_trace_context
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
+    assert response.model_dump(by_alias=True)["executionTraceContext"] == execution_trace_context
     sub_workflow_events = [
         json.loads(event)
         for event in emitted_events
@@ -1014,6 +1023,94 @@ async def test_extension_action_includes_remote_dispatch_context(
     assert payload["requestId"] == "request-123"
     assert payload["apiKeyId"] == "api-key-123"
     assert payload["actionExecutionId"].startswith("action_")
+
+
+@pytest.mark.asyncio
+async def test_agent_run_uses_remote_dispatch_request_as_parent_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
+    monkeypatch.setenv("NARADA_USER_ID", "user-123")
+    monkeypatch.setenv("NARADA_ENV", "dev")
+    monkeypatch.setenv("NARADA_REMOTE_DISPATCH_REQUEST_ID", "remote-parent-123")
+    pyfetch = AsyncMock(
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-06-08T00:00:00Z",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["run-parent"])
+    env_module._narada_request_id = "python-worker-request"
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "python-worker-request", raising=False
+    )
+
+    response = await narada_pkg.Agent(
+        environment=narada_pkg.BrowserEnvironment()
+    ).run("child task")
+
+    assert response.text == "done"
+    dispatch_call = pyfetch.await_args_list[1]
+    payload = json.loads(dispatch_call.kwargs["body"])
+    assert payload["parentRequestId"] == "remote-parent-123"
+    assert payload["parentRunIds"] == ["run-parent"]
+
+
+@pytest.mark.asyncio
+async def test_agent_run_does_not_use_python_worker_request_as_parent_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
+    monkeypatch.setenv("NARADA_USER_ID", "user-123")
+    monkeypatch.setenv("NARADA_ENV", "dev")
+    monkeypatch.delenv("NARADA_REMOTE_DISPATCH_REQUEST_ID", raising=False)
+    pyfetch = AsyncMock(
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-06-08T00:00:00Z",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env_module._narada_parent_run_ids = _FakeJsProxy(["run-parent"])
+    env_module._narada_request_id = "python-worker-request"
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", "python-worker-request", raising=False
+    )
+
+    response = await narada_pkg.Agent(
+        environment=narada_pkg.BrowserEnvironment()
+    ).run("child task")
+
+    assert response.text == "done"
+    dispatch_call = pyfetch.await_args_list[1]
+    payload = json.loads(dispatch_call.kwargs["body"])
+    assert "parentRequestId" not in payload
+    assert payload["parentRunIds"] == ["run-parent"]
 
 
 @pytest.mark.asyncio

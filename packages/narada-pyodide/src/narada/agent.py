@@ -188,6 +188,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
         workflow_trace = response_content.get("workflowTrace")
+        execution_trace_context = response_content.get("executionTraceContext")
         parent_request_id = self.environment._current_parent_request_id()
         # Preserve the response contract for direct callers, but avoid adding a second
         # child node when the backend will stitch the child request into the parent row.
@@ -216,6 +217,7 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=execution_trace_context,
         )
 
     async def _dispatch_request(

@@ -87,6 +87,14 @@ def _parent_request_id() -> str | None:
     return parent_request_id if isinstance(parent_request_id, str) else None
 
 
+def _remote_dispatch_request_id() -> str | None:
+    request_id = os.environ.get(_REMOTE_DISPATCH_REQUEST_ID_ENV_VAR)
+    if request_id is None:
+        return None
+    request_id = request_id.strip()
+    return request_id or None
+
+
 def _load_execution_trace_context_from_env() -> dict[str, Any] | None:
     raw = os.environ.get("NARADA_EXECUTION_TRACE_CONTEXT")
     if not raw:
@@ -581,7 +589,12 @@ class Environment(ABC):
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
-        parent_request_id = self._current_parent_request_id()
+        # Backend parentRequestId has a stricter contract than the worker's
+        # `_narada_request_id`: it must identify a live remote-dispatch request
+        # owned by the caller. The frontend injects that value explicitly when a
+        # Python APA is running under remote dispatch; otherwise omit it and
+        # rely on parentRunIds/executionTraceContext for local runnable linkage.
+        parent_request_id = _remote_dispatch_request_id()
         if parent_request_id is not None:
             body["parentRequestId"] = parent_request_id
         execution_trace_context = _load_execution_trace_context_from_env()

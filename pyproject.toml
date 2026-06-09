@@ -5,6 +5,9 @@ build-backend = "hatchling.build"
 [tool.ruff.lint]
 extend-select = ["I"]
 
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+
 [tool.uv.workspace]
 members = ["packages/*"]
 

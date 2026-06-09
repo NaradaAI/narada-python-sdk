@@ -62,6 +62,8 @@ from narada.environment import (
     Environment,
     InputRequiredCallback,
 )
+from narada.tracing import get_active_trace_session
+from narada.workbench import materialize_execution_trace_context
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -101,6 +103,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -127,6 +130,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -152,6 +156,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
@@ -186,6 +191,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
         workflow_trace = response_content.get("workflowTrace")
+        execution_trace_context = response_content.get("executionTraceContext")
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -199,7 +205,7 @@ class Agent(Generic[_StructuredOutput]):
                 timeout=timeout,
             )
 
-        return AgentResponse(
+        response = AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
@@ -209,7 +215,30 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=execution_trace_context,
         )
+        active_trace_session = get_active_trace_session()
+        if trace and response.execution_trace_context is not None:
+            materialized = await materialize_execution_trace_context(
+                response.execution_trace_context,
+                label=f"agent-run-{response.request_id}",
+                source_run={
+                    "type": "remote-dispatch",
+                    "authority": "agent-run-response",
+                    "requestId": response.request_id,
+                    "status": response.status,
+                },
+                auth_headers=self.environment._auth_headers,
+                base_url=self.environment._base_url,
+            )
+            response.execution_trace_path = str(materialized.path)
+        elif active_trace_session is not None:
+            active_trace_session.register_response(
+                response,
+                auth_headers=self.environment._auth_headers,
+                base_url=self.environment._base_url,
+            )
+        return response
 
     async def _dispatch_request(
         self,

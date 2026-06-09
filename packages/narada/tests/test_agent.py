@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib
+from pathlib import Path
 from typing import Any
 
 import pytest
-from narada import Agent, Environment
+from narada import Agent, Environment, trace
 
 
 class _FakeResponse:
@@ -119,3 +121,240 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_exposes_execution_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "label": "Trace",
+        "traceId": "trace-1",
+        "executionTraceS3Key": "user-test/recording-trace-1/execution-trace/index.json",
+    }
+    fake_session = _RemoteDispatchFakeClientSession()
+
+    def get_with_trace(url: str, **kwargs: Any) -> _FakeResponse:
+        del kwargs
+        if "/remote-dispatch/responses/" not in url:
+            raise AssertionError(f"Unexpected GET URL: {url}")
+        return _FakeResponse(
+            {
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": execution_trace_context,
+                },
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        )
+
+    fake_session.get = get_with_trace  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    response = await Agent(environment=_CountingEnvironment()).run("return trace")
+
+    assert response.execution_trace_context == execution_trace_context
+    assert response.model_dump(by_alias=True)["executionTraceContext"] == execution_trace_context
+
+
+@pytest.mark.asyncio
+async def test_trace_context_manager_materializes_registered_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import narada.environment as environment_module
+
+    trace_module = importlib.import_module("narada.tracing")
+
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "label": "Trace",
+        "traceId": "trace-1",
+        "executionTraceS3Key": "user-test/recording-trace-1/execution-trace/index.json",
+    }
+    calls: list[dict[str, Any]] = []
+
+    async def fake_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
+        calls.append({"context": context, **kwargs})
+
+        class _Result:
+            path = tmp_path / "proof"
+
+        return _Result()
+
+    fake_session = _RemoteDispatchFakeClientSession()
+
+    def get_with_trace(url: str, **kwargs: Any) -> _FakeResponse:
+        del kwargs
+        if "/remote-dispatch/responses/" not in url:
+            raise AssertionError(f"Unexpected GET URL: {url}")
+        return _FakeResponse(
+            {
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": execution_trace_context,
+                },
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        )
+
+    fake_session.get = get_with_trace  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+    monkeypatch.setattr(trace_module, "materialize_execution_trace_context", fake_materialize)
+
+    async with trace("unit-trace", out=tmp_path / "proof") as tr:
+        response = await Agent(environment=_CountingEnvironment()).run("return trace")
+
+    assert tr.path == tmp_path / "proof"
+    assert response.execution_trace_path == str(tmp_path / "proof")
+    assert calls[0]["context"] == execution_trace_context
+    assert calls[0]["out"] == tmp_path / "proof"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_trace_true_materializes_single_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import narada.agent as agent_module
+    import narada.environment as environment_module
+
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "label": "Trace",
+        "traceId": "trace-1",
+        "executionTraceS3Key": "user-test/recording-trace-1/execution-trace/index.json",
+    }
+    calls: list[dict[str, Any]] = []
+
+    async def fake_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
+        calls.append({"context": context, **kwargs})
+
+        class _Result:
+            path = tmp_path / "proof"
+
+        return _Result()
+
+    fake_session = _RemoteDispatchFakeClientSession()
+
+    def get_with_trace(url: str, **kwargs: Any) -> _FakeResponse:
+        del kwargs
+        if "/remote-dispatch/responses/" not in url:
+            raise AssertionError(f"Unexpected GET URL: {url}")
+        return _FakeResponse(
+            {
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": execution_trace_context,
+                },
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        )
+
+    fake_session.get = get_with_trace  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+    monkeypatch.setattr(agent_module, "materialize_execution_trace_context", fake_materialize)
+
+    response = await Agent(environment=_CountingEnvironment()).run("return trace", trace=True)
+
+    assert response.execution_trace_path == str(tmp_path / "proof")
+    assert calls[0]["context"] == execution_trace_context
+    assert calls[0]["label"].startswith("agent-run-req-")
+
+
+@pytest.mark.asyncio
+async def test_agent_run_trace_true_inside_trace_context_materializes_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import narada.agent as agent_module
+    import narada.environment as environment_module
+
+    trace_module = importlib.import_module("narada.tracing")
+    execution_trace_context = {
+        "type": "executionTraceContext",
+        "label": "Trace",
+        "traceId": "trace-1",
+        "executionTraceS3Key": "user-test/recording-trace-1/execution-trace/index.json",
+    }
+    agent_calls: list[dict[str, Any]] = []
+    context_calls: list[dict[str, Any]] = []
+
+    async def fake_agent_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
+        agent_calls.append({"context": context, **kwargs})
+
+        class _Result:
+            path = tmp_path / "agent-proof"
+
+        return _Result()
+
+    async def fake_context_materialize(context: dict[str, Any], **kwargs: Any) -> Any:
+        context_calls.append({"context": context, **kwargs})
+
+        class _Result:
+            path = tmp_path / "context-proof"
+
+        return _Result()
+
+    fake_session = _RemoteDispatchFakeClientSession()
+
+    def get_with_trace(url: str, **kwargs: Any) -> _FakeResponse:
+        del kwargs
+        if "/remote-dispatch/responses/" not in url:
+            raise AssertionError(f"Unexpected GET URL: {url}")
+        return _FakeResponse(
+            {
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": execution_trace_context,
+                },
+                "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        )
+
+    fake_session.get = get_with_trace  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+    monkeypatch.setattr(agent_module, "materialize_execution_trace_context", fake_agent_materialize)
+    monkeypatch.setattr(trace_module, "materialize_execution_trace_context", fake_context_materialize)
+
+    async with trace("unit-trace", out=tmp_path / "context-proof") as tr:
+        response = await Agent(environment=_CountingEnvironment()).run(
+            "return trace",
+            trace=True,
+        )
+
+    assert response.execution_trace_path == str(tmp_path / "agent-proof")
+    assert tr.path is None
+    assert len(agent_calls) == 1
+    assert context_calls == []
