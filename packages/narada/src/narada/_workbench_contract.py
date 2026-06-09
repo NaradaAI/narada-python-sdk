@@ -31,6 +31,5 @@ BINARY_SCAN_SUFFIXES: Final[tuple[str, ...]] = (
 CLEAN_COMMAND_STATUSES: Final[tuple[str, ...]] = (
     "passed",
     "materialized",
-    "needs_review",
     "not_applicable",
 )

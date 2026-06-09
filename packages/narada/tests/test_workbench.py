@@ -1095,6 +1095,9 @@ def test_cli_redacts_sensitive_exception_text(
         == 1
     )
     captured = capsys.readouterr()
-    assert "X-Amz-Signature" not in captured.err
-    assert "Bearer abc123" not in captured.err
-    assert "[REDACTED" in captured.err
+    payload = json.loads(captured.out)
+    assert payload["status"] == "failed"
+    assert "X-Amz-Signature" not in payload["error"]
+    assert "Bearer abc123" not in payload["error"]
+    assert "[REDACTED" in payload["error"]
+    assert captured.err == ""

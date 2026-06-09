@@ -7,6 +7,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from narada.browser_workbench import (
+    browser_diff,
+    browser_downloads,
+    browser_find,
+    browser_goto,
+    browser_nrd_action,
+    browser_screenshot,
+    browser_selectors,
+    browser_snapshot,
+    env_close,
+    env_open,
+    env_status,
+)
 from narada.studio import (
     AgentStudioWorkbenchClient,
     studio_delete,
@@ -204,6 +217,142 @@ async def _studio_delete(args: argparse.Namespace) -> int:
     return 0 if result.status == "passed" else 1
 
 
+async def _env_open(args: argparse.Namespace) -> int:
+    result = await env_open(
+        name=args.name,
+        kind=args.kind,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+        initialization_url=args.initialization_url,
+        cdp_port=args.cdp_port,
+        extension_id=args.extension_id,
+        user_data_dir=args.user_data_dir,
+        profile_directory=args.profile_directory,
+        attach_to_existing=args.attach_to_existing,
+        browser_window_id=args.browser_window_id,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _env_status(args: argparse.Namespace) -> int:
+    result = await env_status(
+        env_id=args.env,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _env_close(args: argparse.Namespace) -> int:
+    result = await env_close(
+        env_id=args.env,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+        close_adopted=args.close_adopted,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_goto(args: argparse.Namespace) -> int:
+    result = await browser_goto(
+        env_id=args.env,
+        url=args.url,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+        new_tab=args.new_tab,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_snapshot(args: argparse.Namespace) -> int:
+    result = await browser_snapshot(
+        env_id=args.env,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+        max_html_bytes=args.max_html_bytes,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_find(args: argparse.Namespace) -> int:
+    result = await browser_find(
+        env_id=args.env,
+        snapshot_id=args.snapshot_id,
+        proof_root=args.proof_root,
+        text=args.text,
+        tag_name=args.tag_name,
+        data_nrd=args.data_nrd,
+        interactive_only=args.interactive_only,
+        limit=args.limit,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_selectors(args: argparse.Namespace) -> int:
+    result = await browser_selectors(
+        env_id=args.env,
+        snapshot_id=args.snapshot_id,
+        frame_id=args.frame_id,
+        data_nrd=args.data_nrd,
+        proof_root=args.proof_root,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_nrd_action(args: argparse.Namespace, action: str) -> int:
+    result = await browser_nrd_action(
+        env_id=args.env,
+        action=action,
+        snapshot_id=args.snapshot_id,
+        frame_id=args.frame_id,
+        data_nrd=args.data_nrd,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+        value=getattr(args, "value", None),
+        post_snapshot=args.post_snapshot,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_diff(args: argparse.Namespace) -> int:
+    result = await browser_diff(
+        env_id=args.env,
+        before=args.before,
+        after=args.after,
+        proof_root=args.proof_root,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_screenshot(args: argparse.Namespace) -> int:
+    result = await browser_screenshot(
+        env_id=args.env,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _browser_downloads(args: argparse.Namespace) -> int:
+    result = await browser_downloads(
+        env_id=args.env,
+        proof_root=args.proof_root,
+        base_url=args.base_url,
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="narada")
     subparsers = parser.add_subparsers(dest="command")
@@ -233,6 +382,150 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("proof_root")
     verify.add_argument("--json", action="store_true")
     verify.set_defaults(handler=_verify)
+
+    env_parser = workbench_subparsers.add_parser("env")
+    env_subparsers = env_parser.add_subparsers(dest="env_command")
+
+    env_open_parser = env_subparsers.add_parser("open")
+    env_open_parser.add_argument("--kind", default="local")
+    env_open_parser.add_argument("--name", required=True)
+    env_open_parser.add_argument("--proof-root", required=True)
+    env_open_parser.add_argument("--base-url")
+    env_open_parser.add_argument("--initialization-url")
+    env_open_parser.add_argument("--cdp-port", type=int)
+    env_open_parser.add_argument("--extension-id")
+    env_open_parser.add_argument("--user-data-dir")
+    env_open_parser.add_argument("--profile-directory")
+    env_open_parser.add_argument("--attach-to-existing", action="store_true")
+    env_open_parser.add_argument("--browser-window-id")
+    env_open_parser.add_argument("--json", action="store_true")
+    env_open_parser.set_defaults(handler=lambda args: asyncio.run(_env_open(args)))
+
+    env_status_parser = env_subparsers.add_parser("status")
+    env_status_parser.add_argument("env")
+    env_status_parser.add_argument("--proof-root", required=True)
+    env_status_parser.add_argument("--base-url")
+    env_status_parser.add_argument("--json", action="store_true")
+    env_status_parser.set_defaults(handler=lambda args: asyncio.run(_env_status(args)))
+
+    env_close_parser = env_subparsers.add_parser("close")
+    env_close_parser.add_argument("env")
+    env_close_parser.add_argument("--proof-root", required=True)
+    env_close_parser.add_argument("--base-url")
+    env_close_parser.add_argument(
+        "--close-adopted",
+        action="store_true",
+        help="Also close an adopted browser window. By default adopted windows are detached, not closed.",
+    )
+    env_close_parser.add_argument("--json", action="store_true")
+    env_close_parser.set_defaults(handler=lambda args: asyncio.run(_env_close(args)))
+
+    browser_parser = workbench_subparsers.add_parser("browser")
+    browser_subparsers = browser_parser.add_subparsers(dest="browser_command")
+
+    browser_goto_parser = browser_subparsers.add_parser("goto")
+    browser_goto_parser.add_argument("env")
+    browser_goto_parser.add_argument("--url", required=True)
+    browser_goto_parser.add_argument("--proof-root", required=True)
+    browser_goto_parser.add_argument("--base-url")
+    browser_goto_parser.add_argument("--new-tab", action="store_true")
+    browser_goto_parser.add_argument("--json", action="store_true")
+    browser_goto_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_goto(args))
+    )
+
+    browser_snapshot_parser = browser_subparsers.add_parser("snapshot")
+    browser_snapshot_parser.add_argument("env")
+    browser_snapshot_parser.add_argument("--proof-root", required=True)
+    browser_snapshot_parser.add_argument("--base-url")
+    browser_snapshot_parser.add_argument("--max-html-bytes", type=int, default=500_000)
+    browser_snapshot_parser.add_argument("--json", action="store_true")
+    browser_snapshot_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_snapshot(args))
+    )
+
+    browser_find_parser = browser_subparsers.add_parser("find")
+    browser_find_parser.add_argument("env")
+    browser_find_parser.add_argument("--snapshot-id", required=True)
+    browser_find_parser.add_argument("--proof-root", required=True)
+    browser_find_parser.add_argument("--text")
+    browser_find_parser.add_argument("--tag-name")
+    browser_find_parser.add_argument("--data-nrd")
+    browser_find_parser.add_argument("--interactive-only", action="store_true")
+    browser_find_parser.add_argument("--limit", type=int, default=20)
+    browser_find_parser.add_argument("--json", action="store_true")
+    browser_find_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_find(args))
+    )
+
+    browser_selectors_parser = browser_subparsers.add_parser("selectors")
+    browser_selectors_parser.add_argument("env")
+    browser_selectors_parser.add_argument("--snapshot-id", required=True)
+    browser_selectors_parser.add_argument("--frame-id", required=True)
+    browser_selectors_parser.add_argument("--data-nrd", required=True)
+    browser_selectors_parser.add_argument("--proof-root", required=True)
+    browser_selectors_parser.add_argument("--json", action="store_true")
+    browser_selectors_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_selectors(args))
+    )
+
+    for command_name, action_name in (
+        ("click-nrd", "click"),
+        ("fill-nrd", "fill"),
+        ("select-nrd", "select"),
+    ):
+        nrd_parser = browser_subparsers.add_parser(command_name)
+        nrd_parser.add_argument("env")
+        nrd_parser.add_argument("--snapshot-id", required=True)
+        nrd_parser.add_argument("--frame-id", required=True)
+        nrd_parser.add_argument("--data-nrd", required=True)
+        nrd_parser.add_argument("--proof-root", required=True)
+        nrd_parser.add_argument("--base-url")
+        if action_name in {"fill", "select"}:
+            nrd_parser.add_argument("--value", required=True)
+        nrd_parser.add_argument(
+            "--post-snapshot",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help=(
+                "Capture a post-action snapshot for proof. Use --no-post-snapshot "
+                "only for diagnostic commands that should verify as needs_review."
+            ),
+        )
+        nrd_parser.add_argument("--json", action="store_true")
+        nrd_parser.set_defaults(
+            handler=lambda args, selected_action=action_name: asyncio.run(
+                _browser_nrd_action(args, selected_action)
+            )
+        )
+
+    browser_diff_parser = browser_subparsers.add_parser("diff")
+    browser_diff_parser.add_argument("env")
+    browser_diff_parser.add_argument("--before", required=True)
+    browser_diff_parser.add_argument("--after", required=True)
+    browser_diff_parser.add_argument("--proof-root", required=True)
+    browser_diff_parser.add_argument("--json", action="store_true")
+    browser_diff_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_diff(args))
+    )
+
+    browser_screenshot_parser = browser_subparsers.add_parser("screenshot")
+    browser_screenshot_parser.add_argument("env")
+    browser_screenshot_parser.add_argument("--proof-root", required=True)
+    browser_screenshot_parser.add_argument("--base-url")
+    browser_screenshot_parser.add_argument("--json", action="store_true")
+    browser_screenshot_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_screenshot(args))
+    )
+
+    browser_downloads_parser = browser_subparsers.add_parser("downloads")
+    browser_downloads_parser.add_argument("env")
+    browser_downloads_parser.add_argument("--proof-root", required=True)
+    browser_downloads_parser.add_argument("--base-url")
+    browser_downloads_parser.add_argument("--json", action="store_true")
+    browser_downloads_parser.set_defaults(
+        handler=lambda args: asyncio.run(_browser_downloads(args))
+    )
 
     studio_parser = workbench_subparsers.add_parser("studio")
     studio_subparsers = studio_parser.add_subparsers(dest="studio_command")
@@ -330,7 +623,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except Exception as exc:
-        print(f"error: {_redact_sensitive_text(str(exc))}", file=sys.stderr)
+        message = _redact_sensitive_text(str(exc))
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "status": "failed",
+                        "error": message,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"error: {message}", file=sys.stderr)
         return 1
 
 

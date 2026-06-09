@@ -940,12 +940,14 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         *,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        base_url: str | None = None,
         config: BrowserConfig | None = None,
         attach_to_existing: bool = False,
     ) -> None:
         super().__init__(
             api_key=api_key,
             auth_headers=auth_headers,
+            base_url=base_url,
         )
         self._browser_process_id = None
         self._config = config or BrowserConfig()
@@ -1037,7 +1039,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
         # Generate a unique tag for the initialization URL
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{self._config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            self._config.initialization_url,
+            {"t": window_tag},
+        )
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
@@ -1058,7 +1063,17 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         context = browser.contexts[0]
 
         side_panel_url = create_side_panel_url(self._config, browser_window_id)
-        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
+        side_panel_page = next(
+            (p for p in context.pages if p.url == side_panel_url), None
+        )
+        if side_panel_page is None:
+            visible_urls = [p.url for p in context.pages]
+            raise RuntimeError(
+                "Narada side panel was not found for browser window "
+                f"{browser_window_id!r} and extension id {self._config.extension_id!r}. "
+                "If you are attaching to a dev extension, pass the matching extension id. "
+                f"Visible page URLs: {visible_urls!r}"
+            )
 
         await self._fix_download_behavior(side_panel_page)
 
@@ -1076,7 +1091,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            config.initialization_url,
+            {"t": window_tag},
+        )
 
         # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
         # We'll set up the CDP auth handler and then navigate to the init URL.
@@ -1376,10 +1394,12 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
         cloud_browser_session_id: str | None = None,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        base_url: str | None = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
             auth_headers=auth_headers,
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
         self._cloud_browser_session_id = cloud_browser_session_id

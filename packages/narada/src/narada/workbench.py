@@ -188,6 +188,16 @@ def _redact_sensitive_text(value: str) -> str:
     return redacted
 
 
+def _warning_codes(warnings: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            str(warning.get("code"))
+            for warning in warnings
+            if warning.get("code") not in {"command_warning"}
+        }
+    )
+
+
 def _frame_dir(root: Path, frame: dict[str, Any], index: int) -> Path:
     frame_id = str(frame.get("frameId") or f"frame_{index}")
     return root / "trace" / "frames" / _safe_slug(frame_id)
@@ -235,6 +245,11 @@ def _is_clean_source_authority(value: Any) -> bool:
 
 def _status_exit_code(status: str) -> int:
     return 0 if status in CLEAN_COMMAND_STATUSES or status == "passed" else 1
+
+
+def _artifact_ref(root: Path, relative_path: str, role: str) -> dict[str, Any]:
+    path = root / relative_path
+    return {"path": relative_path, "role": role, "sha256": _sha256_file(path)}
 
 
 def _source_run_problems(source_run: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -636,6 +651,7 @@ def append_command(
     *,
     command: str,
     status: str,
+    command_id: str | None = None,
     exit_code: int | None = None,
     artifacts: list[dict[str, Any]] | None = None,
     warnings: list[str] | None = None,
@@ -646,7 +662,7 @@ def append_command(
     now = _now_iso()
     row = {
         "schemaVersion": 1,
-        "commandId": f"cmd_{uuid.uuid4().hex}",
+        "commandId": command_id or f"cmd_{uuid.uuid4().hex}",
         "runId": proof_root.name,
         "command": command,
         "status": status,
@@ -781,7 +797,20 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     taints: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
-    for relative_path in REQUIRED_PROOF_FILES:
+    manifest_path = root / "manifest.json"
+    manifest_kind = "trace"
+    if manifest_path.exists():
+        loaded_for_kind = _load_json(manifest_path)
+        if isinstance(loaded_for_kind, dict):
+            manifest_kind = str(loaded_for_kind.get("proofRootKind") or "trace")
+    is_browser_workbench_root = manifest_kind == "browser-workbench"
+    required_files = (
+        ("manifest.json", "commands.jsonl", "cleanup/status.json")
+        if is_browser_workbench_root
+        else REQUIRED_PROOF_FILES
+    )
+
+    for relative_path in required_files:
         if not (root / relative_path).exists():
             failures.append({"code": "missing_required_file", "path": relative_path})
 
@@ -791,10 +820,10 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     resolved_trace: dict[str, Any] | None = None
     expected_artifact_keys: set[str] = set()
 
-    manifest_path = root / "manifest.json"
     context_path = root / "trace" / "context.json"
     resolved_path = root / "trace" / "resolved.json"
     index_path = root / "trace" / "artifacts" / "index.jsonl"
+    browser_index_path = root / "browser" / "artifacts.jsonl"
     if manifest_path.exists():
         loaded = _load_json(manifest_path)
         manifest = loaded if isinstance(loaded, dict) else None
@@ -877,25 +906,26 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     if manifest is not None:
         manifest_context = manifest.get("traceContext")
         source_run = manifest.get("sourceRun")
-        if not isinstance(source_run, dict):
-            failures.append({"code": "source_run_missing"})
-        else:
-            source_failures, source_taints = _source_run_problems(source_run)
-            for code in source_failures:
-                failures.append(
-                    {
-                        "code": code,
-                        "status": source_run.get("status"),
-                    }
-                )
-            for code in source_taints:
-                taints.append(
-                    {
-                        "code": code,
-                        "status": source_run.get("status"),
-                        "authority": source_run.get("authority"),
-                    }
-                )
+        if not is_browser_workbench_root:
+            if not isinstance(source_run, dict):
+                failures.append({"code": "source_run_missing"})
+            else:
+                source_failures, source_taints = _source_run_problems(source_run)
+                for code in source_failures:
+                    failures.append(
+                        {
+                            "code": code,
+                            "status": source_run.get("status"),
+                        }
+                    )
+                for code in source_taints:
+                    taints.append(
+                        {
+                            "code": code,
+                            "status": source_run.get("status"),
+                            "authority": source_run.get("authority"),
+                        }
+                    )
         if context is not None and manifest_context != context:
             failures.append({"code": "manifest_context_mismatch"})
         if context is not None and manifest.get("traceId") not in {
@@ -918,6 +948,17 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 failures.append({"code": "manifest_artifact_index_hash_missing"})
             elif manifest.get("artifactIndexHash") != _sha256_file(index_path):
                 failures.append({"code": "manifest_artifact_index_hash_mismatch"})
+        if browser_index_path.exists():
+            if not manifest.get("browserArtifactIndexHash"):
+                failures.append(
+                    {"code": "manifest_browser_artifact_index_hash_missing"}
+                )
+            elif manifest.get("browserArtifactIndexHash") != _sha256_file(
+                browser_index_path
+            ):
+                failures.append(
+                    {"code": "manifest_browser_artifact_index_hash_mismatch"}
+                )
         commands_path = root / "commands.jsonl"
         if commands_path.exists():
             if not manifest.get("commandLedgerHash"):
@@ -1029,6 +1070,38 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                     "sourceS3Key": source_key,
                 }
             )
+    browser_artifact_rows: list[dict[str, Any]] = []
+    if browser_index_path.exists():
+        browser_artifact_rows = _load_jsonl(browser_index_path)
+        for row in browser_artifact_rows:
+            local_path_value = row.get("path")
+            if not isinstance(local_path_value, str) or not local_path_value:
+                failures.append({"code": "browser_artifact_missing_path", "row": row})
+                continue
+            if os.path.isabs(local_path_value):
+                failures.append(
+                    {"code": "browser_artifact_absolute_path", "path": local_path_value}
+                )
+                continue
+            local_path = root / local_path_value
+            if not local_path.resolve().is_relative_to(root.resolve()):
+                failures.append(
+                    {"code": "browser_artifact_path_escape", "path": local_path_value}
+                )
+                continue
+            if not local_path.exists():
+                failures.append(
+                    {"code": "browser_artifact_file_missing", "path": local_path_value}
+                )
+                continue
+            expected_sha = row.get("sha256")
+            if expected_sha != _sha256_file(local_path):
+                failures.append(
+                    {
+                        "code": "browser_artifact_hash_mismatch",
+                        "path": local_path_value,
+                    }
+                )
 
     redaction_report = _write_redaction_report(root) if write else _scan_redaction(root)
     for finding in redaction_report["findings"]:
@@ -1050,13 +1123,25 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
     commands_path = root / "commands.jsonl"
     if commands_path.exists():
         command_rows = _load_jsonl(commands_path)
+        needs_review = False
         if not command_rows:
             failures.append({"code": "empty_command_ledger"})
         materialize_commands = [
             row for row in command_rows if row.get("command") == "trace.materialize"
         ]
-        if not materialize_commands:
+        browser_commands = [
+            row
+            for row in command_rows
+            if isinstance(row.get("command"), str)
+            and (
+                str(row.get("command")).startswith("browser.")
+                or str(row.get("command")).startswith("env.")
+            )
+        ]
+        if not materialize_commands and not is_browser_workbench_root:
             failures.append({"code": "missing_materialize_command"})
+        if is_browser_workbench_root and not browser_commands:
+            failures.append({"code": "missing_browser_workbench_command"})
         for row in materialize_commands:
             if row.get("status") not in CLEAN_COMMAND_STATUSES:
                 continue
@@ -1110,18 +1195,171 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
                 )
             elif _is_failed_status(row_status):
                 taints.append({"code": "prior_command_failed", "status": row_status})
+            elif row_status not in CLEAN_COMMAND_STATUSES:
+                needs_review = True
+                warnings.append(
+                    {
+                        "code": "command_status_needs_review",
+                        "command": row.get("command"),
+                        "status": row_status,
+                    }
+                )
+            if (
+                row.get("command")
+                in {"browser.click-nrd", "browser.fill-nrd", "browser.select-nrd"}
+                and row_status in CLEAN_COMMAND_STATUSES
+            ):
+                ids = row.get("ids")
+                if not isinstance(ids, dict) or not ids.get("postSnapshotId"):
+                    needs_review = True
+                    warnings.append(
+                        {
+                            "code": "browser_action_post_snapshot_missing",
+                            "command": row.get("command"),
+                        }
+                    )
+            row_command = row.get("command")
+            for warning in row.get("warnings") or []:
+                if row_command in {"score", "verify"}:
+                    continue
+                warnings.append(
+                    {
+                        "code": "command_warning",
+                        "command": row_command,
+                        "warning": warning,
+                    }
+                )
             for taint in row.get("taints") or []:
                 taints.append({"code": "command_taint", "taint": taint})
+            artifacts = row.get("artifacts")
+            if isinstance(artifacts, list):
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        failures.append(
+                            {
+                                "code": "command_artifact_not_object",
+                                "command": row.get("command"),
+                            }
+                        )
+                        continue
+                    artifact_path = artifact.get("path")
+                    if not isinstance(artifact_path, str) or not artifact_path:
+                        failures.append(
+                            {
+                                "code": "command_artifact_missing_path",
+                                "command": row.get("command"),
+                            }
+                        )
+                        continue
+                    if os.path.isabs(artifact_path):
+                        failures.append(
+                            {
+                                "code": "command_artifact_absolute_path",
+                                "path": artifact_path,
+                            }
+                        )
+                        continue
+                    local_path = root / artifact_path
+                    if not local_path.resolve().is_relative_to(root.resolve()):
+                        failures.append(
+                            {
+                                "code": "command_artifact_path_escape",
+                                "path": artifact_path,
+                            }
+                        )
+                        continue
+                    if not local_path.exists():
+                        failures.append(
+                            {
+                                "code": "command_artifact_file_missing",
+                                "path": artifact_path,
+                            }
+                        )
+                        continue
+                    expected_hash = artifact.get("sha256")
+                    if expected_hash is not None and expected_hash != _sha256_file(
+                        local_path
+                    ):
+                        failures.append(
+                            {
+                                "code": "command_artifact_hash_mismatch",
+                                "path": artifact_path,
+                            }
+                        )
+            ids = row.get("ids")
+            if isinstance(ids, dict):
+                report_hash_fields = {
+                    "scoreHash": ("scorePath", "scorer/score.json"),
+                    "proofStatusHash": (
+                        "proofStatusPath",
+                        "reports/proof-status.json",
+                    ),
+                    "verificationReportHash": (
+                        "verificationReportPath",
+                        "reports/verification-report.json",
+                    ),
+                }
+                for field, (
+                    path_field,
+                    default_relative_path,
+                ) in report_hash_fields.items():
+                    if field not in ids:
+                        continue
+                    path_override = ids.get(path_field)
+                    relative_path = (
+                        path_override
+                        if isinstance(path_override, str) and path_override
+                        else default_relative_path
+                    )
+                    report_path = root / relative_path
+                    if not report_path.exists():
+                        failures.append(
+                            {
+                                "code": "report_hash_target_missing",
+                                "field": field,
+                                "path": relative_path,
+                            }
+                        )
+                    elif ids[field] != _sha256_file(report_path):
+                        failures.append(
+                            {
+                                "code": "report_hash_mismatch",
+                                "field": field,
+                                "path": relative_path,
+                            }
+                        )
+    else:
+        needs_review = False
 
     cleanup_path = root / "cleanup" / "status.json"
     if cleanup_path.exists():
         cleanup = _load_json(cleanup_path)
-        if isinstance(cleanup, dict) and cleanup.get("status") == "failed":
-            taints.append({"code": "cleanup_failed"})
+        if not isinstance(cleanup, dict):
+            failures.append({"code": "cleanup_status_not_object"})
+        else:
+            cleanup_status = cleanup.get("status")
+            if cleanup_status == "failed":
+                taints.append({"code": "cleanup_failed"})
+            elif is_browser_workbench_root and cleanup_status != "passed":
+                needs_review = True
+                warnings.append(
+                    {
+                        "code": "cleanup_status_not_terminal",
+                        "status": cleanup_status,
+                    }
+                )
     else:
         taints.append({"code": "cleanup_status_missing"})
 
-    status = "failed" if failures else ("tainted" if taints else "passed")
+    status = (
+        "failed"
+        if failures
+        else "tainted"
+        if taints
+        else "needs_review"
+        if needs_review
+        else "passed"
+    )
     score = {
         "schemaVersion": 1,
         "status": status,
@@ -1129,31 +1367,47 @@ def score_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str,
         "failures": failures,
         "taints": taints,
         "warnings": warnings,
-        "artifactCount": len(artifact_rows),
+        "artifactCount": len(artifact_rows) + len(browser_artifact_rows),
+        "structuralOnly": is_browser_workbench_root,
     }
     if write:
+        score_command_id = f"cmd_{uuid.uuid4().hex}"
         score_path = root / "scorer" / "score.json"
         proof_status_path = root / "reports" / "proof-status.json"
+        score_history_relative_path = f"scorer/history/{score_command_id}.json"
+        proof_status_history_relative_path = (
+            f"reports/history/proof-status-{score_command_id}.json"
+        )
         _write_json(score_path, score)
+        _write_json(root / score_history_relative_path, score)
         (root / "scorer" / "score.md").write_text(
             f"# Score\n\nStatus: {status}\n\nFailures: {len(failures)}\n\nTaints: {len(taints)}\n",
             encoding="utf-8",
         )
         _write_json(proof_status_path, score)
+        _write_json(root / proof_status_history_relative_path, score)
         (root / "reports" / "proof-status.md").write_text(
             f"# Proof Status\n\nStatus: {status}\n",
             encoding="utf-8",
         )
         append_command(
             root,
+            command_id=score_command_id,
             command="score",
             status=status,
-            artifacts=[{"path": "scorer/score.json", "role": "score"}],
-            warnings=[warning["code"] for warning in warnings],
+            artifacts=[
+                _artifact_ref(root, score_history_relative_path, "score"),
+                _artifact_ref(root, proof_status_history_relative_path, "proof-status"),
+            ],
+            warnings=_warning_codes(warnings),
             taints=[taint["code"] for taint in taints],
             ids={
-                "scoreHash": _sha256_file(score_path),
-                "proofStatusHash": _sha256_file(proof_status_path),
+                "scorePath": score_history_relative_path,
+                "scoreHash": _sha256_file(root / score_history_relative_path),
+                "proofStatusPath": proof_status_history_relative_path,
+                "proofStatusHash": _sha256_file(
+                    root / proof_status_history_relative_path
+                ),
             },
         )
         _update_manifest_hash(root, "commandLedgerHash", root / "commands.jsonl")
@@ -1169,27 +1423,16 @@ def verify_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str
     }
     if write:
         root = Path(proof_root)
+        verify_command_id = f"cmd_{uuid.uuid4().hex}"
         verification_report_path = root / "reports" / "verification-report.json"
+        verification_history_relative_path = (
+            f"reports/history/verification-report-{verify_command_id}.json"
+        )
         _write_json(verification_report_path, verified)
         (root / "reports" / "verification-report.md").write_text(
             f"# Verification Report\n\nVerified: {str(verified['verified']).lower()}\n\nStatus: {score['status']}\n",
             encoding="utf-8",
         )
-        append_command(
-            root,
-            command="verify",
-            status=score["status"],
-            artifacts=[
-                {"path": "reports/proof-status.json", "role": "proof-status"},
-                {
-                    "path": "reports/verification-report.json",
-                    "role": "verification-report",
-                },
-            ],
-            taints=[taint["code"] for taint in score["taints"]],
-            ids={"verificationReportHash": _sha256_file(verification_report_path)},
-        )
-        _update_manifest_hash(root, "commandLedgerHash", root / "commands.jsonl")
         final_redaction_report = _write_redaction_report(root)
         if final_redaction_report["findings"]:
             final_status = (
@@ -1211,4 +1454,26 @@ def verify_proof_root(proof_root: str | Path, *, write: bool = True) -> dict[str
                 f"# Verification Report\n\nVerified: false\n\nStatus: {final_status}\n",
                 encoding="utf-8",
             )
+        _write_json(root / verification_history_relative_path, verified)
+        append_command(
+            root,
+            command_id=verify_command_id,
+            command="verify",
+            status=verified["status"],
+            artifacts=[
+                _artifact_ref(
+                    root, verification_history_relative_path, "verification-report"
+                ),
+            ],
+            warnings=_warning_codes(score["warnings"]),
+            taints=[taint["code"] for taint in score["taints"]],
+            ids={
+                "verificationReportPath": verification_history_relative_path,
+                "verificationReportHash": _sha256_file(
+                    root / verification_history_relative_path
+                ),
+            },
+        )
+        _update_manifest_hash(root, "commandLedgerHash", root / "commands.jsonl")
+        _write_redaction_report(root)
     return verified
