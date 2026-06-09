@@ -7,6 +7,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from narada.studio import (
+    AgentStudioWorkbenchClient,
+    studio_delete,
+    studio_diff,
+    studio_export,
+    studio_get,
+    studio_list,
+    studio_resolve,
+    studio_run,
+    studio_upsert_python,
+)
 from narada.workbench import (
     _redact_sensitive_text,
     default_api_base_url,
@@ -39,6 +50,13 @@ def _load_context_file(path: Path) -> dict[str, Any]:
             "Context file must contain executionTraceContext or context object"
         )
     return context
+
+
+def _studio_client(args: argparse.Namespace) -> AgentStudioWorkbenchClient:
+    return AgentStudioWorkbenchClient(
+        auth_headers=default_auth_headers(),
+        base_url=args.base_url or default_api_base_url(),
+    )
 
 
 async def _trace_materialize(args: argparse.Namespace) -> int:
@@ -91,6 +109,101 @@ def _verify(args: argparse.Namespace) -> int:
     return 0 if result["verified"] else 1
 
 
+async def _studio_list(args: argparse.Namespace) -> int:
+    result = await studio_list(
+        parent_path=args.parent_path,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_resolve(args: argparse.Namespace) -> int:
+    result = await studio_resolve(
+        path=args.path,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_get(args: argparse.Namespace) -> int:
+    result = await studio_get(
+        item_id=args.item_id,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_export(args: argparse.Namespace) -> int:
+    result = await studio_export(
+        item_id=args.item_id,
+        out=args.out,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_diff(args: argparse.Namespace) -> int:
+    result = await studio_diff(
+        item_id=args.item_id,
+        file=args.file,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_upsert_python(args: argparse.Namespace) -> int:
+    if args.apply and not args.proof_root:
+        raise ValueError("--proof-root is required with --apply")
+    result = await studio_upsert_python(
+        name=args.name,
+        parent_path=args.parent_path,
+        file=args.file,
+        apply=args.apply,
+        proof_root=args.proof_root,
+        update_item_id=args.update_item_id,
+        expected_remote_code_hash=args.expected_remote_code_hash,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_run(args: argparse.Namespace) -> int:
+    if not args.trace:
+        raise ValueError("studio run requires --trace for M3 proof")
+    result = await studio_run(
+        item_id=args.item_id,
+        proof_root=args.proof_root,
+        prompt_suffix=args.prompt_suffix,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_delete(args: argparse.Namespace) -> int:
+    if not args.proof_root:
+        raise ValueError("studio delete requires --proof-root for command provenance")
+    result = await studio_delete(
+        item_id=args.item_id,
+        expected_name=args.expected_name,
+        created_by_command_id=args.created_by_command_id,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="narada")
     subparsers = parser.add_subparsers(dest="command")
@@ -120,6 +233,90 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("proof_root")
     verify.add_argument("--json", action="store_true")
     verify.set_defaults(handler=_verify)
+
+    studio_parser = workbench_subparsers.add_parser("studio")
+    studio_subparsers = studio_parser.add_subparsers(dest="studio_command")
+
+    studio_list_parser = studio_subparsers.add_parser("list")
+    studio_list_parser.add_argument("--parent-path", default="/")
+    studio_list_parser.add_argument("--proof-root")
+    studio_list_parser.add_argument("--base-url")
+    studio_list_parser.add_argument("--json", action="store_true")
+    studio_list_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_list(args))
+    )
+
+    studio_resolve_parser = studio_subparsers.add_parser("resolve")
+    studio_resolve_parser.add_argument("--path", required=True)
+    studio_resolve_parser.add_argument("--proof-root")
+    studio_resolve_parser.add_argument("--base-url")
+    studio_resolve_parser.add_argument("--json", action="store_true")
+    studio_resolve_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_resolve(args))
+    )
+
+    studio_get_parser = studio_subparsers.add_parser("get")
+    studio_get_parser.add_argument("--item-id", required=True)
+    studio_get_parser.add_argument("--proof-root")
+    studio_get_parser.add_argument("--base-url")
+    studio_get_parser.add_argument("--json", action="store_true")
+    studio_get_parser.set_defaults(handler=lambda args: asyncio.run(_studio_get(args)))
+
+    studio_export_parser = studio_subparsers.add_parser("export")
+    studio_export_parser.add_argument("--item-id", required=True)
+    studio_export_parser.add_argument("--out", required=True)
+    studio_export_parser.add_argument("--base-url")
+    studio_export_parser.add_argument("--json", action="store_true")
+    studio_export_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_export(args))
+    )
+
+    studio_diff_parser = studio_subparsers.add_parser("diff")
+    studio_diff_parser.add_argument("--item-id", required=True)
+    studio_diff_parser.add_argument("--file", required=True)
+    studio_diff_parser.add_argument("--proof-root")
+    studio_diff_parser.add_argument("--base-url")
+    studio_diff_parser.add_argument("--json", action="store_true")
+    studio_diff_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_diff(args))
+    )
+
+    studio_upsert_parser = studio_subparsers.add_parser("upsert-python")
+    studio_upsert_parser.add_argument("--name", required=True)
+    studio_upsert_parser.add_argument("--parent-path", default="/")
+    studio_upsert_parser.add_argument("--file", required=True)
+    studio_apply_group = studio_upsert_parser.add_mutually_exclusive_group()
+    studio_apply_group.add_argument("--dry-run", action="store_true", dest="dry_run")
+    studio_apply_group.add_argument("--apply", action="store_true")
+    studio_upsert_parser.add_argument("--proof-root")
+    studio_upsert_parser.add_argument("--update-item-id")
+    studio_upsert_parser.add_argument("--expected-remote-code-hash")
+    studio_upsert_parser.add_argument("--base-url")
+    studio_upsert_parser.add_argument("--json", action="store_true")
+    studio_upsert_parser.set_defaults(
+        dry_run=True,
+        handler=lambda args: asyncio.run(_studio_upsert_python(args)),
+    )
+
+    studio_run_parser = studio_subparsers.add_parser("run")
+    studio_run_parser.add_argument("--item-id", required=True)
+    studio_run_parser.add_argument("--trace", action="store_true")
+    studio_run_parser.add_argument("--proof-root")
+    studio_run_parser.add_argument("--prompt-suffix")
+    studio_run_parser.add_argument("--base-url")
+    studio_run_parser.add_argument("--json", action="store_true")
+    studio_run_parser.set_defaults(handler=lambda args: asyncio.run(_studio_run(args)))
+
+    studio_delete_parser = studio_subparsers.add_parser("delete")
+    studio_delete_parser.add_argument("--item-id", required=True)
+    studio_delete_parser.add_argument("--expected-name", required=True)
+    studio_delete_parser.add_argument("--created-by-command-id", required=True)
+    studio_delete_parser.add_argument("--proof-root")
+    studio_delete_parser.add_argument("--base-url")
+    studio_delete_parser.add_argument("--json", action="store_true")
+    studio_delete_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_delete(args))
+    )
     return parser
 
 
