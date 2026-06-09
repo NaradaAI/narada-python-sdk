@@ -116,6 +116,20 @@ class ReadExcelSheetTrace(BaseModel):
     description: str
 
 
+class SendEmailTrace(BaseModel):
+    step_type: Literal["sendEmail"]
+    url: str | None = None
+    description: str
+    providerResponse: dict[str, Any] | None = None
+
+
+class SendSlackMessageTrace(BaseModel):
+    step_type: Literal["sendSlackMessage"]
+    url: str | None = None
+    description: str
+    providerResponse: dict[str, Any] | None = None
+
+
 class WriteGoogleSheetTrace(BaseModel):
     step_type: Literal["writeGoogleSheet"]
     url: str
@@ -354,6 +368,8 @@ ApaStepTrace = Annotated[
     | ReadCsvTrace
     | ReadGoogleSheetTrace
     | ReadExcelSheetTrace
+    | SendEmailTrace
+    | SendSlackMessageTrace
     | WriteGoogleSheetTrace
     | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
