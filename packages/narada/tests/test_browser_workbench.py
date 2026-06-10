@@ -357,6 +357,10 @@ async def test_env_open_and_close_write_cleanup_status(
     monkeypatch.setattr(
         browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
     )
+    monkeypatch.setattr(browser_module, "_local_process_is_running", lambda pid: False)
+    monkeypatch.setattr(
+        browser_module, "_tcp_port_is_listening", lambda port, host=None: False
+    )
 
     opened = await env_open(
         name="dev",
@@ -372,8 +376,14 @@ async def test_env_open_and_close_write_cleanup_status(
         "dev-extension"
     )
     assert closed.payload["environment"]["status"] == "closed"
+    assert closed.payload["environment"]["localBrowserProcessStatus"] == (
+        "already_exited"
+    )
+    assert closed.payload["environment"]["localBrowserCdpPortStatus"] == "closed"
     cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
     assert cleanup["status"] == "passed"
+    assert cleanup["localBrowserProcessStatus"] == "already_exited"
+    assert cleanup["localBrowserCdpPortStatus"] == "closed"
     assert (tmp_path / "browser" / "environments" / "dev-closed.json").exists()
     assert score_proof_root(tmp_path)["status"] == "passed"
     assert verify_proof_root(tmp_path)["verified"] is True
@@ -427,6 +437,227 @@ async def test_env_close_detaches_adopted_browser_by_default(
         "adopted_browser_not_closed"
     )
     assert "close" not in _FakeRemoteEnvironment.calls
+
+
+@pytest.mark.asyncio
+async def test_env_close_terminates_sdk_created_local_browser_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    monkeypatch.setattr(browser_module, "_local_process_is_running", lambda pid: True)
+    monkeypatch.setattr(
+        browser_module,
+        "_local_process_identity_status",
+        lambda pid, record: {"status": "verified", "pid": pid},
+    )
+    port_checks: list[tuple[int, str | None]] = []
+
+    def fake_port_probe(port: int, host: str | None = None) -> bool:
+        port_checks.append((port, host))
+        return False
+
+    monkeypatch.setattr(browser_module, "_tcp_port_is_listening", fake_port_probe)
+    terminated: list[int] = []
+
+    async def fake_terminate(pid: int) -> dict[str, Any]:
+        terminated.append(pid)
+        return {"status": "terminated", "pid": pid}
+
+    monkeypatch.setattr(browser_module, "_terminate_local_process", fake_terminate)
+    _write_env_record(
+        tmp_path,
+        extra={
+            "kind": "local",
+            "ownership": "sdk-created",
+            "attachToExisting": False,
+            "browserProcessId": 123,
+            "cdpHost": "127.0.0.42",
+            "cdpPort": 9333,
+            "userDataDir": "/tmp/narada-browser-dev",
+        },
+    )
+
+    closed = await env_close(env_id="dev", proof_root=tmp_path)
+
+    assert closed.status == "passed"
+    assert "close" in _FakeRemoteEnvironment.calls
+    assert terminated == [123]
+    assert closed.payload["environment"]["localBrowserProcessStatus"] == "terminated"
+    assert closed.payload["environment"]["localBrowserCdpPortStatus"] == "closed"
+    assert port_checks == [(9333, "127.0.0.42")]
+    command_row = json.loads(
+        (tmp_path / "commands.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert (
+        "local_browser_process_terminated_after_remote_close" in command_row["warnings"]
+    )
+    cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
+    assert cleanup["status"] == "passed"
+    assert cleanup["localBrowserProcessStatus"] == "terminated"
+    assert cleanup["localBrowserCdpPortStatus"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_env_close_refuses_to_kill_local_browser_when_identity_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    monkeypatch.setattr(browser_module, "_local_process_is_running", lambda pid: True)
+    monkeypatch.setattr(
+        browser_module,
+        "_local_process_identity_status",
+        lambda pid, record: {"status": "identity_mismatch", "pid": pid},
+    )
+    monkeypatch.setattr(
+        browser_module, "_tcp_port_is_listening", lambda port, host=None: False
+    )
+    terminated: list[int] = []
+
+    async def fake_terminate(pid: int) -> dict[str, Any]:
+        terminated.append(pid)
+        return {"status": "terminated", "pid": pid}
+
+    monkeypatch.setattr(browser_module, "_terminate_local_process", fake_terminate)
+    _write_env_record(
+        tmp_path,
+        extra={
+            "kind": "local",
+            "ownership": "sdk-created",
+            "attachToExisting": False,
+            "browserProcessId": 123,
+            "cdpHost": "127.0.0.1",
+            "cdpPort": 9333,
+            "userDataDir": "/tmp/narada-browser-dev",
+        },
+    )
+
+    closed = await env_close(env_id="dev", proof_root=tmp_path)
+
+    assert closed.status == "failed"
+    assert terminated == []
+    assert closed.payload["environment"]["status"] == "close_failed"
+    assert closed.payload["environment"]["localBrowserProcessStatus"] == (
+        "identity_mismatch"
+    )
+    assert closed.payload["environment"]["localBrowserProcessIdentity"] == {
+        "status": "identity_mismatch",
+        "pid": 123,
+    }
+    command_row = json.loads(
+        (tmp_path / "commands.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert "browser_environment_process_cleanup_failed" in command_row["warnings"]
+    cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
+    assert cleanup["status"] == "failed"
+    assert cleanup["localBrowserProcessStatus"] == "identity_mismatch"
+
+
+def test_local_process_identity_requires_exact_debug_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        browser_module,
+        "_process_command_line",
+        lambda pid: (
+            "/Applications/Chrome --remote-debugging-port=93330 "
+            "--user-data-dir=/tmp/narada-browser-dev"
+        ),
+    )
+
+    status = browser_module._local_process_identity_status(
+        123,
+        {"cdpPort": 9333, "userDataDir": "/tmp/narada-browser-dev"},
+    )
+
+    assert status["status"] == "identity_mismatch"
+    assert "--remote-debugging-port=9333" in status["missingMarkers"]
+
+
+def test_local_process_identity_requires_exact_user_data_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        browser_module,
+        "_process_command_line",
+        lambda pid: (
+            "/Applications/Chrome --remote-debugging-port=9333 "
+            "--user-data-dir=/tmp/narada-browser-dev-old"
+        ),
+    )
+
+    status = browser_module._local_process_identity_status(
+        123,
+        {"cdpPort": 9333, "userDataDir": "/tmp/narada-browser-dev"},
+    )
+
+    assert status["status"] == "identity_mismatch"
+    assert "--user-data-dir=/tmp/narada-browser-dev" in status["missingMarkers"]
+
+
+def test_local_process_identity_accepts_exact_launch_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        browser_module,
+        "_process_command_line",
+        lambda pid: (
+            "/Applications/Chrome --remote-debugging-port=9333 "
+            "--user-data-dir=/tmp/narada-browser-dev --new-window"
+        ),
+    )
+
+    status = browser_module._local_process_identity_status(
+        123,
+        {"cdpPort": 9333, "userDataDir": "/tmp/narada-browser-dev"},
+    )
+
+    assert status == {"status": "verified", "pid": 123}
+
+
+@pytest.mark.asyncio
+async def test_env_close_fails_if_sdk_created_local_cdp_port_stays_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        browser_module, "RemoteBrowserEnvironment", _FakeRemoteEnvironment
+    )
+    monkeypatch.setattr(browser_module, "_local_process_is_running", lambda pid: False)
+    monkeypatch.setattr(
+        browser_module, "_tcp_port_is_listening", lambda port, host=None: True
+    )
+    _write_env_record(
+        tmp_path,
+        extra={
+            "kind": "local",
+            "ownership": "sdk-created",
+            "attachToExisting": False,
+            "browserProcessId": 123,
+            "cdpPort": 9333,
+        },
+    )
+
+    closed = await env_close(env_id="dev", proof_root=tmp_path)
+
+    assert closed.status == "failed"
+    assert closed.payload["environment"]["status"] == "close_failed"
+    assert closed.payload["environment"]["closeBehavior"] == "process_cleanup_failed"
+    assert closed.payload["environment"]["localBrowserProcessStatus"] == (
+        "already_exited"
+    )
+    assert closed.payload["environment"]["localBrowserCdpPortStatus"] == "listening"
+    cleanup = json.loads((tmp_path / "cleanup" / "status.json").read_text())
+    assert cleanup["status"] == "failed"
+    assert cleanup["localBrowserCdpPortStatus"] == "listening"
+    score = score_proof_root(tmp_path)
+    assert score["status"] == "tainted"
+    assert any(taint["code"] == "cleanup_failed" for taint in score["taints"])
 
 
 def test_cli_browser_find_requires_proof_root() -> None:

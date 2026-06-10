@@ -1113,6 +1113,14 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             launch_url,
         ]
 
+        # Local branch-dev verification only: keep this out of the public CLI surface.
+        # It lets the existing SDK/workbench launch path load an unpacked dev extension.
+        local_dev_extension_paths = _local_dev_extension_launch_paths_from_env()
+        if local_dev_extension_paths:
+            extension_arg = ",".join(str(path) for path in local_dev_extension_paths)
+            browser_args.insert(3, f"--load-extension={extension_arg}")
+            browser_args.insert(3, f"--disable-extensions-except={extension_arg}")
+
         # Add proxy arguments if configured.
         if config.proxy is not None:
             config.proxy.validate()
@@ -1886,3 +1894,28 @@ async def _stop_cloud_browser_session(
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
     return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
+
+
+def _local_dev_extension_launch_paths_from_env() -> list[Path]:
+    raw_paths = os.environ.get("NARADA_LOCAL_DEV_EXTENSION_LOAD_PATH")
+    if not raw_paths:
+        return []
+
+    paths: list[Path] = []
+    for raw_path in raw_paths.split(os.pathsep):
+        if not raw_path:
+            continue
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_dir():
+            raise RuntimeError(
+                "NARADA_LOCAL_DEV_EXTENSION_LOAD_PATH must point to an unpacked "
+                f"Chrome extension directory; got {str(path)!r}"
+            )
+        if not (path / "manifest.json").is_file():
+            raise RuntimeError(
+                "NARADA_LOCAL_DEV_EXTENSION_LOAD_PATH must contain manifest.json; "
+                f"got {str(path)!r}"
+            )
+        paths.append(path)
+
+    return paths

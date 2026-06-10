@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import os
 import re
 import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,6 +51,7 @@ from narada.workbench import (
 )
 
 BROWSER_WORKBENCH_SCREENSHOT_TIMEOUT_MS = 45_000
+LOCAL_BROWSER_PROCESS_CLEANUP_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -152,6 +160,238 @@ def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _local_process_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+async def _terminate_local_process(
+    pid: int, *, timeout_s: float = LOCAL_BROWSER_PROCESS_CLEANUP_TIMEOUT_S
+) -> dict[str, Any]:
+    if not _local_process_is_running(pid):
+        return {"status": "already_exited", "pid": pid}
+
+    if sys.platform == "win32":
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except Exception as exc:  # pragma: no cover - platform-specific fallback.
+            return {
+                "status": "terminate_failed",
+                "pid": pid,
+                "error": _redact_sensitive_text(f"{type(exc).__name__}: {exc}"),
+            }
+        if result.returncode == 0 or not _local_process_is_running(pid):
+            return {"status": "terminated", "pid": pid}
+        return {
+            "status": "terminate_failed",
+            "pid": pid,
+            "error": _redact_sensitive_text(result.stderr or result.stdout),
+        }
+
+    try:
+        process_group_id = os.getpgid(pid)
+    except ProcessLookupError:
+        return {"status": "already_exited", "pid": pid}
+    except Exception as exc:
+        return {
+            "status": "terminate_failed",
+            "pid": pid,
+            "error": _redact_sensitive_text(f"{type(exc).__name__}: {exc}"),
+        }
+
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        return {"status": "already_exited", "pid": pid}
+    except PermissionError as exc:
+        return {
+            "status": "terminate_failed",
+            "pid": pid,
+            "error": _redact_sensitive_text(f"{type(exc).__name__}: {exc}"),
+        }
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not _local_process_is_running(pid):
+            return {"status": "terminated", "pid": pid}
+        await asyncio.sleep(0.1)
+
+    try:
+        os.killpg(process_group_id, signal.SIGKILL)
+    except ProcessLookupError:
+        return {"status": "terminated", "pid": pid}
+    except PermissionError as exc:
+        return {
+            "status": "terminate_failed",
+            "pid": pid,
+            "error": _redact_sensitive_text(f"{type(exc).__name__}: {exc}"),
+        }
+
+    deadline = time.monotonic() + min(timeout_s, 2.0)
+    while time.monotonic() < deadline:
+        if not _local_process_is_running(pid):
+            return {"status": "terminated", "pid": pid, "forced": True}
+        await asyncio.sleep(0.1)
+
+    return {"status": "terminate_failed", "pid": pid, "error": "process remained alive"}
+
+
+def _process_command_line(pid: int) -> str | None:
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                [
+                    "wmic",
+                    "process",
+                    "where",
+                    f"ProcessId={pid}",
+                    "get",
+                    "CommandLine",
+                    "/value",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            if line.startswith("CommandLine="):
+                return line.removeprefix("CommandLine=").strip() or None
+        return None
+
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _command_line_has_exact_option_value(
+    command_line: str,
+    option: str,
+    value: Any,
+) -> bool:
+    if value is None:
+        return False
+    expected = f"--{option}={value}"
+    return re.search(rf"(?<!\S){re.escape(expected)}(?!\S)", command_line) is not None
+
+
+def _local_process_identity_status(pid: int, record: dict[str, Any]) -> dict[str, Any]:
+    command_line = _process_command_line(pid)
+    if not command_line:
+        return {"status": "identity_unverified", "pid": pid}
+
+    expected_options = {
+        "remote-debugging-port": record.get("cdpPort"),
+        "user-data-dir": record.get("userDataDir"),
+    }
+    if any(value is None for value in expected_options.values()):
+        return {"status": "identity_unverified", "pid": pid}
+
+    missing = [
+        f"--{option}={value}"
+        for option, value in expected_options.items()
+        if not _command_line_has_exact_option_value(command_line, option, value)
+    ]
+    if missing:
+        return {
+            "status": "identity_mismatch",
+            "pid": pid,
+            "missingMarkers": missing,
+        }
+    return {"status": "verified", "pid": pid}
+
+
+def _tcp_port_is_listening(port: int, host: str | None = None) -> bool:
+    hosts = (host,) if host else ("127.0.0.1", "::1")
+    for candidate_host in hosts:
+        try:
+            with socket.create_connection((candidate_host, port), timeout=0.25):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+async def _cleanup_sdk_created_local_browser_process(
+    record: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    process_id = _positive_int(record.get("browserProcessId"))
+    cdp_port = _positive_int(record.get("cdpPort"))
+    cdp_host = record.get("cdpHost")
+    updates: dict[str, Any] = {}
+    warnings: list[str] = []
+    failures: list[str] = []
+
+    if process_id is None:
+        updates["localBrowserProcessStatus"] = "not_tracked"
+    elif _local_process_is_running(process_id):
+        identity = _local_process_identity_status(process_id, record)
+        updates["localBrowserProcessIdentity"] = identity
+        if identity["status"] != "verified":
+            updates["localBrowserProcessStatus"] = identity["status"]
+            failures.append("local_browser_process_identity_not_verified")
+        else:
+            process_cleanup = await _terminate_local_process(process_id)
+            updates["localBrowserProcessStatus"] = process_cleanup["status"]
+            updates["localBrowserProcessCleanup"] = process_cleanup
+            if process_cleanup["status"] == "terminated":
+                warnings.append("local_browser_process_terminated_after_remote_close")
+            elif process_cleanup["status"] != "already_exited":
+                failures.append("local_browser_process_cleanup_failed")
+    else:
+        updates["localBrowserProcessStatus"] = "already_exited"
+
+    if cdp_port is not None:
+        if _tcp_port_is_listening(
+            cdp_port, cdp_host if isinstance(cdp_host, str) else None
+        ):
+            updates["localBrowserCdpPortStatus"] = "listening"
+            failures.append("local_browser_cdp_port_still_listening")
+        else:
+            updates["localBrowserCdpPortStatus"] = "closed"
+
+    return updates, warnings, failures
 
 
 def _artifact(
@@ -465,6 +705,11 @@ async def env_open(
         )
 
     config = BrowserConfig(
+        executable_path=os.environ.get(
+            "NARADA_LOCAL_DEV_CHROME_EXECUTABLE_PATH",
+            BrowserConfig().executable_path,
+        ),
+        cdp_host=os.environ.get("NARADA_LOCAL_DEV_CDP_HOST", BrowserConfig().cdp_host),
         initialization_url=initialization_url or BrowserConfig().initialization_url,
         cdp_port=cdp_port or BrowserConfig().cdp_port,
         extension_id=extension_id or BrowserConfig().extension_id,
@@ -489,9 +734,13 @@ async def env_open(
         "apiBaseUrl": api_base_url,
         "apiBaseUrlOrigin": _origin(api_base_url),
         "initializationUrlOrigin": _origin(config.initialization_url),
+        "chromeExecutablePath": config.executable_path,
+        "cdpHost": config.cdp_host,
         "cdpPort": config.cdp_port,
         "extensionId": config.extension_id,
+        "userDataDir": config.user_data_dir,
         "attachToExisting": attach_to_existing,
+        "ownership": "sdk-created" if not attach_to_existing else "adopted",
     }
     artifact = _write_env(root, name, record)
     await env._stop_playwright()
@@ -543,6 +792,10 @@ async def env_close(
     root = _browser_root(proof_root, f"browser-env-{env_id}")
     record = _load_env(root, env_id)
     is_adopted = record.get("adoptedBrowserWindow") is True
+    is_sdk_created_local = (
+        record.get("ownership") == "sdk-created"
+        and record.get("attachToExisting") is not True
+    )
     warnings: list[str] = []
     if is_adopted and not close_adopted:
         record = {
@@ -553,19 +806,62 @@ async def env_close(
         warnings.append("adopted_browser_not_closed")
     else:
         env = _remote_env(record, base_url=base_url)
-        await env.close(timeout=30)
-        record = {**record, "status": "closed", "closeBehavior": "closed"}
+        try:
+            await env.close(timeout=30)
+        except Exception as exc:
+            close_error = _redact_sensitive_text(
+                f"{type(exc).__name__}: {str(exc) or '<empty>'}"
+            )
+            record = {
+                **record,
+                "status": "close_failed",
+                "closeBehavior": "close_failed",
+                "closeError": close_error,
+            }
+            warnings.append("browser_environment_close_failed")
+        else:
+            cleanup_failures: list[str] = []
+            if is_sdk_created_local:
+                (
+                    process_updates,
+                    process_warnings,
+                    cleanup_failures,
+                ) = await _cleanup_sdk_created_local_browser_process(record)
+                record = {**record, **process_updates}
+                warnings.extend(process_warnings)
+            if cleanup_failures:
+                record = {
+                    **record,
+                    "status": "close_failed",
+                    "closeBehavior": "process_cleanup_failed",
+                    "closeError": "; ".join(cleanup_failures),
+                }
+                warnings.append("browser_environment_process_cleanup_failed")
+            else:
+                record = {**record, "status": "closed", "closeBehavior": "closed"}
     artifact = _write_env_lifecycle_snapshot(
         root, env_id, str(record["status"]), record
     )
     _write_json(
         root / "cleanup" / "status.json",
-        {"status": "passed", "browserEnvironmentStatus": record["status"]},
+        {
+            "status": "failed" if record["status"] == "close_failed" else "passed",
+            "browserEnvironmentStatus": record["status"],
+            "browserProcessId": record.get("browserProcessId"),
+            "localBrowserProcessStatus": record.get("localBrowserProcessStatus"),
+            "localBrowserProcessIdentity": record.get("localBrowserProcessIdentity"),
+            "localBrowserCdpPortStatus": record.get("localBrowserCdpPortStatus"),
+            **(
+                {"error": record["closeError"]}
+                if record.get("closeError") is not None
+                else {}
+            ),
+        },
     )
     return _finish_command(
         root,
         command="env.close",
-        status="passed",
+        status="failed" if record["status"] == "close_failed" else "passed",
         payload={"environment": record},
         artifacts=[artifact],
         warnings=warnings,
