@@ -178,6 +178,20 @@ class ReadExcelSheetTrace(TypedDict):
     description: str
 
 
+class SendEmailTrace(TypedDict):
+    step_type: Literal["sendEmail"]
+    url: NotRequired[str]
+    description: str
+    providerResponse: NotRequired[dict[str, Any]]
+
+
+class SendSlackMessageTrace(TypedDict):
+    step_type: Literal["sendSlackMessage"]
+    url: NotRequired[str]
+    description: str
+    providerResponse: NotRequired[dict[str, Any]]
+
+
 class WriteGoogleSheetTrace(TypedDict):
     step_type: Literal["writeGoogleSheet"]
     url: str
@@ -372,6 +386,8 @@ ApaStepTrace = (
     | ReadCsvTrace
     | ReadGoogleSheetTrace
     | ReadExcelSheetTrace
+    | SendEmailTrace
+    | SendSlackMessageTrace
     | WriteGoogleSheetTrace
     | WriteExcelSheetTrace
     | DataTableExportAsCsvTrace
