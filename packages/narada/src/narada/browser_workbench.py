@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import aiohttp
 from narada_core.actions.models import (
     BrowserActionResponse,
     BrowserClickNrdRequest,
@@ -36,7 +37,11 @@ from narada_core.actions.models import (
 )
 
 from narada.config import BrowserConfig
-from narada.environment import BrowserEnvironment, RemoteBrowserEnvironment
+from narada.environment import (
+    BrowserEnvironment,
+    CloudBrowserEnvironment,
+    RemoteBrowserEnvironment,
+)
 from narada.workbench import (
     _default_out_dir,
     _redact_sensitive_text,
@@ -476,8 +481,12 @@ def _remote_env(
     browser_window_id = record.get("browserWindowId")
     if not isinstance(browser_window_id, str) or not browser_window_id:
         raise ValueError("Browser environment record has no browserWindowId")
+    cloud_browser_session_id = record.get("cloudBrowserSessionId")
     return RemoteBrowserEnvironment(
         browser_window_id=browser_window_id,
+        cloud_browser_session_id=cloud_browser_session_id
+        if isinstance(cloud_browser_session_id, str)
+        else None,
         auth_headers=default_auth_headers(),
         base_url=base_url or record.get("apiBaseUrl") or default_api_base_url(),
     )
@@ -489,12 +498,49 @@ def _write_env(root: Path, env_id: str, record: dict[str, Any]) -> dict[str, Any
     return _artifact(root, path, "browser-environment", sensitive=False)
 
 
+def _env_command_ids(
+    env_id: str, record: dict[str, Any], extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    ids = {
+        "envId": env_id,
+        "browserWindowId": record.get("browserWindowId"),
+    }
+    cloud_session_id = record.get("cloudBrowserSessionId")
+    if isinstance(cloud_session_id, str) and cloud_session_id:
+        ids["cloudBrowserSessionId"] = cloud_session_id
+    if extra:
+        ids.update(extra)
+    return ids
+
+
 def _write_env_lifecycle_snapshot(
     root: Path, env_id: str, status: str, record: dict[str, Any]
 ) -> dict[str, Any]:
     path = root / "browser" / "environments" / f"{_safe_slug(env_id)}-{status}.json"
     _write_json(path, record)
     return _artifact(root, path, "browser-environment", sensitive=False)
+
+
+def _append_cloud_session_lifecycle(
+    root: Path, record: dict[str, Any], row: dict[str, Any]
+) -> dict[str, Any] | None:
+    session_id = record.get("cloudBrowserSessionId")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    session_dir = root / "browser" / "cloud-sessions" / _safe_slug(session_id)
+    path = session_dir / "status.jsonl"
+    payload = {
+        "schemaVersion": 1,
+        "cloudBrowserSessionId": session_id,
+        "envId": record.get("id"),
+        **row,
+    }
+    _append_jsonl(path, payload)
+    event_path = session_dir / "events" / f"{uuid.uuid4().hex}.json"
+    _write_json(event_path, payload)
+    return _artifact(
+        root, event_path, "cloud-browser-session-lifecycle-event", sensitive=False
+    )
 
 
 def _snapshot_dir(root: Path, snapshot_id: str) -> Path:
@@ -646,6 +692,81 @@ def _decode_base64_content(value: str) -> bytes:
     return base64.b64decode(content, validate=False)
 
 
+async def _download_to_file(url: str, destination: Path) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_destination = destination.with_suffix(f"{destination.suffix}.tmp")
+    byte_count = 0
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            resp.raise_for_status()
+            with temp_destination.open("wb") as output:
+                async for chunk in resp.content.iter_chunked(1024 * 1024):
+                    output.write(chunk)
+                    byte_count += len(chunk)
+    temp_destination.replace(destination)
+    return byte_count
+
+
+async def _materialize_cloud_browser_downloads(
+    *,
+    root: Path,
+    env_id: str,
+    record: dict[str, Any],
+    command_id: str,
+    env: RemoteBrowserEnvironment,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    downloads = await env.get_downloaded_files()
+    download_dir = root / "downloads" / command_id
+    artifacts: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for index, item in enumerate(downloads):
+        destination = (
+            download_dir / f"{index:03d}-{_safe_slug(item.file_name or 'download')}"
+        )
+        try:
+            byte_size = await _download_to_file(item.download_url, destination)
+        except Exception as exc:
+            rows.append(
+                {
+                    "source": "cloud-browser-replay",
+                    "envId": env_id,
+                    "cloudBrowserSessionId": record.get("cloudBrowserSessionId"),
+                    "fileName": item.file_name,
+                    "sourceS3Key": item.source_key,
+                    "size": item.size,
+                    "downloadStatus": "failed",
+                    "error": _redact_sensitive_text(str(exc)),
+                    "redactedDownloadUrl": _redact_url(item.download_url),
+                }
+            )
+            warnings.append("cloud_download_fetch_failed")
+            continue
+        artifact = _artifact(root, destination, "cloud-browser-download")
+        artifact["sensitive"] = True
+        artifacts.append(artifact)
+        rows.append(
+            {
+                "source": "cloud-browser-replay",
+                "envId": env_id,
+                "cloudBrowserSessionId": record.get("cloudBrowserSessionId"),
+                "fileName": item.file_name,
+                "sourceS3Key": item.source_key,
+                "size": item.size,
+                "path": artifact["path"],
+                "sha256": artifact["sha256"],
+                "byteSize": byte_size,
+                "downloadStatus": "downloaded",
+                "redactedDownloadUrl": _redact_url(item.download_url),
+            }
+        )
+    if not downloads:
+        warnings.append("cloud_download_capture_empty")
+    elif not artifacts:
+        warnings.append("cloud_download_bytes_not_materialized")
+    return artifacts, rows, warnings
+
+
 async def env_open(
     *,
     name: str,
@@ -659,16 +780,37 @@ async def env_open(
     profile_directory: str | None = None,
     attach_to_existing: bool = False,
     browser_window_id: str | None = None,
+    cloud_browser_session_id: str | None = None,
+    session_name: str | None = None,
+    session_timeout: int | None = None,
+    dev_app_origin_override: str | None = None,
+    dev_extension_s3_bucket: str | None = None,
+    dev_extension_s3_key: str | None = None,
 ) -> BrowserWorkbenchCommandResult:
-    if kind != "local":
-        raise ValueError("M4 supports only --kind local")
+    if kind not in {"local", "cloud"}:
+        raise ValueError("M5 supports --kind local or --kind cloud")
+    if kind == "local" and cloud_browser_session_id is not None:
+        raise ValueError("--cloud-browser-session-id requires --kind cloud")
+    if kind == "local" and any(
+        (dev_app_origin_override, dev_extension_s3_bucket, dev_extension_s3_key)
+    ):
+        raise ValueError("Cloud Browser dev overrides require --kind cloud")
+    if bool(dev_extension_s3_bucket) != bool(dev_extension_s3_key):
+        raise ValueError(
+            "--dev-extension-s3-bucket and --dev-extension-s3-key must be provided together"
+        )
     root = _browser_root(proof_root, f"browser-env-{name}")
     if (root / "commands.jsonl").exists():
         _add_manifest_taint(root, "proof_root_preexisting")
     api_base_url = base_url or default_api_base_url()
     if browser_window_id is not None:
+        if kind == "cloud" and not cloud_browser_session_id:
+            raise ValueError(
+                "--kind cloud adoption requires --cloud-browser-session-id"
+            )
         remote = RemoteBrowserEnvironment(
             browser_window_id=browser_window_id,
+            cloud_browser_session_id=cloud_browser_session_id,
             auth_headers=default_auth_headers(),
             base_url=api_base_url,
         )
@@ -681,6 +823,7 @@ async def env_open(
             "kind": kind,
             "status": "open",
             "browserWindowId": browser_window_id,
+            "cloudBrowserSessionId": cloud_browser_session_id,
             "browserProcessId": None,
             "apiBaseUrl": api_base_url,
             "apiBaseUrlOrigin": _origin(api_base_url),
@@ -691,16 +834,85 @@ async def env_open(
             "extensionId": extension_id,
             "attachToExisting": True,
             "adoptedBrowserWindow": True,
+            "ownership": "adopted",
+            "sessionName": session_name,
+            "sessionTimeout": session_timeout,
             "verifiedCurrentUrl": current_url,
         }
         artifact = _write_env(root, name, record)
+        cloud_artifact = _append_cloud_session_lifecycle(
+            root,
+            record,
+            {
+                "status": "open",
+                "ownership": "adopted",
+                "event": "env.open",
+            },
+        )
+        artifacts = [artifact, *([cloud_artifact] if cloud_artifact else [])]
         return _finish_command(
             root,
             command="env.open",
             status="passed",
             payload={"environment": record},
-            artifacts=[artifact],
-            ids={"envId": name, "browserWindowId": browser_window_id},
+            artifacts=artifacts,
+            ids=_env_command_ids(name, record),
+            inputs={"kind": kind, "apiBaseUrlOrigin": record["apiBaseUrlOrigin"]},
+        )
+
+    if kind == "cloud":
+        env = CloudBrowserEnvironment(
+            auth_headers=default_auth_headers(),
+            base_url=api_base_url,
+            config=BrowserConfig(interactive=False),
+            session_name=session_name,
+            session_timeout=session_timeout,
+            dev_app_origin_override=dev_app_origin_override,
+            dev_extension_s3_bucket=dev_extension_s3_bucket,
+            dev_extension_s3_key=dev_extension_s3_key,
+        )
+        await env.start()
+        record = {
+            "schemaVersion": 1,
+            "id": name,
+            "kind": kind,
+            "status": "open",
+            "browserWindowId": env.browser_window_id,
+            "cloudBrowserSessionId": env.cloud_browser_session_id,
+            "browserProcessId": None,
+            "apiBaseUrl": api_base_url,
+            "apiBaseUrlOrigin": _origin(api_base_url),
+            "initializationUrlOrigin": _origin(
+                env._initialization_url or env._config.initialization_url
+            ),
+            "devAppOriginOverride": dev_app_origin_override,
+            "devExtensionS3Bucket": dev_extension_s3_bucket,
+            "devExtensionS3Key": dev_extension_s3_key,
+            "sessionName": session_name,
+            "sessionTimeout": session_timeout,
+            "ownership": "sdk-created",
+            "attachToExisting": False,
+            "adoptedBrowserWindow": False,
+        }
+        artifact = _write_env(root, name, record)
+        cloud_artifact = _append_cloud_session_lifecycle(
+            root,
+            record,
+            {
+                "status": "open",
+                "ownership": "sdk-created",
+                "event": "env.open",
+            },
+        )
+        await env._stop_playwright()
+        artifacts = [artifact, *([cloud_artifact] if cloud_artifact else [])]
+        return _finish_command(
+            root,
+            command="env.open",
+            status="passed",
+            payload={"environment": record},
+            artifacts=artifacts,
+            ids=_env_command_ids(name, record),
             inputs={"kind": kind, "apiBaseUrlOrigin": record["apiBaseUrlOrigin"]},
         )
 
@@ -750,7 +962,7 @@ async def env_open(
         status="passed",
         payload={"environment": record},
         artifacts=[artifact],
-        ids={"envId": name, "browserWindowId": env.browser_window_id},
+        ids=_env_command_ids(name, record),
         inputs={"kind": kind, "apiBaseUrlOrigin": record["apiBaseUrlOrigin"]},
     )
 
@@ -770,7 +982,12 @@ async def env_status(
         response = await env._run_extension_action(GetUrlRequest(), GetUrlResponse)
         url = response.url
     except Exception as exc:
-        warnings.append(_redact_sensitive_text(str(exc)))
+        message = str(exc)
+        warnings.append(
+            _redact_sensitive_text(
+                f"{type(exc).__name__}: {message if message else '<empty>'}"
+            )
+        )
     payload = {"environment": record, "currentUrl": url}
     return _finish_command(
         root,
@@ -778,7 +995,7 @@ async def env_status(
         status="passed" if url is not None else "needs_review",
         payload=payload,
         warnings=warnings,
-        ids={"envId": env_id, "browserWindowId": record.get("browserWindowId")},
+        ids=_env_command_ids(env_id, record),
     )
 
 
@@ -792,10 +1009,13 @@ async def env_close(
     root = _browser_root(proof_root, f"browser-env-{env_id}")
     record = _load_env(root, env_id)
     is_adopted = record.get("adoptedBrowserWindow") is True
+    is_cloud = isinstance(record.get("cloudBrowserSessionId"), str)
     is_sdk_created_local = (
-        record.get("ownership") == "sdk-created"
+        not is_cloud
+        and record.get("ownership") == "sdk-created"
         and record.get("attachToExisting") is not True
     )
+    ownership = record.get("ownership")
     warnings: list[str] = []
     if is_adopted and not close_adopted:
         record = {
@@ -803,7 +1023,11 @@ async def env_close(
             "status": "detached",
             "closeBehavior": "adopted_browser_not_closed",
         }
-        warnings.append("adopted_browser_not_closed")
+        warnings.append(
+            "adopted_cloud_browser_not_stopped"
+            if is_cloud
+            else "adopted_browser_not_closed"
+        )
     else:
         env = _remote_env(record, base_url=base_url)
         try:
@@ -842,6 +1066,16 @@ async def env_close(
     artifact = _write_env_lifecycle_snapshot(
         root, env_id, str(record["status"]), record
     )
+    cloud_artifact = _append_cloud_session_lifecycle(
+        root,
+        record,
+        {
+            "status": record["status"],
+            "ownership": ownership,
+            "event": "env.close",
+            "closeBehavior": record.get("closeBehavior"),
+        },
+    )
     _write_json(
         root / "cleanup" / "status.json",
         {
@@ -851,6 +1085,8 @@ async def env_close(
             "localBrowserProcessStatus": record.get("localBrowserProcessStatus"),
             "localBrowserProcessIdentity": record.get("localBrowserProcessIdentity"),
             "localBrowserCdpPortStatus": record.get("localBrowserCdpPortStatus"),
+            "cloudBrowserSessionId": record.get("cloudBrowserSessionId"),
+            "cloudBrowserOwnership": ownership,
             **(
                 {"error": record["closeError"]}
                 if record.get("closeError") is not None
@@ -858,14 +1094,15 @@ async def env_close(
             ),
         },
     )
+    artifacts = [artifact, *([cloud_artifact] if cloud_artifact else [])]
     return _finish_command(
         root,
         command="env.close",
         status="failed" if record["status"] == "close_failed" else "passed",
         payload={"environment": record},
-        artifacts=[artifact],
+        artifacts=artifacts,
         warnings=warnings,
-        ids={"envId": env_id, "browserWindowId": record.get("browserWindowId")},
+        ids=_env_command_ids(env_id, record),
     )
 
 
@@ -895,7 +1132,7 @@ async def browser_goto(
         command="browser.goto",
         status="passed",
         payload=action_row,
-        ids={"envId": env_id, "browserWindowId": record.get("browserWindowId")},
+        ids=_env_command_ids(env_id, record),
         inputs={"url": url},
     )
 
@@ -935,7 +1172,7 @@ async def browser_snapshot(
         },
         artifacts=artifacts,
         warnings=warnings,
-        ids={"envId": env_id, "snapshotId": snapshot.snapshot_id},
+        ids=_env_command_ids(env_id, record, {"snapshotId": snapshot.snapshot_id}),
     )
 
 
@@ -1083,12 +1320,15 @@ async def browser_nrd_action(
         payload=payload,
         artifacts=artifacts,
         warnings=warnings,
-        ids={
-            "envId": env_id,
-            "snapshotId": snapshot_id,
-            "dataNrd": data_nrd,
-            "postSnapshotId": payload.get("postSnapshotId"),
-        },
+        ids=_env_command_ids(
+            env_id,
+            record,
+            {
+                "snapshotId": snapshot_id,
+                "dataNrd": data_nrd,
+                "postSnapshotId": payload.get("postSnapshotId"),
+            },
+        ),
     )
 
 
@@ -1143,7 +1383,7 @@ async def browser_screenshot(
             status="needs_review",
             payload=row,
             warnings=["browser_screenshot_capture_failed"],
-            ids={"envId": env_id},
+            ids=_env_command_ids(env_id, record),
         )
     data = _decode_base64_content(screenshot.base64_content)
     path = root / "browser" / "screenshots" / f"{uuid.uuid4().hex}.png"
@@ -1164,7 +1404,7 @@ async def browser_screenshot(
         status="passed",
         payload=row,
         artifacts=[artifact],
-        ids={"envId": env_id},
+        ids=_env_command_ids(env_id, record),
     )
 
 
@@ -1177,13 +1417,44 @@ async def browser_downloads(
     root = _browser_root(proof_root, f"browser-{env_id}")
     record = _load_env(root, env_id)
     env = _remote_env(record, base_url=base_url)
+    command_id = f"cmd_{uuid.uuid4().hex}"
+    if record.get("cloudBrowserSessionId"):
+        (
+            download_artifacts,
+            downloaded_rows,
+            warnings,
+        ) = await _materialize_cloud_browser_downloads(
+            root=root,
+            env_id=env_id,
+            record=record,
+            command_id=command_id,
+            env=env,
+        )
+        row = {
+            "envId": env_id,
+            "source": "cloud-browser-replay",
+            "cloudBrowserSessionId": record.get("cloudBrowserSessionId"),
+            "downloads": downloaded_rows,
+            "captureSupported": True,
+        }
+        _append_jsonl(root / "downloads.jsonl", row)
+        return _finish_command(
+            root,
+            command="browser.downloads",
+            status="passed" if download_artifacts and not warnings else "needs_review",
+            payload=row,
+            artifacts=download_artifacts,
+            warnings=warnings,
+            command_id=command_id,
+            ids=_env_command_ids(env_id, record),
+        )
+
     started_after = _proof_root_started_after(root)
     response = await env._run_extension_action(
         BrowserDownloadsRequest(started_after=started_after),
         BrowserDownloadsResponse,
         timeout=30,
     )
-    command_id = f"cmd_{uuid.uuid4().hex}"
     download_artifacts: list[dict[str, Any]] = []
     sanitized_downloads: list[dict[str, Any]] = []
     download_dir = root / "downloads" / command_id
@@ -1255,5 +1526,5 @@ async def browser_downloads(
         artifacts=download_artifacts,
         warnings=warnings,
         command_id=command_id,
-        ids={"envId": env_id},
+        ids=_env_command_ids(env_id, record),
     )

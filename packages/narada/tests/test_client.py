@@ -125,8 +125,19 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
     async def wait_for_browser_window_id(*args: object, **kwargs: object) -> str:
         return "window-123"
 
+    async def wait_for_cloud_side_panel_page(
+        *args: object, **kwargs: object
+    ) -> _FakePage:
+        side_panel_page = _FakePage()
+        side_panel_page.url = "chrome-extension://dev-extension/sidepanel.html"
+        side_panel_page.context = _FakeContext(side_panel_page)
+        return side_panel_page
+
     monkeypatch.setattr(
         env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_side_panel_page", wait_for_cloud_side_panel_page
     )
 
     await env._initialize_cloud_browser_window(

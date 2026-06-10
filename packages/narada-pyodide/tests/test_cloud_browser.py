@@ -12,6 +12,7 @@ from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
 )
+from narada_core.models import AgentKind
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -147,6 +148,24 @@ async def test_cloud_browser_environment_maps_backend_response(
         "require_extension": True,
         "initiator_remote_dispatch_request_id": "request-maps-123",
     }
+
+
+def test_local_browser_window_legacy_import_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
+    monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
+    pyfetch = AsyncMock(side_effect=[_sdk_config_response()])
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    window = narada_pkg.LocalBrowserWindow()
+
+    assert isinstance(window, narada_pkg.Agent)
+    assert window.kind is AgentKind.OPERATOR
+    assert window.environment.browser_window_id == "browser-window-123"
+    assert narada_pkg.Agent.OPERATOR is AgentKind.OPERATOR
+    assert narada_pkg.Agent.PRODUCTIVITY is AgentKind.PRODUCTIVITY
+    assert narada_pkg.Agent.CORE_AGENT is AgentKind.CORE_AGENT
 
 
 @pytest.mark.asyncio
@@ -708,6 +727,63 @@ async def test_dispatch_request_emits_success_text_and_execution_trace_context(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_request_emits_workflow_trace_children_as_action_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_children = [
+        {
+            "kind": "output",
+            "text": "TRACE_CHILD_DONE",
+            "channel": "stdout",
+        }
+    ]
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "req-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": {
+                        "text": "TRACE_PARENT_CHILD_DONE",
+                        "workflowTrace": {
+                            "status": "success",
+                            "runtime": "python",
+                            "children": workflow_children,
+                        },
+                    },
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await env._dispatch_request(
+        prompt="run child workflow",
+        agent="/$USER/childWorkflow",
+    )
+
+    assert response["status"] == "success"
+    assert len(emitted_events) == 1
+    parsed_event = json.loads(emitted_events[0])
+    assert parsed_event["text"] == "TRACE_PARENT_CHILD_DONE"
+    assert parsed_event["action_trace"] == workflow_children
+
+
+@pytest.mark.asyncio
 async def test_dispatch_request_preserves_current_file_variable_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -817,6 +893,7 @@ async def test_cloud_browser_downloads_return_presigned_urls(
             file_name="report.pdf",
             size=42,
             download_url="https://example.com/report.pdf",
+            source_key="downloads/session-123/report.pdf",
         )
     ]
     first_call, second_call = pyfetch.await_args_list
@@ -859,6 +936,7 @@ async def test_lambda_environment_downloads_return_presigned_urls(
             file_name="report.pdf",
             size=42,
             download_url="https://example.com/report.pdf",
+            source_key="downloads/session-123/report.pdf",
         )
     ]
     first_call, second_call = pyfetch.await_args_list

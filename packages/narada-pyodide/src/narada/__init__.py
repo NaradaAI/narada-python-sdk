@@ -12,7 +12,7 @@ from narada_core.models import (
     ResponseContent,
 )
 
-from narada.agent import Agent
+from narada.agent import Agent, LocalBrowserWindow
 from narada.environment import (
     BaseBrowserEnvironment,
     BrowserEnvironment,
@@ -24,6 +24,10 @@ from narada.environment import (
 )
 from narada.utils import download_file, render_html
 from narada.version import __version__
+
+Agent.PRODUCTIVITY = AgentKind.PRODUCTIVITY  # type: ignore[attr-defined]
+Agent.OPERATOR = AgentKind.OPERATOR  # type: ignore[attr-defined]
+Agent.CORE_AGENT = AgentKind.CORE_AGENT  # type: ignore[attr-defined]
 
 __all__ = [
     "__version__",
@@ -39,6 +43,7 @@ __all__ = [
     "Environment",
     "File",
     "LambdaEnvironment",
+    "LocalBrowserWindow",
     "NaradaError",
     "NaradaTimeoutError",
     "ReasoningEffort",
