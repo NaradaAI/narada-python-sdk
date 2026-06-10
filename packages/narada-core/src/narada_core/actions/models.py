@@ -419,6 +419,128 @@ class ExecuteJavaScriptOnPageResponse(BaseModel):
     result: JsonValue
 
 
+class BrowserPageSnapshotRequest(BaseModel):
+    name: Literal["browser_page_snapshot"] = "browser_page_snapshot"
+    snapshot_id: str | None = None
+    max_html_bytes: int = Field(default=500_000, ge=1, le=950_000)
+    include_visible_text: bool = True
+    max_visible_text_bytes: int = Field(default=200_000, ge=1, le=500_000)
+
+
+class BrowserPageSnapshotResponse(BaseModel):
+    snapshot_id: str
+    url: str
+    title: str
+    active: bool
+    html: str
+    html_truncated: bool
+    visible_text: str | None = None
+    visible_text_truncated: bool = False
+    elements: list[dict[str, JsonValue]] = Field(default_factory=list)
+    frames: list[dict[str, JsonValue]] = Field(default_factory=list)
+    meta: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class BrowserFindInSnapshotRequest(BaseModel):
+    name: Literal["browser_find_in_snapshot"] = "browser_find_in_snapshot"
+    text: str | None = None
+    tag_name: str | None = None
+    data_nrd: str | None = None
+    interactive_only: bool = False
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class BrowserFindInSnapshotResponse(BaseModel):
+    matches: list[dict[str, JsonValue]]
+
+
+class BrowserElementHandle(BaseModel):
+    snapshot_id: str = Field(min_length=1)
+    frame_id: str = Field(min_length=1)
+    data_nrd: str = Field(min_length=1)
+    snapshot_url: str = Field(min_length=1)
+    element_fingerprint: str = Field(min_length=1)
+
+
+class BrowserElementInfoRequest(BaseModel):
+    name: Literal["browser_element_info"] = "browser_element_info"
+    handle: BrowserElementHandle
+
+
+class BrowserElementInfoResponse(BaseModel):
+    element: dict[str, JsonValue]
+
+
+class BrowserGetSelectorsRequest(BaseModel):
+    name: Literal["browser_get_selectors"] = "browser_get_selectors"
+    handle: BrowserElementHandle
+
+
+class BrowserGetSelectorsResponse(BaseModel):
+    selectors: dict[str, JsonValue]
+    diagnostic: bool = True
+
+
+class BrowserClickNrdRequest(BaseModel):
+    name: Literal["browser_click_nrd"] = "browser_click_nrd"
+    handle: BrowserElementHandle
+    post_snapshot: bool = True
+
+
+class BrowserFillNrdRequest(BaseModel):
+    name: Literal["browser_fill_nrd"] = "browser_fill_nrd"
+    handle: BrowserElementHandle
+    value: str
+    clear: bool = True
+    post_snapshot: bool = True
+
+
+class BrowserSelectNrdRequest(BaseModel):
+    name: Literal["browser_select_nrd"] = "browser_select_nrd"
+    handle: BrowserElementHandle
+    value: str
+    post_snapshot: bool = True
+
+
+class BrowserActionResponse(BaseModel):
+    status: Literal["performed"] = "performed"
+    post_snapshot: BrowserPageSnapshotResponse | None = None
+
+
+class BrowserSnapshotDiffRequest(BaseModel):
+    name: Literal["browser_snapshot_diff"] = "browser_snapshot_diff"
+    before_html: str
+    after_html: str
+
+
+class BrowserSnapshotDiffResponse(BaseModel):
+    added_text: list[str]
+    removed_text: list[str]
+
+
+class BrowserScreenshotRequest(BaseModel):
+    name: Literal["browser_screenshot"] = "browser_screenshot"
+    timeout_ms: int | None = Field(default=None, ge=1_000, le=60_000)
+
+
+class BrowserScreenshotResponse(BaseModel):
+    base64_content: str
+    name: str
+    mime_type: str
+    timestamp: str
+
+
+class BrowserDownloadsRequest(BaseModel):
+    name: Literal["browser_downloads"] = "browser_downloads"
+    started_after: str | None = None
+
+
+class BrowserDownloadsResponse(BaseModel):
+    downloads: list[dict[str, JsonValue]]
+    capture_supported: bool = True
+    warning: str | None = None
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -477,6 +599,16 @@ type ExtensionActionRequest = (
     | GetScreenshotRequest
     | GetUrlRequest
     | ExecuteJavaScriptOnPageRequest
+    | BrowserPageSnapshotRequest
+    | BrowserFindInSnapshotRequest
+    | BrowserElementInfoRequest
+    | BrowserGetSelectorsRequest
+    | BrowserClickNrdRequest
+    | BrowserFillNrdRequest
+    | BrowserSelectNrdRequest
+    | BrowserSnapshotDiffRequest
+    | BrowserScreenshotRequest
+    | BrowserDownloadsRequest
     | PromptForUserInputRequest
     | UserApprovalRequest
 )

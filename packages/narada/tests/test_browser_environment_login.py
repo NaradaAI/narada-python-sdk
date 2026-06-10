@@ -6,6 +6,19 @@ from narada.config import BrowserConfig
 from narada_core.errors import NaradaExtensionUnauthenticatedError
 
 
+def test_initialization_tag_preserves_existing_query_params() -> None:
+    import narada.environment as environment_module
+
+    tagged_url = environment_module._with_query_params(
+        "http://localhost:3000/blank?narada-sidepanel-test=1",
+        {"t": "window-tag"},
+    )
+
+    assert (
+        tagged_url == "http://localhost:3000/blank?narada-sidepanel-test=1&t=window-tag"
+    )
+
+
 @pytest.mark.asyncio
 async def test_browser_environment_does_not_fetch_login_token_when_already_authenticated(
     monkeypatch: pytest.MonkeyPatch,
