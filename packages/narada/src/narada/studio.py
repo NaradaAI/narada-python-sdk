@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -20,6 +21,7 @@ from narada.project_sync import (
     scan_project_package_findings,
     write_exported_project,
 )
+from narada.tracing import trace
 from narada.workbench import (
     _default_out_dir,
     _redact_sensitive_text,
@@ -32,8 +34,13 @@ from narada.workbench import (
     append_command,
     default_api_base_url,
     default_auth_headers,
-    materialize_execution_trace_context,
 )
+
+_SEARCH_LIMIT_CAPS = {
+    "max_depth": 8,
+    "max_items": 1000,
+    "max_content_items": 100,
+}
 
 
 class AgentStudioWorkbenchError(RuntimeError):
@@ -212,6 +219,10 @@ def _list_item_summary(item: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _is_folder_item(item: dict[str, Any]) -> bool:
+    return item.get("type") == "folder"
+
+
 def _item_code(item: dict[str, Any]) -> str:
     if item.get("type") != "file" or item.get("fileType") != "pythonAgent":
         raise AgentStudioWorkbenchError("Agent Studio item is not a Python agent file")
@@ -239,6 +250,13 @@ def _item_path(item: dict[str, Any]) -> str:
             "Agent Studio item did not contain parentPath/name"
         )
     return f"{parent_path}{name}"
+
+
+def _item_search_path(item: dict[str, Any]) -> str:
+    try:
+        return _item_path(item)
+    except AgentStudioWorkbenchError:
+        return ""
 
 
 def _jsonable_value(value: Any) -> Any:
@@ -284,6 +302,108 @@ def _local_code_and_hash(path: str | Path) -> tuple[str, str]:
 
 def _remote_code_hash(item: dict[str, Any]) -> str:
     return _sha256_json(_python_file_data(_item_code(item), _item_variables(item)))
+
+
+def _search_tokens(query: str) -> list[str]:
+    normalized = "".join(char.lower() if char.isalnum() else " " for char in query)
+    return [token for token in normalized.split() if token]
+
+
+def _text_similarity(query: str, value: str) -> int:
+    if not query or not value:
+        return 0
+    return int(SequenceMatcher(None, query.lower(), value.lower()).ratio() * 30)
+
+
+def _first_snippet(text: str, tokens: list[str], *, radius: int = 80) -> str | None:
+    lower = text.lower()
+    match_index = -1
+    for token in tokens:
+        match_index = lower.find(token)
+        if match_index >= 0:
+            break
+    if match_index < 0:
+        return None
+    start = max(0, match_index - radius)
+    end = min(len(text), match_index + radius)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(text) else ""
+    return _redact_sensitive_text(f"{prefix}{text[start:end]}{suffix}")
+
+
+def _score_metadata_match(
+    item: dict[str, Any], query: str, tokens: list[str]
+) -> tuple[int, list[str], list[dict[str, str]]]:
+    name = str(item.get("name") or "")
+    path = _item_search_path(item)
+    item_type = str(item.get("type") or "")
+    file_type = str(item.get("fileType") or item.get("targetFileType") or "")
+    fields = {
+        "name": name,
+        "path": path,
+        "type": item_type,
+        "fileType": file_type,
+    }
+    score = 0
+    matched_fields: set[str] = set()
+    snippets: list[dict[str, str]] = []
+    query_lower = query.lower()
+
+    for field, value in fields.items():
+        value_lower = value.lower()
+        if not value_lower:
+            continue
+        field_score = 0
+        if query_lower and query_lower in value_lower:
+            field_score += 80 if field == "name" else 60
+        for token in tokens:
+            if token in value_lower:
+                field_score += 20 if field == "name" else 12
+        similarity = _text_similarity(query, value)
+        if field in {"name", "path"} and similarity >= 18:
+            field_score += similarity
+        if field_score:
+            matched_fields.add(field)
+            snippet = _first_snippet(value, tokens)
+            if snippet is not None:
+                snippets.append({"field": field, "text": snippet})
+        score += field_score
+
+    return score, sorted(matched_fields), snippets
+
+
+def _score_content_match(
+    code: str, query: str, tokens: list[str]
+) -> tuple[int, list[dict[str, str]]]:
+    code_lower = code.lower()
+    query_lower = query.lower()
+    score = 0
+    if query_lower and query_lower in code_lower:
+        score += 50
+    for token in tokens:
+        if token in code_lower:
+            score += 12
+    snippet = _first_snippet(code, tokens, radius=100)
+    snippets = [{"field": "content", "text": snippet}] if snippet else []
+    return score, snippets
+
+
+def _redact_search_text(value: Any) -> Any:
+    if value is None:
+        return None
+    return _redact_sensitive_text(str(value))
+
+
+def _search_resolution_status(candidates: list[dict[str, Any]]) -> str:
+    if not candidates:
+        return "no_match"
+    if len(candidates) == 1:
+        return "single_candidate"
+    top_score = int(candidates[0].get("score") or 0)
+    second_score = int(candidates[1].get("score") or 0)
+    if second_score >= max(top_score - 10, int(top_score * 0.8)):
+        return "needs_user_choice"
+    return "single_candidate"
 
 
 def _studio_root(proof_root: str | Path | None, label: str) -> Path | None:
@@ -434,6 +554,179 @@ async def studio_list(
         payload=payload,
         client=resolved_client,
         artifacts=artifacts,
+    )
+    _refresh_redaction_report(root)
+    return StudioCommandResult("passed", root, payload, command_id)
+
+
+async def _collect_search_items(
+    client: AgentStudioWorkbenchClient,
+    *,
+    parent_path: str,
+    max_depth: int,
+    max_items: int,
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    normalized_parent_path = _normalize_parent_path(parent_path)
+    queue: list[tuple[str, int]] = [(normalized_parent_path, 0)]
+    visited_paths: set[str] = set()
+    items: list[dict[str, Any]] = []
+
+    while queue:
+        current_parent_path, depth = queue.pop(0)
+        if current_parent_path in visited_paths:
+            continue
+        visited_paths.add(current_parent_path)
+        if depth > max_depth:
+            warnings.append(f"max-depth-reached:{current_parent_path}")
+            continue
+        for item in await client.list_items(parent_path=current_parent_path):
+            items.append(item)
+            if len(items) >= max_items:
+                warnings.append("max-items-reached")
+                return items
+            if _is_folder_item(item) and depth < max_depth:
+                folder_path = _normalize_parent_path(_item_search_path(item))
+                if folder_path not in visited_paths:
+                    queue.append((folder_path, depth + 1))
+    return items
+
+
+async def studio_search(
+    *,
+    query: str,
+    parent_path: str = "/",
+    content: bool = False,
+    max_depth: int = 3,
+    max_items: int = 200,
+    max_content_items: int = 25,
+    proof_root: str | Path | None = None,
+    client: AgentStudioWorkbenchClient | None = None,
+) -> StudioCommandResult:
+    resolved_client = client or AgentStudioWorkbenchClient()
+    root = _studio_root(proof_root, "studio-search")
+    normalized_parent_path = _normalize_parent_path(parent_path)
+    warnings: list[str] = []
+    if max_depth < 0:
+        raise AgentStudioWorkbenchError("--max-depth must be non-negative")
+    if max_items < 1:
+        raise AgentStudioWorkbenchError("--max-items must be at least 1")
+    if max_content_items < 0:
+        raise AgentStudioWorkbenchError("--max-content-items must be non-negative")
+    if max_depth > _SEARCH_LIMIT_CAPS["max_depth"]:
+        warnings.append(f"max-depth-capped:{_SEARCH_LIMIT_CAPS['max_depth']}")
+        max_depth = _SEARCH_LIMIT_CAPS["max_depth"]
+    if max_items > _SEARCH_LIMIT_CAPS["max_items"]:
+        warnings.append(f"max-items-capped:{_SEARCH_LIMIT_CAPS['max_items']}")
+        max_items = _SEARCH_LIMIT_CAPS["max_items"]
+    if max_content_items > _SEARCH_LIMIT_CAPS["max_content_items"]:
+        warnings.append(
+            f"max-content-items-capped:{_SEARCH_LIMIT_CAPS['max_content_items']}"
+        )
+        max_content_items = _SEARCH_LIMIT_CAPS["max_content_items"]
+    tokens = _search_tokens(query)
+    if not tokens:
+        raise AgentStudioWorkbenchError("--query must contain searchable text")
+
+    items = await _collect_search_items(
+        resolved_client,
+        parent_path=normalized_parent_path,
+        max_depth=max_depth,
+        max_items=max_items,
+        warnings=warnings,
+    )
+    content_items_checked = 0
+    candidates: list[dict[str, Any]] = []
+    for item in items:
+        metadata_score, matched_fields, snippets = _score_metadata_match(
+            item, query, tokens
+        )
+        score = metadata_score
+        item_type = str(item.get("type") or "")
+        file_type = str(item.get("fileType") or item.get("targetFileType") or "")
+        item_id = str(item.get("id") or "")
+        if content and item_type == "file" and file_type == "pythonAgent" and item_id:
+            if content_items_checked >= max_content_items:
+                warnings.append("max-content-items-reached")
+            else:
+                content_items_checked += 1
+                try:
+                    full_item = await resolved_client.get_item(item_id=item_id)
+                    content_score, content_snippets = _score_content_match(
+                        _item_code(full_item), query, tokens
+                    )
+                    if content_score:
+                        score += content_score
+                        matched_fields = sorted({*matched_fields, "content"})
+                        snippets.extend(content_snippets)
+                except AgentStudioWorkbenchError as exc:
+                    warnings.append(f"content-unavailable:{item_id}:{exc.status}")
+        if score <= 0:
+            continue
+        candidates.append(
+            {
+                "itemId": item_id,
+                "name": _redact_search_text(item.get("name")),
+                "path": _redact_search_text(_item_search_path(item)),
+                "type": item_type,
+                "fileType": file_type or None,
+                "score": score,
+                "matchedFields": matched_fields,
+                "snippets": snippets[:3],
+                "ownerEmail": _redact_search_text(item.get("ownerEmail")),
+                "isShortcut": item_type.endswith("Shortcut"),
+            }
+        )
+
+    candidates.sort(
+        key=lambda candidate: (
+            int(candidate.get("score") or 0),
+            str(candidate.get("name") or "").lower(),
+        ),
+        reverse=True,
+    )
+    resolution_status = _search_resolution_status(candidates)
+    report = {
+        "schemaVersion": 1,
+        "status": "passed",
+        "query": _redact_search_text(query),
+        "resolutionStatus": resolution_status,
+        "candidates": candidates,
+        "warnings": sorted(set(warnings)),
+        "searchedItemCount": len(items),
+        "contentSearchEnabled": content,
+        "contentItemsChecked": content_items_checked,
+        "limits": {
+            "maxDepth": max_depth,
+            "maxItems": max_items,
+            "maxContentItems": max_content_items,
+        },
+    }
+    artifacts: list[dict[str, Any]] = []
+    if root is not None:
+        search_path = root / "agent-studio" / "search.json"
+        _write_json(search_path, report)
+        artifacts.append(_artifact_ref(root, search_path, "agent-studio-search"))
+    payload = {
+        **report,
+        "proofRoot": str(root) if root is not None else None,
+        "inputs": {
+            "query": _redact_search_text(query),
+            "parentPath": _redact_search_text(normalized_parent_path),
+            "content": content,
+            "maxDepth": max_depth,
+            "maxItems": max_items,
+            "maxContentItems": max_content_items,
+        },
+    }
+    command_id = _append_studio_command(
+        root,
+        command="studio.search",
+        status="passed",
+        payload=payload,
+        client=resolved_client,
+        artifacts=artifacts,
+        warnings=report["warnings"],
     )
     _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)
@@ -1087,30 +1380,19 @@ async def studio_run(
         auth_headers=resolved_client.auth_headers,
         base_url=resolved_client.base_url,
     )
-    response = await Agent(environment=environment).run(prompt)
-    context = response.execution_trace_context
-    if context is None:
-        raise AgentStudioWorkbenchError(
-            "Agent run did not return executionTraceContext"
-        )
     root = (
         Path(proof_root)
         if proof_root is not None
         else _default_out_dir(f"studio-run-{item_id}")
     )
-    materialized = await materialize_execution_trace_context(
-        context,
-        out=root,
-        label=f"studio-run-{item_id}",
-        source_run={
-            "type": "remote-dispatch",
-            "authority": "agent-run-response",
-            "requestId": response.request_id,
-            "status": response.status,
-        },
-        auth_headers=resolved_client.auth_headers,
-        base_url=resolved_client.base_url,
-    )
+    async with trace(f"studio-run-{item_id}", out=root):
+        response = await Agent(environment=environment).run(prompt)
+    context = response.execution_trace_context
+    if context is None:
+        raise AgentStudioWorkbenchError(
+            "Agent run did not return executionTraceContext"
+        )
+    materialized_path = Path(response.execution_trace_path or root)
     run_report = {
         "schemaVersion": 1,
         "status": response.status,
@@ -1122,13 +1404,20 @@ async def studio_run(
         "structuredOutput": _jsonable_value(response.structured_output),
         "executionTraceContext": context,
     }
-    run_path = materialized.path / "agent-studio" / "run.json"
+    run_path = materialized_path / "agent-studio" / "run.json"
     _write_json(run_path, run_report)
     artifacts = [
-        _artifact_ref(materialized.path, run_path, "agent-studio-run"),
-        _write_remote_item_ref(materialized.path, item, "remote-item"),
+        _artifact_ref(materialized_path, run_path, "agent-studio-run"),
+        _write_remote_item_ref(materialized_path, item, "remote-item"),
     ]
-    materialization_report = getattr(materialized, "report", {})
+    materialization_report_path = (
+        materialized_path / "reports" / "materialization-report.json"
+    )
+    materialization_report: dict[str, Any] = {}
+    if materialization_report_path.exists():
+        materialization_report = json.loads(
+            materialization_report_path.read_text(encoding="utf-8")
+        )
     materialization_status = (
         str(materialization_report.get("status", "unknown"))
         if isinstance(materialization_report, dict)
@@ -1140,7 +1429,7 @@ async def studio_run(
     payload = {
         "schemaVersion": 1,
         "status": status,
-        "proofRoot": str(materialized.path),
+        "proofRoot": str(materialized_path),
         "requestId": response.request_id,
         "itemId": item_id,
         "slashPath": slash_path,
@@ -1158,7 +1447,7 @@ async def studio_run(
         },
     }
     command_id = _append_studio_command(
-        materialized.path,
+        materialized_path,
         command="studio.run",
         status=payload["status"],
         payload=payload,
@@ -1167,11 +1456,11 @@ async def studio_run(
         warnings=["requires-active-client"],
     )
     _update_manifest_hash(
-        materialized.path, "commandLedgerHash", materialized.path / "commands.jsonl"
+        materialized_path, "commandLedgerHash", materialized_path / "commands.jsonl"
     )
-    _refresh_redaction_report(materialized.path)
+    _refresh_redaction_report(materialized_path)
     return StudioCommandResult(
-        payload["status"], materialized.path, payload, command_id
+        payload["status"], materialized_path, payload, command_id
     )
 
 

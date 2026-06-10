@@ -16,6 +16,7 @@ from narada.studio import (
     studio_export,
     studio_list,
     studio_run,
+    studio_search,
     studio_upsert_python,
 )
 from narada.workbench import _sha256_json, append_command
@@ -33,6 +34,23 @@ def _python_item(*, code: str = "print('remote')") -> dict[str, Any]:
         "parentPath": "/",
         "fileType": "pythonAgent",
         "fileData": {"code": code, "variables": []},
+        "sharedWithEmails": [],
+        "requestedAccessByEmails": [],
+        "isPublic": False,
+        "createdAt": "2026-06-09T00:00:00Z",
+        "updatedAt": "2026-06-09T00:00:00Z",
+    }
+
+
+def _folder_item(*, item_id: str, name: str, parent_path: str = "/") -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "type": "folder",
+        "ownerEmail": "user@example.com",
+        "ownerUid": "user_1",
+        "ownerName": "User One",
+        "name": name,
+        "parentPath": parent_path,
         "sharedWithEmails": [],
         "requestedAccessByEmails": [],
         "isPublic": False,
@@ -60,6 +78,7 @@ class _FakeResponse:
 
 class _FakeStudioSession:
     existing_item: dict[str, Any] | None = _python_item()
+    search_items: list[dict[str, Any]] | None = None
     calls: list[tuple[str, str, dict[str, Any]]] = []
 
     def __init__(self) -> None:
@@ -75,6 +94,18 @@ class _FakeStudioSession:
         self.calls.append(("GET", url, kwargs))
         parsed = urlsplit(url)
         if parsed.path.endswith("/agent-studio/items") and parsed.query:
+            query = parse_qs(parsed.query)
+            parent_path = query.get("parentPath", ["/"])[0]
+            if self.__class__.search_items is not None:
+                return _FakeResponse(
+                    payload={
+                        "items": [
+                            item
+                            for item in self.__class__.search_items
+                            if item.get("parentPath") == parent_path
+                        ]
+                    }
+                )
             return _FakeResponse(
                 payload={"items": [self.existing_item] if self.existing_item else []}
             )
@@ -89,6 +120,12 @@ class _FakeStudioSession:
             if self.existing_item is None:
                 return _FakeResponse(status=404, payload={"detail": "not found"})
             return _FakeResponse(payload={"item": self.existing_item})
+        if "/agent-studio/items/" in parsed.path and self.__class__.search_items:
+            item_id = parsed.path.rsplit("/", 1)[-1]
+            for item in self.__class__.search_items:
+                if item.get("id") == item_id:
+                    return _FakeResponse(payload={"item": item})
+            return _FakeResponse(status=404, payload={"detail": "not found"})
         return _FakeResponse(status=500, payload={"detail": f"unexpected GET {url}"})
 
     def post(self, url: str, **kwargs: Any) -> _FakeResponse:
@@ -112,6 +149,7 @@ class _FakeStudioSession:
 @pytest.fixture(autouse=True)
 def reset_fake_studio_session() -> None:
     _FakeStudioSession.existing_item = _python_item()
+    _FakeStudioSession.search_items = None
     _FakeStudioSession.calls = []
 
 
@@ -140,6 +178,170 @@ async def test_studio_list_writes_optional_proof_artifacts(tmp_path: Path) -> No
     command_row = json.loads((tmp_path / "commands.jsonl").read_text().splitlines()[0])
     assert command_row["inputs"]["apiBaseUrlOrigin"] == "https://api.example.test"
     assert command_row["inputs"]["authMode"] == "api-key"
+
+
+@pytest.mark.asyncio
+async def test_studio_search_fuzzy_matches_nested_title_and_writes_proof(
+    tmp_path: Path,
+) -> None:
+    _FakeStudioSession.search_items = [
+        _folder_item(item_id="folder_1", name="JLR", parent_path="/"),
+        {
+            **_python_item(code="print('mercedes workflow')"),
+            "id": "item_mercedes",
+            "name": "Mercedes Benchmark",
+            "parentPath": "/JLR/",
+        },
+        {
+            **_python_item(code="print('other')"),
+            "id": "item_other",
+            "name": "Polestar Smoke",
+            "parentPath": "/",
+        },
+    ]
+
+    result = await studio_search(
+        query="JLR mercedes",
+        parent_path="/",
+        proof_root=tmp_path,
+        client=_client(),
+    )
+
+    assert result.status == "passed"
+    assert result.payload["resolutionStatus"] == "single_candidate"
+    assert result.payload["candidates"][0]["itemId"] == "item_mercedes"
+    assert "fileData" not in json.dumps(result.payload["candidates"])
+    search_report = json.loads(
+        (tmp_path / "agent-studio" / "search.json").read_text(encoding="utf-8")
+    )
+    assert search_report["query"] == "JLR mercedes"
+    command_row = json.loads((tmp_path / "commands.jsonl").read_text().splitlines()[0])
+    assert command_row["command"] == "studio.search"
+
+
+@pytest.mark.asyncio
+async def test_studio_search_content_is_opt_in_and_redacted() -> None:
+    _FakeStudioSession.search_items = [
+        {
+            **_python_item(
+                code='{"authorization": "Bearer should-not-leak"}\n# washer jets evidence\n'
+            ),
+            "id": "item_washer",
+            "name": "Maintenance Workflow",
+        }
+    ]
+
+    metadata_only = await studio_search(
+        query="washer jets",
+        parent_path="/",
+        content=False,
+        client=_client(),
+    )
+    content_result = await studio_search(
+        query="washer jets",
+        parent_path="/",
+        content=True,
+        client=_client(),
+    )
+
+    assert metadata_only.payload["candidates"] == []
+    candidate = content_result.payload["candidates"][0]
+    assert candidate["matchedFields"] == ["content"]
+    assert "Bearer should-not-leak" not in json.dumps(candidate["snippets"])
+
+
+@pytest.mark.asyncio
+async def test_studio_search_marks_close_candidates_for_user_choice() -> None:
+    _FakeStudioSession.search_items = [
+        {
+            **_python_item(code="print('a')"),
+            "id": "item_a",
+            "name": "Invoice Follow Up North",
+        },
+        {
+            **_python_item(code="print('b')"),
+            "id": "item_b",
+            "name": "Invoice Follow Up South",
+        },
+    ]
+
+    result = await studio_search(
+        query="invoice follow up",
+        parent_path="/",
+        client=_client(),
+    )
+
+    assert result.status == "passed"
+    assert result.payload["resolutionStatus"] == "needs_user_choice"
+    assert [candidate["itemId"] for candidate in result.payload["candidates"]] == [
+        "item_b",
+        "item_a",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_studio_search_redacts_persisted_query_and_metadata(
+    tmp_path: Path,
+) -> None:
+    _FakeStudioSession.search_items = [
+        {
+            **_python_item(code="print('secret title smoke')"),
+            "id": "item_secret",
+            "name": "Authorization: Bearer should-not-leak",
+            "parentPath": "/Authorization: Bearer should-not-leak/",
+            "ownerEmail": "token: should-not-leak",
+        }
+    ]
+
+    result = await studio_search(
+        query="Authorization: Bearer should-not-leak",
+        parent_path="/Authorization: Bearer should-not-leak",
+        proof_root=tmp_path,
+        client=_client(),
+    )
+
+    serialized_payload = json.dumps(result.payload)
+    search_report = json.loads(
+        (tmp_path / "agent-studio" / "search.json").read_text(encoding="utf-8")
+    )
+    command_row = json.loads((tmp_path / "commands.jsonl").read_text().splitlines()[0])
+    serialized_artifacts = json.dumps({"report": search_report, "command": command_row})
+
+    assert "should-not-leak" not in serialized_payload
+    assert "should-not-leak" not in serialized_artifacts
+    assert "[REDACTED_SECRET]" in serialized_payload
+    assert "[REDACTED_SECRET]" in serialized_artifacts
+
+
+@pytest.mark.asyncio
+async def test_studio_search_clamps_excessive_limits() -> None:
+    _FakeStudioSession.search_items = [
+        {
+            **_python_item(code="print('a')"),
+            "id": "item_a",
+            "name": "Invoice Follow Up North",
+        }
+    ]
+
+    result = await studio_search(
+        query="invoice",
+        parent_path="/",
+        max_depth=999,
+        max_items=9999,
+        max_content_items=999,
+        client=_client(),
+    )
+
+    assert result.payload["limits"] == {
+        "maxDepth": 8,
+        "maxItems": 1000,
+        "maxContentItems": 100,
+    }
+    assert result.payload["warnings"] == [
+        "max-content-items-capped:100",
+        "max-depth-capped:8",
+        "max-items-capped:1000",
+    ]
 
 
 @pytest.mark.asyncio
@@ -328,6 +530,63 @@ async def test_studio_delete_rejects_update_command_provenance(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_studio_run_requests_trace_capture_through_real_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeEnvironment:
+        instances: list["FakeEnvironment"] = []
+
+        def __init__(self, **kwargs: Any) -> None:
+            self._auth_headers = kwargs["auth_headers"]
+            self._base_url = kwargs["base_url"]
+            self.dispatch_kwargs: dict[str, Any] | None = None
+            self.__class__.instances.append(self)
+
+        async def _dispatch_request(self, **kwargs: Any) -> dict[str, Any]:
+            self.dispatch_kwargs = kwargs
+            return {
+                "requestId": "req_1",
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": {
+                        "executionTraceS3Key": "trace/index.json"
+                    },
+                },
+                "usage": {"actions": 0, "credits": 0},
+            }
+
+    materialize_calls: list[dict[str, Any]] = []
+
+    async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
+        materialize_calls.append(kwargs)
+        root = Path(kwargs["out"])
+        root.mkdir(parents=True, exist_ok=True)
+        return SimpleNamespace(path=root)
+
+    monkeypatch.setattr("narada.studio.Environment", FakeEnvironment)
+    monkeypatch.setattr(
+        "narada.tracing.materialize_execution_trace_context",
+        fake_materialize_execution_trace_context,
+    )
+
+    result = await studio_run(
+        item_id="item_1",
+        proof_root=tmp_path,
+        client=_client(),
+    )
+
+    assert result.status == "passed"
+    fake_environment = FakeEnvironment.instances[0]
+    assert fake_environment.dispatch_kwargs is not None
+    assert fake_environment.dispatch_kwargs["capture_execution_trace"] is True
+    assert len(materialize_calls) == 1
+    assert materialize_calls[0]["out"] == tmp_path
+
+
+@pytest.mark.asyncio
 async def test_studio_run_writes_jsonable_response_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -338,7 +597,11 @@ async def test_studio_run_writes_jsonable_response_output(
 
         async def run(self, prompt: str) -> AgentResponse[dict[str, Any]]:
             assert prompt == "/user@example.com/Smoke"
-            return AgentResponse(
+            from narada.tracing import get_active_trace_session
+
+            active_trace_session = get_active_trace_session()
+            assert active_trace_session is not None
+            response = AgentResponse(
                 request_id="req_1",
                 status="success",
                 text="ok",
@@ -347,6 +610,12 @@ async def test_studio_run_writes_jsonable_response_output(
                 usage=AgentUsage(actions=0, credits=0),
                 execution_trace_context={"executionTraceS3Key": "trace/index.json"},
             )
+            active_trace_session.register_response(
+                response,
+                auth_headers={},
+                base_url="http://test.local/fast/v2",
+            )
+            return response
 
     async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
         root = Path(kwargs["out"])
@@ -355,7 +624,7 @@ async def test_studio_run_writes_jsonable_response_output(
 
     monkeypatch.setattr("narada.studio.Agent", FakeAgent)
     monkeypatch.setattr(
-        "narada.studio.materialize_execution_trace_context",
+        "narada.tracing.materialize_execution_trace_context",
         fake_materialize_execution_trace_context,
     )
 
@@ -382,7 +651,11 @@ async def test_studio_run_propagates_materializer_taint(
 
         async def run(self, prompt: str) -> AgentResponse[dict[str, Any]]:
             assert prompt == "/user@example.com/Smoke"
-            return AgentResponse(
+            from narada.tracing import get_active_trace_session
+
+            active_trace_session = get_active_trace_session()
+            assert active_trace_session is not None
+            response = AgentResponse(
                 request_id="req_1",
                 status="success",
                 text="ok",
@@ -391,15 +664,24 @@ async def test_studio_run_propagates_materializer_taint(
                 usage=AgentUsage(actions=0, credits=0),
                 execution_trace_context={"executionTraceS3Key": "trace/index.json"},
             )
+            active_trace_session.register_response(
+                response,
+                auth_headers={},
+                base_url="http://test.local/fast/v2",
+            )
+            return response
 
     async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
         root = Path(kwargs["out"])
         root.mkdir(parents=True, exist_ok=True)
+        report_path = root / "reports" / "materialization-report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps({"status": "tainted"}), encoding="utf-8")
         return SimpleNamespace(path=root, report={"status": "tainted"})
 
     monkeypatch.setattr("narada.studio.Agent", FakeAgent)
     monkeypatch.setattr(
-        "narada.studio.materialize_execution_trace_context",
+        "narada.tracing.materialize_execution_trace_context",
         fake_materialize_execution_trace_context,
     )
 
