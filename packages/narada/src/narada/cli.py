@@ -31,6 +31,7 @@ from narada.studio import (
     studio_project_export,
     studio_resolve,
     studio_run,
+    studio_search,
     studio_sync_python_project,
     studio_upsert_python,
 )
@@ -138,6 +139,21 @@ async def _studio_list(args: argparse.Namespace) -> int:
 async def _studio_resolve(args: argparse.Namespace) -> int:
     result = await studio_resolve(
         path=args.path,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_search(args: argparse.Namespace) -> int:
+    result = await studio_search(
+        query=args.query,
+        parent_path=args.parent_path,
+        content=args.content,
+        max_depth=args.max_depth,
+        max_items=args.max_items,
+        max_content_items=args.max_content_items,
         proof_root=args.proof_root,
         client=_studio_client(args),
     )
@@ -619,6 +635,20 @@ def build_parser() -> argparse.ArgumentParser:
     studio_resolve_parser.add_argument("--json", action="store_true")
     studio_resolve_parser.set_defaults(
         handler=lambda args: asyncio.run(_studio_resolve(args))
+    )
+
+    studio_search_parser = studio_subparsers.add_parser("search")
+    studio_search_parser.add_argument("--query", required=True)
+    studio_search_parser.add_argument("--parent-path", default="/")
+    studio_search_parser.add_argument("--content", action="store_true")
+    studio_search_parser.add_argument("--max-depth", type=int, default=3)
+    studio_search_parser.add_argument("--max-items", type=int, default=200)
+    studio_search_parser.add_argument("--max-content-items", type=int, default=25)
+    studio_search_parser.add_argument("--proof-root")
+    studio_search_parser.add_argument("--base-url")
+    studio_search_parser.add_argument("--json", action="store_true")
+    studio_search_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_search(args))
     )
 
     studio_get_parser = studio_subparsers.add_parser("get")

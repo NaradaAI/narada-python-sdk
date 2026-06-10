@@ -32,6 +32,7 @@ _SIGNED_URL_PATTERNS = (
 )
 _SECRET_PATTERNS = (
     re.compile(r"Authorization:\s*Bearer\s+\S+", re.IGNORECASE),
+    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
     re.compile(r'"authorization"\s*:\s*"Bearer\s+[^"]+"', re.IGNORECASE),
     re.compile(r"\bcookie\s*:\s*[^\n\r]+", re.IGNORECASE),
     re.compile(r'"cookie"\s*:\s*"[^"]+"', re.IGNORECASE),
