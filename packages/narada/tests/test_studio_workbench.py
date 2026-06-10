@@ -328,6 +328,63 @@ async def test_studio_delete_rejects_update_command_provenance(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_studio_run_requests_trace_capture_through_real_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeEnvironment:
+        instances: list["FakeEnvironment"] = []
+
+        def __init__(self, **kwargs: Any) -> None:
+            self._auth_headers = kwargs["auth_headers"]
+            self._base_url = kwargs["base_url"]
+            self.dispatch_kwargs: dict[str, Any] | None = None
+            self.__class__.instances.append(self)
+
+        async def _dispatch_request(self, **kwargs: Any) -> dict[str, Any]:
+            self.dispatch_kwargs = kwargs
+            return {
+                "requestId": "req_1",
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                    "executionTraceContext": {
+                        "executionTraceS3Key": "trace/index.json"
+                    },
+                },
+                "usage": {"actions": 0, "credits": 0},
+            }
+
+    materialize_calls: list[dict[str, Any]] = []
+
+    async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
+        materialize_calls.append(kwargs)
+        root = Path(kwargs["out"])
+        root.mkdir(parents=True, exist_ok=True)
+        return SimpleNamespace(path=root)
+
+    monkeypatch.setattr("narada.studio.Environment", FakeEnvironment)
+    monkeypatch.setattr(
+        "narada.tracing.materialize_execution_trace_context",
+        fake_materialize_execution_trace_context,
+    )
+
+    result = await studio_run(
+        item_id="item_1",
+        proof_root=tmp_path,
+        client=_client(),
+    )
+
+    assert result.status == "passed"
+    fake_environment = FakeEnvironment.instances[0]
+    assert fake_environment.dispatch_kwargs is not None
+    assert fake_environment.dispatch_kwargs["capture_execution_trace"] is True
+    assert len(materialize_calls) == 1
+    assert materialize_calls[0]["out"] == tmp_path
+
+
+@pytest.mark.asyncio
 async def test_studio_run_writes_jsonable_response_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -338,7 +395,11 @@ async def test_studio_run_writes_jsonable_response_output(
 
         async def run(self, prompt: str) -> AgentResponse[dict[str, Any]]:
             assert prompt == "/user@example.com/Smoke"
-            return AgentResponse(
+            from narada.tracing import get_active_trace_session
+
+            active_trace_session = get_active_trace_session()
+            assert active_trace_session is not None
+            response = AgentResponse(
                 request_id="req_1",
                 status="success",
                 text="ok",
@@ -347,6 +408,12 @@ async def test_studio_run_writes_jsonable_response_output(
                 usage=AgentUsage(actions=0, credits=0),
                 execution_trace_context={"executionTraceS3Key": "trace/index.json"},
             )
+            active_trace_session.register_response(
+                response,
+                auth_headers={},
+                base_url="http://test.local/fast/v2",
+            )
+            return response
 
     async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
         root = Path(kwargs["out"])
@@ -355,7 +422,7 @@ async def test_studio_run_writes_jsonable_response_output(
 
     monkeypatch.setattr("narada.studio.Agent", FakeAgent)
     monkeypatch.setattr(
-        "narada.studio.materialize_execution_trace_context",
+        "narada.tracing.materialize_execution_trace_context",
         fake_materialize_execution_trace_context,
     )
 
@@ -382,7 +449,11 @@ async def test_studio_run_propagates_materializer_taint(
 
         async def run(self, prompt: str) -> AgentResponse[dict[str, Any]]:
             assert prompt == "/user@example.com/Smoke"
-            return AgentResponse(
+            from narada.tracing import get_active_trace_session
+
+            active_trace_session = get_active_trace_session()
+            assert active_trace_session is not None
+            response = AgentResponse(
                 request_id="req_1",
                 status="success",
                 text="ok",
@@ -391,15 +462,24 @@ async def test_studio_run_propagates_materializer_taint(
                 usage=AgentUsage(actions=0, credits=0),
                 execution_trace_context={"executionTraceS3Key": "trace/index.json"},
             )
+            active_trace_session.register_response(
+                response,
+                auth_headers={},
+                base_url="http://test.local/fast/v2",
+            )
+            return response
 
     async def fake_materialize_execution_trace_context(*_: Any, **kwargs: Any) -> Any:
         root = Path(kwargs["out"])
         root.mkdir(parents=True, exist_ok=True)
+        report_path = root / "reports" / "materialization-report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps({"status": "tainted"}), encoding="utf-8")
         return SimpleNamespace(path=root, report={"status": "tainted"})
 
     monkeypatch.setattr("narada.studio.Agent", FakeAgent)
     monkeypatch.setattr(
-        "narada.studio.materialize_execution_trace_context",
+        "narada.tracing.materialize_execution_trace_context",
         fake_materialize_execution_trace_context,
     )
 

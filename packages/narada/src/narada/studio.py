@@ -20,6 +20,7 @@ from narada.project_sync import (
     scan_project_package_findings,
     write_exported_project,
 )
+from narada.tracing import trace
 from narada.workbench import (
     _default_out_dir,
     _redact_sensitive_text,
@@ -32,7 +33,6 @@ from narada.workbench import (
     append_command,
     default_api_base_url,
     default_auth_headers,
-    materialize_execution_trace_context,
 )
 
 
@@ -1087,30 +1087,19 @@ async def studio_run(
         auth_headers=resolved_client.auth_headers,
         base_url=resolved_client.base_url,
     )
-    response = await Agent(environment=environment).run(prompt)
-    context = response.execution_trace_context
-    if context is None:
-        raise AgentStudioWorkbenchError(
-            "Agent run did not return executionTraceContext"
-        )
     root = (
         Path(proof_root)
         if proof_root is not None
         else _default_out_dir(f"studio-run-{item_id}")
     )
-    materialized = await materialize_execution_trace_context(
-        context,
-        out=root,
-        label=f"studio-run-{item_id}",
-        source_run={
-            "type": "remote-dispatch",
-            "authority": "agent-run-response",
-            "requestId": response.request_id,
-            "status": response.status,
-        },
-        auth_headers=resolved_client.auth_headers,
-        base_url=resolved_client.base_url,
-    )
+    async with trace(f"studio-run-{item_id}", out=root):
+        response = await Agent(environment=environment).run(prompt)
+    context = response.execution_trace_context
+    if context is None:
+        raise AgentStudioWorkbenchError(
+            "Agent run did not return executionTraceContext"
+        )
+    materialized_path = Path(response.execution_trace_path or root)
     run_report = {
         "schemaVersion": 1,
         "status": response.status,
@@ -1122,13 +1111,20 @@ async def studio_run(
         "structuredOutput": _jsonable_value(response.structured_output),
         "executionTraceContext": context,
     }
-    run_path = materialized.path / "agent-studio" / "run.json"
+    run_path = materialized_path / "agent-studio" / "run.json"
     _write_json(run_path, run_report)
     artifacts = [
-        _artifact_ref(materialized.path, run_path, "agent-studio-run"),
-        _write_remote_item_ref(materialized.path, item, "remote-item"),
+        _artifact_ref(materialized_path, run_path, "agent-studio-run"),
+        _write_remote_item_ref(materialized_path, item, "remote-item"),
     ]
-    materialization_report = getattr(materialized, "report", {})
+    materialization_report_path = (
+        materialized_path / "reports" / "materialization-report.json"
+    )
+    materialization_report: dict[str, Any] = {}
+    if materialization_report_path.exists():
+        materialization_report = json.loads(
+            materialization_report_path.read_text(encoding="utf-8")
+        )
     materialization_status = (
         str(materialization_report.get("status", "unknown"))
         if isinstance(materialization_report, dict)
@@ -1140,7 +1136,7 @@ async def studio_run(
     payload = {
         "schemaVersion": 1,
         "status": status,
-        "proofRoot": str(materialized.path),
+        "proofRoot": str(materialized_path),
         "requestId": response.request_id,
         "itemId": item_id,
         "slashPath": slash_path,
@@ -1158,7 +1154,7 @@ async def studio_run(
         },
     }
     command_id = _append_studio_command(
-        materialized.path,
+        materialized_path,
         command="studio.run",
         status=payload["status"],
         payload=payload,
@@ -1167,11 +1163,11 @@ async def studio_run(
         warnings=["requires-active-client"],
     )
     _update_manifest_hash(
-        materialized.path, "commandLedgerHash", materialized.path / "commands.jsonl"
+        materialized_path, "commandLedgerHash", materialized_path / "commands.jsonl"
     )
-    _refresh_redaction_report(materialized.path)
+    _refresh_redaction_report(materialized_path)
     return StudioCommandResult(
-        payload["status"], materialized.path, payload, command_id
+        payload["status"], materialized_path, payload, command_id
     )
 
 
