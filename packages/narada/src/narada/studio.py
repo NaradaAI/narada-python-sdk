@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -11,6 +12,14 @@ from pydantic import BaseModel
 
 from narada.agent import Agent
 from narada.environment import Environment
+from narada.project_sync import (
+    ProjectPackage,
+    build_project_package,
+    diff_project_package,
+    extract_project_from_runtime,
+    scan_project_package_findings,
+    write_exported_project,
+)
 from narada.workbench import (
     _default_out_dir,
     _redact_sensitive_text,
@@ -19,6 +28,7 @@ from narada.workbench import (
     _sha256_json,
     _update_manifest_hash,
     _write_json,
+    _write_redaction_report,
     append_command,
     default_api_base_url,
     default_auth_headers,
@@ -284,11 +294,27 @@ def _studio_root(proof_root: str | Path | None, label: str) -> Path | None:
     return root
 
 
+def _normalize_parent_path(parent_path: str) -> str:
+    normalized = parent_path or "/"
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    if not normalized.endswith("/"):
+        normalized = f"{normalized}/"
+    return normalized
+
+
 def _write_remote_item(root: Path, item: dict[str, Any]) -> str:
     item_id = str(item.get("id") or "unknown-item")
     path = root / "agent-studio" / "items" / _safe_slug(item_id) / "remote.json"
     _write_json(path, item)
     return path.relative_to(root).as_posix()
+
+
+def _write_remote_item_ref(
+    root: Path, item: dict[str, Any], role: str
+) -> dict[str, Any]:
+    relative_path = _write_remote_item(root, item)
+    return _artifact_ref(root, root / relative_path, role)
 
 
 def _append_studio_command(
@@ -298,6 +324,7 @@ def _append_studio_command(
     status: str,
     payload: dict[str, Any],
     client: AgentStudioWorkbenchClient | None = None,
+    command_id: str | None = None,
     artifacts: list[dict[str, Any]] | None = None,
     warnings: list[str] | None = None,
     taints: list[str] | None = None,
@@ -315,6 +342,7 @@ def _append_studio_command(
         root,
         command=command,
         status=status,
+        command_id=command_id,
         artifacts=artifacts,
         warnings=warnings,
         taints=taints,
@@ -322,6 +350,19 @@ def _append_studio_command(
         inputs=inputs,
     )
     return str(row["commandId"])
+
+
+def _artifact_ref(root: Path, path: Path, role: str) -> dict[str, Any]:
+    return {
+        "path": path.relative_to(root).as_posix(),
+        "role": role,
+        "sha256": _sha256_file(path),
+    }
+
+
+def _refresh_redaction_report(root: Path | None) -> None:
+    if root is not None:
+        _write_redaction_report(root)
 
 
 def _assert_created_by_command(root: Path, *, command_id: str, item_id: str) -> None:
@@ -336,8 +377,12 @@ def _assert_created_by_command(root: Path, *, command_id: str, item_id: str) -> 
             continue
         ids = row.get("ids")
         inputs = row.get("inputs")
+        allowed_create_commands = {
+            "studio.upsert-python",
+            "studio.sync-python-project",
+        }
         if (
-            row.get("command") == "studio.upsert-python"
+            row.get("command") in allowed_create_commands
             and row.get("status") == "passed"
             and isinstance(ids, dict)
             and isinstance(inputs, dict)
@@ -390,6 +435,7 @@ async def studio_list(
         client=resolved_client,
         artifacts=artifacts,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)
 
 
@@ -404,9 +450,7 @@ async def studio_resolve(
     item = await resolved_client.resolve_path(path=path)
     artifacts: list[dict[str, Any]] = []
     if root is not None:
-        artifacts.append(
-            {"path": _write_remote_item(root, item), "role": "remote-item"}
-        )
+        artifacts.append(_write_remote_item_ref(root, item, "remote-item"))
     payload = {
         "schemaVersion": 1,
         "status": "passed",
@@ -423,6 +467,7 @@ async def studio_resolve(
         client=resolved_client,
         artifacts=artifacts,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)
 
 
@@ -437,9 +482,7 @@ async def studio_get(
     item = await resolved_client.get_item(item_id=item_id)
     artifacts: list[dict[str, Any]] = []
     if root is not None:
-        artifacts.append(
-            {"path": _write_remote_item(root, item), "role": "remote-item"}
-        )
+        artifacts.append(_write_remote_item_ref(root, item, "remote-item"))
     payload = {
         "schemaVersion": 1,
         "status": "passed",
@@ -456,6 +499,7 @@ async def studio_get(
         client=resolved_client,
         artifacts=artifacts,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)
 
 
@@ -492,10 +536,11 @@ async def studio_export(
         payload=payload,
         client=resolved_client,
         artifacts=[
-            {"path": export_path.relative_to(root).as_posix(), "role": "python-source"},
-            {"path": remote_path.relative_to(root).as_posix(), "role": "remote-item"},
+            _artifact_ref(root, export_path, "python-source"),
+            _artifact_ref(root, remote_path, "remote-item"),
         ],
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)
 
 
@@ -526,9 +571,7 @@ async def studio_diff(
     if root is not None:
         diff_path = root / "agent-studio" / "diff.json"
         _write_json(diff_path, report)
-        artifacts.append(
-            {"path": diff_path.relative_to(root).as_posix(), "role": "diff"}
-        )
+        artifacts.append(_artifact_ref(root, diff_path, "diff"))
     payload = {
         **report,
         "proofRoot": str(root) if root is not None else None,
@@ -547,6 +590,7 @@ async def studio_diff(
         client=resolved_client,
         artifacts=artifacts,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult(status, root, payload, command_id)
 
 
@@ -624,18 +668,10 @@ async def studio_upsert_python(
     if root is not None:
         report_path = root / "agent-studio" / "lifecycle-report.json"
         _write_json(report_path, report)
-        artifacts.append(
-            {
-                "path": report_path.relative_to(root).as_posix(),
-                "role": "lifecycle-report",
-            }
-        )
+        artifacts.append(_artifact_ref(root, report_path, "lifecycle-report"))
         if existing_item is not None:
             artifacts.append(
-                {
-                    "path": _write_remote_item(root, existing_item),
-                    "role": "remote-item-before",
-                }
+                _write_remote_item_ref(root, existing_item, "remote-item-before")
             )
     payload = {
         **report,
@@ -662,7 +698,377 @@ async def studio_upsert_python(
         artifacts=artifacts,
         warnings=warnings,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult(status, root, payload, command_id)
+
+
+def _write_project_package_artifacts(
+    root: Path,
+    package: ProjectPackage,
+    command_id: str,
+    include_runtime: bool = True,
+) -> list[dict[str, Any]]:
+    sync_root = root / "agent-studio" / "project-sync" / "commands" / command_id
+    latest_root = root / "agent-studio" / "project-sync"
+    manifest_path = sync_root / "source-manifest.json"
+    report_path = sync_root / "package-report.json"
+    runtime_path = sync_root / "generated-runtime.py"
+    _write_json(report_path, package.package_report)
+    _write_json(latest_root / "package-report.json", package.package_report)
+    artifacts = [
+        _artifact_ref(root, report_path, "project-package-report"),
+    ]
+    if include_runtime:
+        _write_json(manifest_path, package.manifest)
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text(package.runtime_code, encoding="utf-8")
+        _write_json(latest_root / "source-manifest.json", package.manifest)
+        (latest_root / "generated-runtime.py").write_text(
+            package.runtime_code, encoding="utf-8"
+        )
+        artifacts.extend(
+            [
+                _artifact_ref(root, manifest_path, "project-source-manifest"),
+                _artifact_ref(root, runtime_path, "generated-python-runtime"),
+            ]
+        )
+    else:
+        for latest_path in (
+            latest_root / "source-manifest.json",
+            latest_root / "generated-runtime.py",
+        ):
+            latest_path.unlink(missing_ok=True)
+    return artifacts
+
+
+def _project_sync_redaction_status(
+    root: Path, package_findings: dict[str, list[str]]
+) -> tuple[str, list[str], list[str]]:
+    redaction = _write_redaction_report(root)
+    failures = [
+        f"{finding['code']}:{finding['path']}"
+        for finding in redaction["findings"]
+        if finding["severity"] == "failure"
+    ]
+    taints = [
+        f"{finding['code']}:{finding['path']}"
+        for finding in redaction["findings"]
+        if finding["severity"] == "taint"
+    ]
+    failures.extend(package_findings["failures"])
+    taints.extend(package_findings["taints"])
+    status = "failed" if failures else ("tainted" if taints else "passed")
+    return status, failures, taints
+
+
+async def studio_sync_python_project(
+    *,
+    local: str | Path,
+    name: str,
+    parent_path: str,
+    entrypoint: str,
+    apply: bool,
+    proof_root: str | Path,
+    update_item_id: str | None = None,
+    expected_remote_code_hash: str | None = None,
+    client: AgentStudioWorkbenchClient | None = None,
+    regeneration_command: str | None = None,
+) -> StudioCommandResult:
+    resolved_client = client or AgentStudioWorkbenchClient()
+    root = _studio_root(proof_root, "studio-sync-python-project")
+    if root is None:
+        raise AgentStudioWorkbenchError("sync-python-project requires --proof-root")
+    command_id = f"cmd_{uuid.uuid4().hex}"
+    package = build_project_package(
+        local=local,
+        entrypoint=entrypoint,
+        regeneration_command=regeneration_command,
+    )
+    package_findings = scan_project_package_findings(package)
+    package_status = (
+        "failed"
+        if package_findings["failures"]
+        else ("tainted" if package_findings["taints"] else "passed")
+    )
+    artifacts = _write_project_package_artifacts(
+        root,
+        package,
+        command_id,
+        include_runtime=package_status == "passed",
+    )
+    redaction_status, redaction_failures, redaction_taints = (
+        _project_sync_redaction_status(root, package_findings)
+    )
+    normalized_parent_path = _normalize_parent_path(parent_path)
+    item_path = f"{normalized_parent_path}{name}"
+    existing_item: dict[str, Any] | None = None
+    remote_hash: str | None = None
+    item_id: str | None = None
+    warnings: list[str] = []
+    action = "create"
+
+    if redaction_status == "passed":
+        try:
+            existing_item = await resolved_client.resolve_path(path=item_path)
+        except AgentStudioWorkbenchError as exc:
+            if exc.status != 404:
+                raise
+
+        if existing_item is not None:
+            action = "update"
+            item_id = str(existing_item.get("id") or "")
+            _item_code(existing_item)
+            remote_hash = _remote_code_hash(existing_item)
+            if apply:
+                if not update_item_id:
+                    raise AgentStudioWorkbenchError(
+                        "Target path already exists; pass --update-item-id and --expected-remote-code-hash"
+                    )
+                if item_id != update_item_id:
+                    raise AgentStudioWorkbenchError(
+                        "Resolved item id did not match --update-item-id"
+                    )
+                if expected_remote_code_hash != remote_hash:
+                    raise AgentStudioWorkbenchError(
+                        "Remote code hash did not match expected hash"
+                    )
+
+        if apply:
+            if existing_item is None:
+                item_id = await resolved_client.create_python_item(
+                    name=name,
+                    parent_path=normalized_parent_path,
+                    code=package.runtime_code,
+                )
+            else:
+                await resolved_client.update_python_item(
+                    item_id=item_id or update_item_id or "",
+                    code=package.runtime_code,
+                    variables=_item_variables(existing_item),
+                )
+
+    status = redaction_status
+    if redaction_status == "passed":
+        status = "passed"
+    elif apply:
+        warnings.append(
+            "Remote write skipped because project package did not pass redaction scan"
+        )
+    report = {
+        "schemaVersion": 1,
+        "status": status,
+        "action": action,
+        "applied": apply and status == "passed",
+        "itemId": item_id,
+        "path": item_path,
+        "entrypoint": entrypoint,
+        "sourceTreeSha256": package.manifest["sourceTreeSha256"],
+        "runtimeSha256": package.manifest["runtimeSha256"],
+        "remoteCodeHash": remote_hash,
+        "redactionStatus": redaction_status,
+        "redactionFailures": redaction_failures,
+        "redactionTaints": redaction_taints,
+        "requiresUpdateGuard": existing_item is not None and not apply,
+        "suggestedUpdateItemId": item_id if existing_item is not None else None,
+        "suggestedExpectedRemoteCodeHash": remote_hash
+        if existing_item is not None
+        else None,
+    }
+    lifecycle_path = (
+        root
+        / "agent-studio"
+        / "project-sync"
+        / "commands"
+        / command_id
+        / "sync-report.json"
+    )
+    _write_json(lifecycle_path, report)
+    _write_json(root / "agent-studio" / "project-sync" / "sync-report.json", report)
+    artifacts.append(_artifact_ref(root, lifecycle_path, "project-sync-report"))
+    if existing_item is not None:
+        artifacts.append(
+            _write_remote_item_ref(root, existing_item, "remote-item-before")
+        )
+    payload = {
+        **report,
+        "proofRoot": str(root),
+        "ids": {
+            "itemId": item_id,
+            "sourceTreeSha256": package.manifest["sourceTreeSha256"],
+            "runtimeSha256": package.manifest["runtimeSha256"],
+            "remoteCodeHash": remote_hash,
+        },
+        "inputs": {
+            "name": name,
+            "parentPath": normalized_parent_path,
+            "local": str(local),
+            "entrypoint": entrypoint,
+            "apply": apply,
+            "updateItemId": update_item_id,
+        },
+    }
+    written_command_id = _append_studio_command(
+        root,
+        command="studio.sync-python-project",
+        status=status,
+        payload=payload,
+        client=resolved_client,
+        command_id=command_id,
+        artifacts=artifacts,
+        warnings=warnings,
+        taints=redaction_taints,
+    )
+    _refresh_redaction_report(root)
+    return StudioCommandResult(status, root, payload, written_command_id)
+
+
+async def studio_project_diff(
+    *,
+    local: str | Path,
+    item_id: str,
+    proof_root: str | Path | None = None,
+    client: AgentStudioWorkbenchClient | None = None,
+) -> StudioCommandResult:
+    resolved_client = client or AgentStudioWorkbenchClient()
+    root = _studio_root(proof_root, "studio-project-diff")
+    command_id = f"cmd_{uuid.uuid4().hex}" if root is not None else None
+    item = await resolved_client.get_item(item_id=item_id)
+    remote_manifest, _ = extract_project_from_runtime(_item_code(item))
+    local_package = build_project_package(
+        local=local,
+        entrypoint=str(remote_manifest["entrypoint"]),
+    )
+    report = {
+        **diff_project_package(
+            local_package=local_package,
+            remote_manifest=remote_manifest,
+        ),
+        "itemId": item_id,
+    }
+    artifacts: list[dict[str, Any]] = []
+    if root is not None:
+        sync_root = (
+            root / "agent-studio" / "project-sync" / "commands" / str(command_id)
+        )
+        diff_path = sync_root / "project-diff.json"
+        manifest_path = sync_root / "source-manifest.json"
+        remote_manifest_path = sync_root / "remote-source-manifest.json"
+        _write_json(diff_path, report)
+        _write_json(manifest_path, local_package.manifest)
+        _write_json(remote_manifest_path, remote_manifest)
+        latest_root = root / "agent-studio" / "project-sync"
+        _write_json(latest_root / "project-diff.json", report)
+        _write_json(latest_root / "source-manifest.json", local_package.manifest)
+        _write_json(latest_root / "remote-source-manifest.json", remote_manifest)
+        artifacts.extend(
+            [
+                _artifact_ref(root, diff_path, "project-diff"),
+                _artifact_ref(root, manifest_path, "project-source-manifest"),
+                _artifact_ref(
+                    root, remote_manifest_path, "remote-project-source-manifest"
+                ),
+            ]
+        )
+    payload = {
+        **report,
+        "proofRoot": str(root) if root is not None else None,
+        "ids": {
+            "itemId": item_id,
+            "localSourceTreeSha256": report["localSourceTreeSha256"],
+            "remoteSourceTreeSha256": report["remoteSourceTreeSha256"],
+        },
+        "inputs": {"itemId": item_id, "local": str(local)},
+    }
+    command_id = _append_studio_command(
+        root,
+        command="studio.project-diff",
+        status=report["status"],
+        payload=payload,
+        client=resolved_client,
+        command_id=command_id,
+        artifacts=artifacts,
+    )
+    _refresh_redaction_report(root)
+    return StudioCommandResult(report["status"], root, payload, command_id)
+
+
+async def studio_project_export(
+    *,
+    item_id: str,
+    out: str | Path,
+    proof_root: str | Path | None = None,
+    client: AgentStudioWorkbenchClient | None = None,
+) -> StudioCommandResult:
+    resolved_client = client or AgentStudioWorkbenchClient()
+    root = _studio_root(proof_root, "studio-project-export")
+    command_id = f"cmd_{uuid.uuid4().hex}" if root is not None else None
+    item = await resolved_client.get_item(item_id=item_id)
+    manifest, files = extract_project_from_runtime(_item_code(item))
+    exported = write_exported_project(out=out, files=files)
+    report = {
+        "schemaVersion": 1,
+        "status": "passed",
+        "itemId": item_id,
+        "out": str(out),
+        "entrypoint": manifest["entrypoint"],
+        "sourceTreeSha256": manifest["sourceTreeSha256"],
+        "runtimeSha256": manifest["runtimeSha256"],
+        "files": exported,
+    }
+    artifacts: list[dict[str, Any]] = []
+    if root is not None:
+        sync_root = (
+            root / "agent-studio" / "project-sync" / "commands" / str(command_id)
+        )
+        export_path = sync_root / "project-export.json"
+        manifest_path = sync_root / "source-manifest.json"
+        _write_json(export_path, report)
+        _write_json(manifest_path, manifest)
+        latest_root = root / "agent-studio" / "project-sync"
+        _write_json(latest_root / "project-export.json", report)
+        _write_json(latest_root / "source-manifest.json", manifest)
+        artifacts.extend(
+            [
+                _artifact_ref(root, export_path, "project-export"),
+                _artifact_ref(root, manifest_path, "project-source-manifest"),
+            ]
+        )
+        export_files_root = sync_root / "exported-files"
+        exported_for_proof = write_exported_project(out=export_files_root, files=files)
+        write_exported_project(
+            out=latest_root / "exported-files",
+            files=files,
+            allow_overwrite=True,
+        )
+        for row in exported_for_proof:
+            artifacts.append(
+                _artifact_ref(
+                    root,
+                    export_files_root / row["path"],
+                    "project-exported-file",
+                )
+            )
+    payload = {
+        **report,
+        "proofRoot": str(root) if root is not None else None,
+        "ids": {
+            "itemId": item_id,
+            "sourceTreeSha256": manifest["sourceTreeSha256"],
+            "runtimeSha256": manifest["runtimeSha256"],
+        },
+        "inputs": {"itemId": item_id, "out": str(out)},
+    }
+    command_id = _append_studio_command(
+        root,
+        command="studio.project-export",
+        status="passed",
+        payload=payload,
+        client=resolved_client,
+        command_id=command_id,
+        artifacts=artifacts,
+    )
+    _refresh_redaction_report(root)
+    return StudioCommandResult("passed", root, payload, command_id)
 
 
 async def studio_run(
@@ -719,11 +1125,8 @@ async def studio_run(
     run_path = materialized.path / "agent-studio" / "run.json"
     _write_json(run_path, run_report)
     artifacts = [
-        {
-            "path": run_path.relative_to(materialized.path).as_posix(),
-            "role": "agent-studio-run",
-        },
-        {"path": _write_remote_item(materialized.path, item), "role": "remote-item"},
+        _artifact_ref(materialized.path, run_path, "agent-studio-run"),
+        _write_remote_item_ref(materialized.path, item, "remote-item"),
     ]
     materialization_report = getattr(materialized, "report", {})
     materialization_status = (
@@ -766,6 +1169,7 @@ async def studio_run(
     _update_manifest_hash(
         materialized.path, "commandLedgerHash", materialized.path / "commands.jsonl"
     )
+    _refresh_redaction_report(materialized.path)
     return StudioCommandResult(
         payload["status"], materialized.path, payload, command_id
     )
@@ -806,14 +1210,9 @@ async def studio_delete(
     if root is not None:
         cleanup_path = root / "agent-studio" / "cleanup.json"
         _write_json(cleanup_path, report)
+        artifacts.append(_artifact_ref(root, cleanup_path, "cleanup"))
         artifacts.append(
-            {"path": cleanup_path.relative_to(root).as_posix(), "role": "cleanup"}
-        )
-        artifacts.append(
-            {
-                "path": _write_remote_item(root, item),
-                "role": "remote-item-before-delete",
-            }
+            _write_remote_item_ref(root, item, "remote-item-before-delete")
         )
     payload = {
         **report,
@@ -829,4 +1228,5 @@ async def studio_delete(
         client=resolved_client,
         artifacts=artifacts,
     )
+    _refresh_redaction_report(root)
     return StudioCommandResult("passed", root, payload, command_id)

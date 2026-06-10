@@ -27,8 +27,11 @@ from narada.studio import (
     studio_export,
     studio_get,
     studio_list,
+    studio_project_diff,
+    studio_project_export,
     studio_resolve,
     studio_run,
+    studio_sync_python_project,
     studio_upsert_python,
 )
 from narada.workbench import (
@@ -210,6 +213,64 @@ async def _studio_delete(args: argparse.Namespace) -> int:
         item_id=args.item_id,
         expected_name=args.expected_name,
         created_by_command_id=args.created_by_command_id,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_sync_python_project(args: argparse.Namespace) -> int:
+    if args.apply and not args.proof_root:
+        raise ValueError("--proof-root is required with --apply")
+    if not args.apply and not args.proof_root:
+        raise ValueError("--proof-root is required for sync-python-project")
+    command = [
+        "narada",
+        "workbench",
+        "studio",
+        "sync-python-project",
+        "--local",
+        args.local,
+        "--name",
+        args.name,
+        "--parent-path",
+        args.parent_path,
+        "--entrypoint",
+        args.entrypoint,
+        "--apply" if args.apply else "--dry-run",
+    ]
+    result = await studio_sync_python_project(
+        local=args.local,
+        name=args.name,
+        parent_path=args.parent_path,
+        entrypoint=args.entrypoint,
+        apply=args.apply,
+        proof_root=args.proof_root,
+        update_item_id=args.update_item_id,
+        expected_remote_code_hash=args.expected_remote_code_hash,
+        client=_studio_client(args),
+        regeneration_command=" ".join(command),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_project_diff(args: argparse.Namespace) -> int:
+    result = await studio_project_diff(
+        local=args.local,
+        item_id=args.item_id,
+        proof_root=args.proof_root,
+        client=_studio_client(args),
+    )
+    _print({**result.payload, "commandId": result.command_id}, as_json=args.json)
+    return 0 if result.status == "passed" else 1
+
+
+async def _studio_project_export(args: argparse.Namespace) -> int:
+    result = await studio_project_export(
+        item_id=args.item_id,
+        out=args.out,
         proof_root=args.proof_root,
         client=_studio_client(args),
     )
@@ -621,6 +682,46 @@ def build_parser() -> argparse.ArgumentParser:
     studio_delete_parser.add_argument("--json", action="store_true")
     studio_delete_parser.set_defaults(
         handler=lambda args: asyncio.run(_studio_delete(args))
+    )
+
+    studio_sync_parser = studio_subparsers.add_parser("sync-python-project")
+    studio_sync_parser.add_argument("--local", required=True)
+    studio_sync_parser.add_argument("--name", required=True)
+    studio_sync_parser.add_argument("--parent-path", default="/")
+    studio_sync_parser.add_argument("--entrypoint", required=True)
+    studio_sync_apply_group = studio_sync_parser.add_mutually_exclusive_group()
+    studio_sync_apply_group.add_argument(
+        "--dry-run", action="store_true", dest="dry_run"
+    )
+    studio_sync_apply_group.add_argument("--apply", action="store_true")
+    studio_sync_parser.add_argument("--proof-root", required=True)
+    studio_sync_parser.add_argument("--update-item-id")
+    studio_sync_parser.add_argument("--expected-remote-code-hash")
+    studio_sync_parser.add_argument("--base-url")
+    studio_sync_parser.add_argument("--json", action="store_true")
+    studio_sync_parser.set_defaults(
+        dry_run=True,
+        handler=lambda args: asyncio.run(_studio_sync_python_project(args)),
+    )
+
+    studio_project_diff_parser = studio_subparsers.add_parser("project-diff")
+    studio_project_diff_parser.add_argument("--local", required=True)
+    studio_project_diff_parser.add_argument("--item-id", required=True)
+    studio_project_diff_parser.add_argument("--proof-root")
+    studio_project_diff_parser.add_argument("--base-url")
+    studio_project_diff_parser.add_argument("--json", action="store_true")
+    studio_project_diff_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_project_diff(args))
+    )
+
+    studio_project_export_parser = studio_subparsers.add_parser("project-export")
+    studio_project_export_parser.add_argument("--item-id", required=True)
+    studio_project_export_parser.add_argument("--out", required=True)
+    studio_project_export_parser.add_argument("--proof-root")
+    studio_project_export_parser.add_argument("--base-url")
+    studio_project_export_parser.add_argument("--json", action="store_true")
+    studio_project_export_parser.set_defaults(
+        handler=lambda args: asyncio.run(_studio_project_export(args))
     )
     return parser
 
