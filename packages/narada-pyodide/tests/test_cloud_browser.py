@@ -1296,6 +1296,8 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
         "parentSegmentId": "segment-local",
     }
     assert second_post["executionTraceContext"] == first_post["executionTraceContext"]
+    assert first_post["captureExecutionTrace"] is True
+    assert second_post["captureExecutionTrace"] is True
 
 
 @pytest.mark.asyncio

@@ -161,6 +161,7 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
+        active_trace_session = get_active_trace_session()
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
             clear_chat=clear_chat,
@@ -180,6 +181,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            capture_execution_trace=trace or active_trace_session is not None,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -218,7 +220,6 @@ class Agent(Generic[_StructuredOutput]):
             critic_result=critic_result,
             execution_trace_context=execution_trace_context,
         )
-        active_trace_session = get_active_trace_session()
         if trace and response.execution_trace_context is not None:
             materialized = await materialize_execution_trace_context(
                 response.execution_trace_context,
@@ -264,9 +265,15 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
+        capture_execution_trace = (
+            get_active_trace_session() is not None
+            if capture_execution_trace is None
+            else capture_execution_trace
+        )
         # Branch on `reasoning` so each call site binds a single, typed overload
         # of `_dispatch_request`. The validation also lives in `_dispatch_request`
         # itself (defense in depth + reachable when callers go straight to the
@@ -292,6 +299,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                capture_execution_trace=capture_execution_trace,
                 timeout=timeout,
             )
         else:
@@ -328,6 +336,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                capture_execution_trace=capture_execution_trace,
                 timeout=timeout,
             )
         return remote_dispatch_response

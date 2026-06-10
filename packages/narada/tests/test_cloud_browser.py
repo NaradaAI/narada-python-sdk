@@ -334,6 +334,7 @@ async def test_dispatch_request_includes_execution_trace_context(
     assert response["status"] == "success"
     assert fake_session.dispatched_body is not None
     assert fake_session.dispatched_body["executionTraceContext"] == trace_context
+    assert fake_session.dispatched_body["captureExecutionTrace"] is True
 
 
 @pytest.mark.asyncio

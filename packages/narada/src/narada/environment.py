@@ -589,6 +589,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -615,6 +616,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -641,6 +643,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -667,6 +670,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -693,6 +697,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -724,6 +729,8 @@ class Environment(ABC):
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
+        if capture_execution_trace or execution_trace_context is not None:
+            body["captureExecutionTrace"] = True
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id

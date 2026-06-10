@@ -102,6 +102,9 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator first",
         "/Operator second",
     ]
+    assert all(
+        "captureExecutionTrace" not in body for body in fake_session.dispatched_bodies
+    )
 
 
 @pytest.mark.asyncio
@@ -231,6 +234,7 @@ async def test_trace_context_manager_materializes_registered_response(
     assert response.execution_trace_path == str(tmp_path / "proof")
     assert calls[0]["context"] == execution_trace_context
     assert calls[0]["out"] == tmp_path / "proof"
+    assert fake_session.dispatched_bodies[0]["captureExecutionTrace"] is True
 
 
 @pytest.mark.asyncio
@@ -293,6 +297,7 @@ async def test_agent_run_trace_true_materializes_single_response(
     assert response.execution_trace_path == str(tmp_path / "proof")
     assert calls[0]["context"] == execution_trace_context
     assert calls[0]["label"].startswith("agent-run-req-")
+    assert fake_session.dispatched_bodies[0]["captureExecutionTrace"] is True
 
 
 @pytest.mark.asyncio
@@ -371,3 +376,4 @@ async def test_agent_run_trace_true_inside_trace_context_materializes_once(
     assert tr.path is None
     assert len(agent_calls) == 1
     assert context_calls == []
+    assert fake_session.dispatched_bodies[0]["captureExecutionTrace"] is True

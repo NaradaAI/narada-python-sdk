@@ -244,6 +244,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        capture_execution_trace: bool | None = None,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -272,6 +273,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                capture_execution_trace=capture_execution_trace,
                 timeout=timeout,
             )
         else:
@@ -308,6 +310,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                capture_execution_trace=capture_execution_trace,
                 timeout=timeout,
             )
         return remote_dispatch_response
