@@ -74,10 +74,39 @@ async def run_critic(
         if critic_action_trace_raw is not None
         else None
     )
+    critic_workflow_trace = critic_content.get("workflowTrace")
 
     return CriticResult(
         validation_passed=validation_passed,
         structured_output=structured_output,
         usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
         action_trace=critic_action_trace,
+        workflow_trace=critic_workflow_trace,
     )
+
+
+def merge_critic_workflow_trace(
+    *,
+    workflow_trace: dict[str, Any] | None,
+    critic_result: CriticResult | None,
+) -> dict[str, Any] | None:
+    critic_workflow_trace = (
+        critic_result.workflow_trace if critic_result is not None else None
+    )
+    if critic_workflow_trace is None:
+        return workflow_trace
+
+    if workflow_trace is None:
+        return critic_workflow_trace
+
+    children = workflow_trace.get("children")
+    if not isinstance(children, list):
+        return workflow_trace
+
+    return {
+        **workflow_trace,
+        "children": [
+            *children,
+            {"kind": "sub_workflow", "trace": critic_workflow_trace},
+        ],
+    }

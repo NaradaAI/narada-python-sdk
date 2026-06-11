@@ -412,3 +412,72 @@ async def test_agent_run_exposes_workflow_trace_alias(
 
     assert response.workflow_trace == workflow_trace
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
+
+
+@pytest.mark.asyncio
+async def test_agent_run_appends_critic_workflow_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {
+        "workflowId": "main-workflow",
+        "workflowName": "Main Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 100,
+        "children": [],
+    }
+    critic_workflow_trace = {
+        "workflowId": "critic-workflow",
+        "workflowName": "Critic Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 200,
+        "children": [],
+    }
+    env = CloudBrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+    )
+    agent = Agent(environment=env)
+    monkeypatch.setattr(
+        agent,
+        "_dispatch_request",
+        AsyncMock(
+            side_effect=[
+                {
+                    "requestId": "request-123",
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "workflowTrace": workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                },
+                {
+                    "requestId": "critic-request-123",
+                    "status": "success",
+                    "response": {
+                        "text": '{"narada_validation_passed":true}',
+                        "output": {
+                            "type": "structured",
+                            "content": {"narada_validation_passed": True},
+                        },
+                        "structuredOutput": SimpleNamespace(
+                            narada_validation_passed=True
+                        ),
+                        "workflowTrace": critic_workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                },
+            ]
+        ),
+    )
+
+    response = await agent.run("return a trace", critic={})
+
+    assert response.critic_result is not None
+    assert response.critic_result.workflow_trace == critic_workflow_trace
+    assert response.workflow_trace == {
+        **workflow_trace,
+        "children": [{"kind": "sub_workflow", "trace": critic_workflow_trace}],
+    }

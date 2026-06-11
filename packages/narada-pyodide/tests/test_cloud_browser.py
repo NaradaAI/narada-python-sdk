@@ -528,6 +528,94 @@ async def test_agent_run_exposes_workflow_trace_alias(
 
 
 @pytest.mark.asyncio
+async def test_agent_run_emits_combined_critic_workflow_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_trace = {
+        "workflowId": "main-workflow",
+        "workflowName": "Main Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 100,
+        "children": [],
+    }
+    critic_workflow_trace = {
+        "workflowId": "critic-workflow",
+        "workflowName": "Critic Workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 200,
+        "children": [],
+    }
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "main-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "workflowTrace": workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+            _FakeResponse(json_data={"requestId": "critic-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "response": {
+                        "text": '{"narada_validation_passed":true}',
+                        "output": {
+                            "type": "structured",
+                            "content": {"narada_validation_passed": True},
+                        },
+                        "workflowTrace": critic_workflow_trace,
+                    },
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    emitted_events: list[str] = []
+    monkeypatch.setattr(
+        sys.modules["narada._trace"],
+        "_narada_emit_trace_event",
+        emitted_events.append,
+        raising=False,
+    )
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await narada_pkg.Agent(environment=env).run("return a trace", critic={})
+
+    combined_workflow_trace = {
+        **workflow_trace,
+        "children": [{"kind": "sub_workflow", "trace": critic_workflow_trace}],
+    }
+    assert response.critic_result is not None
+    assert response.critic_result.workflow_trace == critic_workflow_trace
+    assert response.workflow_trace == combined_workflow_trace
+    sub_workflow_events = [
+        json.loads(event)
+        for event in emitted_events
+        if json.loads(event)["kind"] == "subWorkflow"
+    ]
+    assert sub_workflow_events == [
+        {"kind": "subWorkflow", "workflowTrace": combined_workflow_trace}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_request_retries_poll_fetch_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
