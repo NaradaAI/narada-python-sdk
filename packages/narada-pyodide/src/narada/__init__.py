@@ -1,4 +1,8 @@
-from narada_core.actions.models import ActiveInputRequest, CriticResult
+from narada_core.actions.models import (
+    ActiveInputRequest,
+    CriticResult,
+    PressKeyEventItem,
+)
 from narada_core.errors import (
     NaradaError,
     NaradaTimeoutError,
@@ -41,6 +45,7 @@ __all__ = [
     "LambdaEnvironment",
     "NaradaError",
     "NaradaTimeoutError",
+    "PressKeyEventItem",
     "ReasoningEffort",
     "RemoteBrowserEnvironment",
     "render_html",
