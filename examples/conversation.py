@@ -1,38 +1,32 @@
 import asyncio
 
-from narada import Agent, Narada
+from narada import Agent, AgentKind, BrowserEnvironment
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env, kind=AgentKind.CORE_AGENT)
 
-        resp = await window.agent(
+    try:
+        resp = await agent.run(
             prompt="Pick a lucky number for me between 1 and 100",
-            agent=Agent.CORE_AGENT,
-            # By default, the chat history is cleared when an agent is invoked so that the agent can
-            # start fresh.
-            clear_chat=True,
         )
         print(resp.text)
 
-        resp = await window.agent(
+        resp = await agent.run(
             prompt="What did you pick again?",
-            agent=Agent.CORE_AGENT,
-            # By not clearing the chat history, we can continue the conversation.
-            clear_chat=False,
+            # Pass the previous request ID to continue from the earlier response.
+            previous_request_id=resp.request_id,
         )
         print(resp.text)
 
-        resp = await window.agent(
+        resp = await agent.run(
             prompt="What's double that number?",
-            agent=Agent.CORE_AGENT,
-            # By not clearing the chat history, we can continue the conversation.
-            clear_chat=False,
+            previous_request_id=resp.request_id,
         )
         print(resp.text)
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

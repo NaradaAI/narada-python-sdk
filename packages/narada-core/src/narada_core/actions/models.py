@@ -22,6 +22,9 @@ from narada_core.tracing import model as tracing_model
 DEFAULT_HITL_TIMEOUT_SECONDS = 300
 
 _StructuredOutputT = TypeVar("_StructuredOutputT")
+type JsonValue = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 
 class AgentUsage(BaseModel):
@@ -40,10 +43,13 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 
 
 class CriticResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
@@ -61,6 +67,9 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     action_trace: tracing_model.ActionTrace | None = None
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
 
 
 class AgenticSelectorClickAction(TypedDict):
@@ -403,6 +412,15 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class ExecuteJavaScriptOnPageRequest(BaseModel):
+    name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
+    code: str
+
+
+class ExecuteJavaScriptOnPageResponse(BaseModel):
+    result: JsonValue
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -433,24 +451,58 @@ class UserApprovalResponse(BaseModel):
     approved: bool
 
 
+class KeyEventModifiers(TypedDict, total=False):
+    ctrl: bool
+    shift: bool
+    alt: bool
+    meta: bool
+
+
+class PressKeyEventItem(BaseModel):
+    type: Literal["keyDown", "keyUp", "press"] = "keyDown"  # noqa: A003
+    code: str
+    key: str | None = None
+    modifiers: KeyEventModifiers | None = None
+
+
+class PressKeyRequest(BaseModel):
+    """Wire payload: key events for the extension to replay on the active tab."""
+
+    name: Literal["press_key"] = "press_key"
+    events: list[PressKeyEventItem]
+
+
+ActiveInputAction = Annotated[
+    PromptForUserInputRequest | UserApprovalRequest,
+    Field(discriminator="name"),
+]
+
+
+class ActiveInputRequest(BaseModel):
+    input_id: str = Field(alias="inputId")
+    action: ActiveInputAction
+
+
 type ExtensionActionRequest = (
-    AgenticSelectorRequest
-    | AgenticMatchingSelectorsFinderRequest
+    AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
+    | AgenticSelectorRequest
     | CloseWindowRequest
-    | GoToUrlRequest
-    | WaitForElementRequest
-    | PrintMessageRequest
-    | ReadGoogleSheetRequest
-    | ReadExcelSheetRequest
-    | WriteGoogleSheetRequest
-    | WriteExcelSheetRequest
+    | ExecuteJavaScriptOnPageRequest
     | GetFullHtmlRequest
-    | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
+    | GetSimplifiedHtmlRequest
     | GetUrlRequest
+    | GoToUrlRequest
+    | PressKeyRequest
+    | PrintMessageRequest
     | PromptForUserInputRequest
+    | ReadExcelSheetRequest
+    | ReadGoogleSheetRequest
     | UserApprovalRequest
+    | WaitForElementRequest
+    | WriteExcelSheetRequest
+    | WriteGoogleSheetRequest
 )
 
 

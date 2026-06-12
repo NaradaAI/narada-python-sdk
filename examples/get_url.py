@@ -1,15 +1,18 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 
 
 async def main() -> None:
-    async with Narada() as narada:
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
-        await window.go_to_url(url="https://www.google.com", timeout=60)
-        result = await window.get_url(timeout=30)
+    try:
+        await agent.go_to_url(url="https://www.google.com", timeout=60)
+        result = await agent.get_url(timeout=30)
         print(f"Current URL: {result.url}")
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

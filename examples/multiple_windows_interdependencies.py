@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 from pydantic import BaseModel
 
 
@@ -23,14 +23,16 @@ async def main() -> None:
     #
     # Step 3: In window 1, add a note with the h-index information.
 
-    async with Narada() as narada:
-        window_1, window_2 = await asyncio.gather(
-            narada.open_and_initialize_browser_window(),
-            narada.open_and_initialize_browser_window(),
-        )
+    env_1 = BrowserEnvironment()
+    env_2 = BrowserEnvironment()
+    agent_1 = Agent(environment=env_1)
+    agent_2 = Agent(environment=env_2)
+
+    try:
+        await asyncio.gather(env_1.start(), env_2.start())
 
         # First, get the author's name from window 1
-        response = await window_1.agent(
+        response = await agent_1.run(
             prompt=(
                 'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
                 "page, then extract the first author's name from the arXiv page."
@@ -43,15 +45,15 @@ async def main() -> None:
 
         # Start parallel tasks: name filling in window 1, h-index search in window 2
         async def fill_name_in_contact() -> None:
-            await window_1.go_to_url(url="https://contacts.google.com/new")
-            await window_1.agent(
+            await agent_1.go_to_url(url="https://contacts.google.com/new")
+            await agent_1.run(
                 prompt=(
                     f"Fill in the first name and last name fields for {author_name}. Do not save."
                 )
             )
 
         async def search_h_index() -> int:
-            response = await window_2.agent(
+            response = await agent_2.run(
                 prompt=(
                     f"Search for {author_name} of LLM Compiler with Google and extract their "
                     "h-index, which you can find by opening their Google Scholar profile and "
@@ -71,9 +73,11 @@ async def main() -> None:
 
         # Now add a note with h-index information.
         print("Adding h-index note to contact...")
-        await window_1.agent(
+        await agent_1.run(
             prompt=(f"Add a note that their h-index is {h_index}. Do not click save."),
         )
+    finally:
+        await asyncio.gather(env_1.close(), env_2.close())
 
 
 if __name__ == "__main__":

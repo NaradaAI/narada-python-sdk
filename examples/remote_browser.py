@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import RemoteBrowserWindow
+from narada import Agent, RemoteBrowserEnvironment
 
 
 async def main() -> None:
@@ -13,28 +13,30 @@ async def main() -> None:
     # enable additional management capabilities such as stopping the session:
     #
     # ```
-    # win_1 = await narada.open_and_initialize_cloud_browser_window(...)
+    # cloud_env = CloudBrowserEnvironment(...)
+    # await cloud_env.start()
     #
-    # browser_window_id = win_1.browser_window_id
-    # cloud_browser_session_id = win_1.cloud_browser_session_id
+    # browser_window_id = cloud_env.browser_window_id
+    # cloud_browser_session_id = cloud_env.cloud_browser_session_id
     #
     # ...
     #
-    # win_2 = RemoteBrowserWindow(
+    # remote_env = RemoteBrowserEnvironment(
     #     browser_window_id=browser_window_id,
-    #     loud_browser_session_id=cloud_browser_session_id,
+    #     cloud_browser_session_id=cloud_browser_session_id,
     # )
-    # await win_2.close()  # This will stop the cloud session.
+    # await remote_env.close()  # This will stop the cloud session.
     # ```
     cloud_browser_session_id = None
 
-    window = RemoteBrowserWindow(
+    env = RemoteBrowserEnvironment(
         browser_window_id=browser_window_id,
         cloud_browser_session_id=cloud_browser_session_id,
     )
+    agent = Agent(environment=env)
 
     # Run a task on another machine.
-    response = await window.agent(
+    response = await agent.run(
         prompt=(
             'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
             "page, then tell me who the authors are."
