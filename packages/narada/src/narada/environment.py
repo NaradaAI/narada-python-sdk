@@ -970,8 +970,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         )
 
     async def _initialize(self) -> None:
-        self._playwright_context_manager = async_playwright()
-        self._playwright = await self._playwright_context_manager.__aenter__()
+        await self._start_playwright()
         if self._attach_to_existing:
             await self._initialize_in_existing_browser_window()
         else:
@@ -996,6 +995,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
         finally:
             await self._stop_playwright()
+
+    async def _start_playwright(self) -> None:
+        self._playwright_context_manager = async_playwright()
+        self._playwright = await self._playwright_context_manager.__aenter__()
 
     async def _stop_playwright(self) -> None:
         if self._playwright_context_manager is None:
@@ -1480,8 +1483,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
         interactive prompts and related behavior.
         """
-        self._playwright_context_manager = async_playwright()
-        self._playwright = await self._playwright_context_manager.__aenter__()
+        await self._start_playwright()
 
         request_body = {
             "require_extension": True,
@@ -1557,6 +1559,10 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             # Re-raise the original connection error
             raise
 
+    async def _start_playwright(self) -> None:
+        self._playwright_context_manager = async_playwright()
+        self._playwright = await self._playwright_context_manager.__aenter__()
+
     async def _stop_playwright(self) -> None:
         if self._playwright_context_manager is None:
             return
@@ -1597,6 +1603,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_id: str,
         login_url: str,
         cdp_auth_headers: dict[str, str],
+        expected_browser_window_id: str | None = None,
     ) -> None:
         assert self._playwright is not None
 
@@ -1608,6 +1615,23 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
+        if expected_browser_window_id is not None:
+            # Put the backend-owned browser ID into sessionStorage before hydration
+            # so AgentCore sessions use the right Firestore route when needed.
+            expected_browser_window_id_json = json.dumps(expected_browser_window_id)
+            await context.add_init_script(
+                script=f"""
+                    (() => {{
+                      const expectedBrowserWindowId = {expected_browser_window_id_json};
+                      try {{
+                        sessionStorage.setItem(
+                          "naradaBrowserWindowId",
+                          expectedBrowserWindowId
+                        );
+                      }} catch (_error) {{}}
+                    }})();
+                """
+            )
         await initialization_page.goto(
             login_url, timeout=15_000, wait_until="domcontentloaded"
         )
@@ -1628,7 +1652,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaTimeoutError:
+            except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
@@ -1636,6 +1660,15 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 await initialization_page.goto(
                     login_url, timeout=15_000, wait_until="domcontentloaded"
                 )
+
+        if (
+            expected_browser_window_id is not None
+            and browser_window_id != expected_browser_window_id
+        ):
+            raise RuntimeError(
+                "Initialized cloud session reported browserWindowId "
+                f"{browser_window_id!r}, expected {expected_browser_window_id!r}."
+            )
 
         self._browser_window_id = browser_window_id
         self._session_id = session_id
