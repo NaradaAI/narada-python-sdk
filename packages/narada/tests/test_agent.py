@@ -119,3 +119,22 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_forwards_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = _CountingEnvironment()
+    agent = Agent(environment=env)
+
+    await agent.run("automated eval", test=True)
+
+    assert fake_session.dispatched_bodies[0]["test"] is True
