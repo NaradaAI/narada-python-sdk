@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel, create_model
 
 from narada_core.actions.models import AgentUsage, CriticResult
-from narada_core.models import Agent, CriticConfig
+from narada_core.models import AgentKind, CriticConfig
 from narada_core.tracing.model import parse_action_trace
 
 _VALIDATION_VAR = "narada_validation_passed"
@@ -38,7 +38,7 @@ async def run_critic(
 
     critic_dispatch_response = await dispatch_request(
         prompt=critic.get("prompt", _DEFAULT_CRITIC_PROMPT),
-        agent=Agent.PRODUCTIVITY,
+        agent=AgentKind.PRODUCTIVITY,
         output_schema=CriticOutputModel,
         critic_context={
             "agentPrompt": original_prompt,
@@ -74,10 +74,39 @@ async def run_critic(
         if critic_action_trace_raw is not None
         else None
     )
+    critic_workflow_trace = critic_content.get("workflowTrace")
 
     return CriticResult(
         validation_passed=validation_passed,
         structured_output=structured_output,
         usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),
         action_trace=critic_action_trace,
+        workflow_trace=critic_workflow_trace,
     )
+
+
+def merge_critic_workflow_trace(
+    *,
+    workflow_trace: dict[str, Any] | None,
+    critic_result: CriticResult | None,
+) -> dict[str, Any] | None:
+    critic_workflow_trace = (
+        critic_result.workflow_trace if critic_result is not None else None
+    )
+    if critic_workflow_trace is None:
+        return workflow_trace
+
+    if workflow_trace is None:
+        return critic_workflow_trace
+
+    children = workflow_trace.get("children")
+    if not isinstance(children, list):
+        return workflow_trace
+
+    return {
+        **workflow_trace,
+        "children": [
+            *children,
+            {"kind": "sub_workflow", "trace": critic_workflow_trace},
+        ],
+    }

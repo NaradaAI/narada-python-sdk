@@ -12,7 +12,7 @@ class NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(NaradaTimeoutError):
     def __init__(self, timeout: int) -> None:
         super().__init__(
             f"Request timed out after {timeout} seconds. "
-            "Try specifying a larger `timeout` value when calling `agent`."
+            "Try specifying a larger `timeout` value when calling `Agent.run`."
         )
 
 

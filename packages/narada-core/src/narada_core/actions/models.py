@@ -12,17 +12,19 @@ from typing import (
     override,
 )
 
-from pydantic import (
-    BaseModel,
-    Field,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
 from narada_core.tracing import model as tracing_model
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
 
+DEFAULT_HITL_TIMEOUT_SECONDS = 300
+
 _StructuredOutputT = TypeVar("_StructuredOutputT")
+type JsonValue = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 
 class AgentUsage(BaseModel):
@@ -41,13 +43,18 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 
 
 class CriticResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
+    model_config = ConfigDict(populate_by_name=True)
+
     request_id: str
     status: Literal["success", "error", "input-required"]
     text: str
@@ -58,7 +65,11 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
 
 
 class AgenticSelectorClickAction(TypedDict):
@@ -198,6 +209,37 @@ class AgenticSelectorRequest(BaseModel):
 
 class AgenticSelectorResponse(BaseModel):
     value: str | None
+
+
+class AgenticMatchingSelectorsFinderRequest(BaseModel):
+    name: Literal["agentic_matching_selectors_finder"] = (
+        "agentic_matching_selectors_finder"
+    )
+    prompt: str
+
+
+class AgenticMatchingSelectorsFinderResponse(BaseModel):
+    selectors: list[AgenticSelectors]
+
+
+class WaitForElementRequest(BaseModel):
+    name: Literal["wait_for_element"] = "wait_for_element"
+    selectors: AgenticSelectors
+    state: Literal["visible", "hidden"]
+    timeout: int  # milliseconds
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "selectors": _dump_agentic_selectors(self.selectors),
+            "state": self.state,
+            "timeout": self.timeout,
+        }
+
+
+class WaitForElementResponse(BaseModel):
+    found: bool
 
 
 class Viewport(TypedDict):
@@ -370,6 +412,15 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class ExecuteJavaScriptOnPageRequest(BaseModel):
+    name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
+    code: str
+
+
+class ExecuteJavaScriptOnPageResponse(BaseModel):
+    result: JsonValue
+
+
 class PromptForUserInputVariable(BaseModel):
     name: str
     type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
@@ -381,6 +432,7 @@ class PromptForUserInputRequest(BaseModel):
     name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
     step_id: str
     variables: list[PromptForUserInputVariable]
+    prompt_message: str | None = None
 
 
 class PromptForUserInputResponse(BaseModel):
@@ -399,22 +451,58 @@ class UserApprovalResponse(BaseModel):
     approved: bool
 
 
+class KeyEventModifiers(TypedDict, total=False):
+    ctrl: bool
+    shift: bool
+    alt: bool
+    meta: bool
+
+
+class PressKeyEventItem(BaseModel):
+    type: Literal["keyDown", "keyUp", "press"] = "keyDown"  # noqa: A003
+    code: str
+    key: str | None = None
+    modifiers: KeyEventModifiers | None = None
+
+
+class PressKeyRequest(BaseModel):
+    """Wire payload: key events for the extension to replay on the active tab."""
+
+    name: Literal["press_key"] = "press_key"
+    events: list[PressKeyEventItem]
+
+
+ActiveInputAction = Annotated[
+    PromptForUserInputRequest | UserApprovalRequest,
+    Field(discriminator="name"),
+]
+
+
+class ActiveInputRequest(BaseModel):
+    input_id: str = Field(alias="inputId")
+    action: ActiveInputAction
+
+
 type ExtensionActionRequest = (
-    AgenticSelectorRequest
+    AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
+    | AgenticSelectorRequest
     | CloseWindowRequest
-    | GoToUrlRequest
-    | PrintMessageRequest
-    | ReadGoogleSheetRequest
-    | ReadExcelSheetRequest
-    | WriteGoogleSheetRequest
-    | WriteExcelSheetRequest
+    | ExecuteJavaScriptOnPageRequest
     | GetFullHtmlRequest
-    | GetSimplifiedHtmlRequest
     | GetScreenshotRequest
+    | GetSimplifiedHtmlRequest
     | GetUrlRequest
+    | GoToUrlRequest
+    | PressKeyRequest
+    | PrintMessageRequest
     | PromptForUserInputRequest
+    | ReadExcelSheetRequest
+    | ReadGoogleSheetRequest
     | UserApprovalRequest
+    | WaitForElementRequest
+    | WriteExcelSheetRequest
+    | WriteGoogleSheetRequest
 )
 
 
@@ -422,3 +510,5 @@ class ExtensionActionResponse(BaseModel):
     status: Literal["success", "error", "aborted"]
     error: str | None = None
     data: str | None = None
+    action_trace: tracing_model.ActionTrace | None = None
+    workflowTrace: dict[str, Any] | None = None
