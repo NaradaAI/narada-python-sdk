@@ -1,7 +1,7 @@
 import asyncio
 
 import rich
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 from pydantic import BaseModel, Field
 
 
@@ -19,13 +19,12 @@ class PaperInfo(BaseModel):
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
+    try:
         # Run a task in this browser window.
-        response = await window.agent(
+        response = await agent.run(
             prompt=(
                 'Search for "LLM Compiler" on Google and open the first arXiv paper on the results '
                 "page. Then extract the paper info from the arXiv page in the given format."
@@ -34,6 +33,8 @@ async def main() -> None:
         )
 
         rich.print("Response:", response.structured_output)
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

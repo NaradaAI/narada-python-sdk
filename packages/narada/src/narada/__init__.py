@@ -1,4 +1,9 @@
-from narada_core.actions.models import CriticResult, PressKeyEventItem
+from narada_core.actions.models import (
+    ActiveInputRequest,
+    CriticResult,
+    DispatchKeyEventItem,
+    PressKeyEventItem,
+)
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -9,7 +14,7 @@ from narada_core.errors import (
     UserAbortedError,
 )
 from narada_core.models import (
-    Agent,
+    AgentKind,
     CriticConfig,
     File,
     ReasoningEffort,
@@ -17,24 +22,37 @@ from narada_core.models import (
     ResponseContent,
 )
 
-from narada.client import Narada
+from narada.agent import Agent
 from narada.config import BrowserConfig, ProxyConfig
+from narada.environment import (
+    BaseBrowserEnvironment,
+    BrowserEnvironment,
+    CloudBrowserEnvironment,
+    Environment,
+    LambdaEnvironment,
+    RemoteBrowserEnvironment,
+    SessionDownloadItem,
+)
 from narada.utils import download_file, render_html
 from narada.version import __version__
-from narada.window import CloudBrowserWindow, LocalBrowserWindow, RemoteBrowserWindow
 
 __all__ = [
     "__version__",
+    "ActiveInputRequest",
     "Agent",
+    "AgentKind",
+    "BaseBrowserEnvironment",
     "BrowserConfig",
-    "CloudBrowserWindow",
+    "BrowserEnvironment",
+    "CloudBrowserEnvironment",
     "CriticConfig",
     "CriticResult",
+    "DispatchKeyEventItem",
     "PressKeyEventItem",
     "download_file",
+    "Environment",
     "File",
-    "LocalBrowserWindow",
-    "Narada",
+    "LambdaEnvironment",
     "NaradaError",
     "NaradaExtensionMissingError",
     "NaradaExtensionUnauthenticatedError",
@@ -43,9 +61,10 @@ __all__ = [
     "NaradaUnsupportedBrowserError",
     "ProxyConfig",
     "ReasoningEffort",
-    "RemoteBrowserWindow",
+    "RemoteBrowserEnvironment",
     "render_html",
     "Response",
     "ResponseContent",
+    "SessionDownloadItem",
     "UserAbortedError",
 ]

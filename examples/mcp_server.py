@@ -1,6 +1,6 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 from narada_core.models import (
     AuthenticationNone,
     McpServer,
@@ -8,11 +8,10 @@ from narada_core.models import (
 
 
 async def main() -> None:
-    # Initialize the Narada client.
-    async with Narada() as narada:
-        # Open a new browser window and initialize the Narada UI agent.
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
+    try:
         # Define an MCP server configuration.
         # This example uses no authentication, but you can also use:
         # - AuthenticationBearerToken(bearerToken="your-token")
@@ -29,12 +28,14 @@ async def main() -> None:
 
         # Run a task with the MCP server linked to the agent.
         # The agent will have access to the tools from the specified MCP server.
-        response = await window.agent(
+        response = await agent.run(
             prompt="Use the MCP server tools to fetch and process some data",
             mcp_servers=[mcp_server],
         )
 
         print("Response:", response.model_dump_json(indent=2))
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

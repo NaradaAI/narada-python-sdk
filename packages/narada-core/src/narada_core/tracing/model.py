@@ -8,8 +8,22 @@ from pydantic import (
     NonNegativeInt,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
+
+
+def _normalize_agent_type(agent_type: object) -> str:
+    """Normalize legacy SDK enum values into the frontend trace contract."""
+    match agent_type:
+        case 1 | "1":
+            return "generalist"
+        case 2 | "2":
+            return "operator"
+        case 3 | "3":
+            return "coreAgent"
+        case _:
+            return str(agent_type)
 
 
 class OperatorActionTraceItem(BaseModel):
@@ -41,6 +55,11 @@ class AgentTrace(BaseModel):
     agent_type: str
     action_trace: ActionTrace | None = None
     text: str | None = None
+
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _normalize_agent_type(cls, value: object) -> str:
+        return _normalize_agent_type(value)
 
 
 class ForLoopTrace(BaseModel):
@@ -170,6 +189,8 @@ class RunCustomAgentTrace(BaseModel):
     workflow_name: str
     status: Literal["success", "error"]
     error_message: str | None = None
+    subWorkflow: dict[str, Any] | None = None
+    children: ActionTrace | None = None
 
 
 class IfTrace(BaseModel):
@@ -239,10 +260,17 @@ class PythonSubAgentCallEvent(BaseModel):
     ts_end: int
     agent_type: str
     prompt: str
-    status: Literal["success", "error", "timeout"]
+    status: Literal["success", "error", "timeout", "input-required"]
     request_id: str | None = None
+    text: str | None = None
     error_message: str | None = None
     action_trace: ActionTrace | None = None
+    execution_trace_context: dict[str, Any] | None = None
+
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _normalize_agent_type(cls, value: object) -> str:
+        return _normalize_agent_type(value)
 
     @model_validator(mode="after")
     def _check_ts_ordering(self) -> PythonSubAgentCallEvent:
@@ -257,6 +285,10 @@ class PythonExtensionActionEvent(BaseModel):
     kind: Literal["extensionAction"] = "extensionAction"
     ts_start: int
     ts_end: int
+    # Correlates one Python SDK/Pyodide extension action with the frontend
+    # request body (`actionExecutionId`), the execution-trace event refs, and
+    # any evidence frame captured for that browser action.
+    action_execution_id: str | None = None
     # Matches the snake_case `name` discriminator on ExtensionActionRequest
     # (e.g. "go_to_url", "get_screenshot"). Carried as a plain string rather
     # than a Literal so adding a new extension action in the future does not
@@ -276,6 +308,11 @@ class PythonExtensionActionEvent(BaseModel):
         return self
 
 
+class PythonSubWorkflowEvent(BaseModel):
+    kind: Literal["subWorkflow"] = "subWorkflow"
+    workflowTrace: dict[str, Any]
+
+
 class PythonSideEffectEvent(BaseModel):
     kind: Literal["sideEffect"] = "sideEffect"
     ts: int
@@ -288,6 +325,7 @@ PythonTraceEvent = Annotated[
     | PythonStderrEvent
     | PythonSubAgentCallEvent
     | PythonExtensionActionEvent
+    | PythonSubWorkflowEvent
     | PythonSideEffectEvent,
     Field(discriminator="kind"),
 ]
