@@ -465,9 +465,6 @@ class PressKeyEventItem(BaseModel):
     modifiers: KeyEventModifiers | None = None
 
 
-RecordedKeyModifiers = KeyEventModifiers
-
-
 class PressKeyRequest(BaseModel):
     """Wire payload: key events for the extension to replay on the active tab."""
 
@@ -487,25 +484,25 @@ class ActiveInputRequest(BaseModel):
 
 
 type ExtensionActionRequest = (
-    AgenticSelectorRequest
-    | PressKeyRequest
-    | AgenticMatchingSelectorsFinderRequest
+    AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
+    | AgenticSelectorRequest
     | CloseWindowRequest
-    | GoToUrlRequest
-    | WaitForElementRequest
-    | PrintMessageRequest
-    | ReadGoogleSheetRequest
-    | ReadExcelSheetRequest
-    | WriteGoogleSheetRequest
-    | WriteExcelSheetRequest
-    | GetFullHtmlRequest
-    | GetSimplifiedHtmlRequest
-    | GetScreenshotRequest
-    | GetUrlRequest
     | ExecuteJavaScriptOnPageRequest
+    | GetFullHtmlRequest
+    | GetScreenshotRequest
+    | GetSimplifiedHtmlRequest
+    | GetUrlRequest
+    | GoToUrlRequest
+    | PressKeyRequest
+    | PrintMessageRequest
     | PromptForUserInputRequest
+    | ReadExcelSheetRequest
+    | ReadGoogleSheetRequest
     | UserApprovalRequest
+    | WaitForElementRequest
+    | WriteExcelSheetRequest
+    | WriteGoogleSheetRequest
 )
 
 
