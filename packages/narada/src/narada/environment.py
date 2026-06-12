@@ -1602,6 +1602,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_id: str,
         login_url: str,
         cdp_auth_headers: dict[str, str],
+        expected_browser_window_id: str | None = None,
     ) -> None:
         assert self._playwright is not None
 
@@ -1613,6 +1614,22 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
+        if expected_browser_window_id is not None:
+            # Put the backend-owned browser ID into sessionStorage before hydration
+            # so AgentCore sessions use the right Firestore route when needed.
+            await context.add_init_script(
+                script=f"""
+                    (() => {{
+                      const expectedBrowserWindowId = {json.dumps(expected_browser_window_id)};
+                      try {{
+                        sessionStorage.setItem(
+                          "naradaBrowserWindowId",
+                          expectedBrowserWindowId
+                        );
+                      }} catch (_error) {{}}
+                    }})();
+                """
+            )
         await initialization_page.goto(
             login_url, timeout=15_000, wait_until="domcontentloaded"
         )
@@ -1641,6 +1658,15 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 await initialization_page.goto(
                     login_url, timeout=15_000, wait_until="domcontentloaded"
                 )
+
+        if (
+            expected_browser_window_id is not None
+            and browser_window_id != expected_browser_window_id
+        ):
+            raise RuntimeError(
+                "Initialized cloud session reported browserWindowId "
+                f"{browser_window_id!r}, expected {expected_browser_window_id!r}."
+            )
 
         self._browser_window_id = browser_window_id
         self._session_id = session_id
@@ -1783,6 +1809,7 @@ async def initialize_existing_cloud_browser_session(
     session_id: str,
     login_url: str,
     cdp_auth_headers: dict[str, str],
+    expected_browser_window_id: str | None = None,
     config: BrowserConfig | None = None,
     api_key: str | None = None,
     auth_headers: dict[str, str] | None = None,
@@ -1807,6 +1834,7 @@ async def initialize_existing_cloud_browser_session(
             session_id=session_id,
             login_url=login_url,
             cdp_auth_headers=cdp_auth_headers,
+            expected_browser_window_id=expected_browser_window_id,
         )
         return RemoteBrowserEnvironment(
             api_key=api_key,
