@@ -8,7 +8,6 @@ from narada import (
     CloudBrowserEnvironment,
     LambdaEnvironment,
     RemoteBrowserEnvironment,
-    initialize_existing_cloud_browser_session,
 )
 from narada.config import BrowserConfig
 from narada_core.errors import NaradaTimeoutError
@@ -266,86 +265,6 @@ async def test_remote_browser_environment_with_cloud_session_stops_session_by_de
         session_id="session-123",
         timeout=None,
     )
-
-
-@pytest.mark.asyncio
-async def test_initialize_existing_cloud_browser_session_returns_non_owning_remote_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import narada.environment as environment_module
-
-    class _FakePlaywrightContextManager:
-        entered = False
-        exited = False
-
-        async def __aenter__(self):
-            self.entered = True
-            return object()
-
-        async def __aexit__(self, *args):
-            self.exited = True
-
-    playwright_context_manager = _FakePlaywrightContextManager()
-    monkeypatch.setattr(
-        environment_module,
-        "async_playwright",
-        lambda: playwright_context_manager,
-    )
-
-    validate_sdk_config = AsyncMock()
-    monkeypatch.setattr(
-        environment_module.CloudBrowserEnvironment,
-        "_validate_sdk_config",
-        validate_sdk_config,
-    )
-
-    initialize_calls: list[dict] = []
-
-    async def initialize_cloud_browser_window(self, **kwargs) -> None:
-        initialize_calls.append(kwargs)
-        self._browser_window_id = "browser-window-123"
-
-    monkeypatch.setattr(
-        environment_module.CloudBrowserEnvironment,
-        "_initialize_cloud_browser_window",
-        initialize_cloud_browser_window,
-    )
-
-    stop_cloud_browser_session = AsyncMock()
-    monkeypatch.setattr(
-        environment_module,
-        "_stop_cloud_browser_session",
-        stop_cloud_browser_session,
-    )
-
-    env = await initialize_existing_cloud_browser_session(
-        auth_headers={"x-api-key": "test-key"},
-        config=BrowserConfig(interactive=False),
-        cdp_websocket_url="wss://agentcore.example.test/session-123",
-        session_id="session-123",
-        login_url="https://app.narada.ai/initialize?sessionId=session-123",
-        cdp_auth_headers={"Authorization": "signed-cdp"},
-        expected_browser_window_id="backend-window-123",
-    )
-
-    assert playwright_context_manager.entered is True
-    assert playwright_context_manager.exited is True
-    validate_sdk_config.assert_awaited_once()
-    assert initialize_calls == [
-        {
-            "cdp_websocket_url": "wss://agentcore.example.test/session-123",
-            "session_id": "session-123",
-            "login_url": "https://app.narada.ai/initialize?sessionId=session-123",
-            "cdp_auth_headers": {"Authorization": "signed-cdp"},
-            "expected_browser_window_id": "backend-window-123",
-        }
-    ]
-    assert env.browser_window_id == "browser-window-123"
-    assert env.cloud_browser_session_id == "session-123"
-
-    await env.close()
-
-    stop_cloud_browser_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio

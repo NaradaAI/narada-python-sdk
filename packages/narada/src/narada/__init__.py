@@ -31,7 +31,6 @@ from narada.environment import (
     LambdaEnvironment,
     RemoteBrowserEnvironment,
     SessionDownloadItem,
-    initialize_existing_cloud_browser_session,
 )
 from narada.utils import download_file, render_html
 from narada.version import __version__
@@ -50,7 +49,6 @@ __all__ = [
     "download_file",
     "Environment",
     "File",
-    "initialize_existing_cloud_browser_session",
     "LambdaEnvironment",
     "NaradaError",
     "NaradaExtensionMissingError",
