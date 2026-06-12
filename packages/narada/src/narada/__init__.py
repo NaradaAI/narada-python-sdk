@@ -1,4 +1,8 @@
-from narada_core.actions.models import ActiveInputRequest, CriticResult
+from narada_core.actions.models import (
+    ActiveInputRequest,
+    CriticResult,
+    PressKeyEventItem,
+)
 from narada_core.errors import (
     NaradaError,
     NaradaExtensionMissingError,
@@ -52,6 +56,7 @@ __all__ = [
     "NaradaInitializationError",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
+    "PressKeyEventItem",
     "ProxyConfig",
     "ReasoningEffort",
     "RemoteBrowserEnvironment",

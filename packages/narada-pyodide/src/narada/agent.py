@@ -29,6 +29,8 @@ from narada_core.actions.models import (
     GoToUrlRequest,
     JsonValue,
     PrintMessageRequest,
+    PressKeyEventItem,
+    PressKeyRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -370,6 +372,27 @@ class Agent(Generic[_StructuredOutput]):
             timeout=timeout,
         )
         return result.selectors
+
+    async def press_key(
+        self,
+        *,
+        events: list[PressKeyEventItem | Mapping[str, Any]],
+        timeout: int | None = 60,
+    ) -> None:
+        """Dispatch keyboard events on the active tab through the extension."""
+        if not events:
+            raise ValueError("press_key requires a non-empty events= list")
+
+        normalized_events = [
+            event
+            if isinstance(event, PressKeyEventItem)
+            else PressKeyEventItem.model_validate(event)
+            for event in events
+        ]
+        return await self._browser_environment()._run_extension_action(
+            PressKeyRequest(events=normalized_events),
+            timeout=timeout,
+        )
 
     async def agentic_mouse_action(
         self,
