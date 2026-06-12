@@ -295,7 +295,7 @@ async def test_remote_browser_environment_dispatch_omits_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -319,7 +319,7 @@ async def test_remote_browser_environment_dispatch_omits_parent_run_ids(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_request_waits_through_active_input_required(
+async def test_dispatch_request_waits_through_hitl_input_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -330,7 +330,7 @@ async def test_dispatch_request_waits_through_active_input_required(
                     "status": "input-required",
                     "completedAt": None,
                     "response": None,
-                    "activeInputRequest": {
+                    "hitlInputMetadata": {
                         "inputId": "input-123",
                         "action": {
                             "name": "prompt_for_user_input",
@@ -351,7 +351,7 @@ async def test_dispatch_request_waits_through_active_input_required(
                     "status": "input-required",
                     "completedAt": None,
                     "response": None,
-                    "activeInputRequest": {
+                    "hitlInputMetadata": {
                         "inputId": "input-123",
                         "action": {
                             "name": "prompt_for_user_input",
@@ -372,7 +372,7 @@ async def test_dispatch_request_waits_through_active_input_required(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -396,9 +396,9 @@ async def test_dispatch_request_waits_through_active_input_required(
     assert pyfetch.await_count == 4
     assert sleep.await_count == 2
     on_input_required.assert_awaited_once()
-    active_input_request = on_input_required.await_args.args[0]
-    assert active_input_request.input_id == "input-123"
-    assert active_input_request.action.name == "prompt_for_user_input"
+    hitl_input_metadata = on_input_required.await_args.args[0]
+    assert hitl_input_metadata.input_id == "input-123"
+    assert hitl_input_metadata.action.name == "prompt_for_user_input"
 
 
 @pytest.mark.asyncio
@@ -417,7 +417,7 @@ async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
                     },
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -458,7 +458,7 @@ async def test_agent_run_forwards_clear_chat(
                     },
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -494,7 +494,7 @@ async def test_agent_run_exposes_workflow_trace_alias(
                     },
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -560,7 +560,7 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
                         "workflowTrace": workflow_trace,
                     },
                     "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
             _FakeResponse(json_data={"requestId": "critic-request-123"}),
@@ -577,7 +577,7 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
                         "workflowTrace": critic_workflow_trace,
                     },
                     "usage": {"actions": 0, "credits": 0},
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -629,7 +629,7 @@ async def test_dispatch_request_retries_poll_fetch_failures(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -691,7 +691,7 @@ async def test_dispatch_request_emits_string_trace_agent_type_for_sdk_enum(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -749,7 +749,7 @@ async def test_dispatch_request_emits_success_text_and_execution_trace_context(
                         "actionTrace": [],
                         "executionTraceContext": execution_trace_context,
                     },
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -795,7 +795,7 @@ async def test_dispatch_request_preserves_current_file_variable_shape(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]
@@ -1168,7 +1168,7 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
             _FakeResponse(json_data={"requestId": "req-2"}),
@@ -1177,7 +1177,7 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
                     "status": "success",
                     "completedAt": "2026-05-08T00:00:00+00:00",
                     "response": None,
-                    "activeInputRequest": None,
+                    "hitlInputMetadata": None,
                 }
             ),
         ]

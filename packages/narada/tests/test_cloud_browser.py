@@ -101,7 +101,7 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
                 "usage": None,
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": None,
-                "activeInputRequest": {
+                "hitlInputMetadata": {
                     "inputId": "input-1",
                     "action": {
                         "name": "prompt_for_user_input",
@@ -118,7 +118,7 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
                 "usage": None,
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": None,
-                "activeInputRequest": {
+                "hitlInputMetadata": {
                     "inputId": "input-1",
                     "action": {
                         "name": "prompt_for_user_input",
@@ -135,7 +135,7 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
                 "usage": None,
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": None,
-                "activeInputRequest": {
+                "hitlInputMetadata": {
                     "inputId": "input-2",
                     "action": {
                         "name": "user_approval",
@@ -152,7 +152,7 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
-                "activeInputRequest": None,
+                "hitlInputMetadata": None,
             },
         ]
     )
@@ -164,8 +164,8 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
 
     observed_input_ids: list[str] = []
 
-    async def on_input_required(active_input_request) -> None:
-        observed_input_ids.append(active_input_request.input_id)
+    async def on_input_required(hitl_input_metadata) -> None:
+        observed_input_ids.append(hitl_input_metadata.input_id)
 
     env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
 
@@ -201,7 +201,7 @@ async def test_dispatch_request_includes_execution_trace_context(
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
-                "activeInputRequest": None,
+                "hitlInputMetadata": None,
             }
         ]
     )
@@ -403,7 +403,7 @@ async def test_agent_run_exposes_workflow_trace_alias(
                 },
                 "completedAt": "2026-01-01T00:00:01Z",
                 "usage": {"actions": 0, "credits": 0},
-                "activeInputRequest": None,
+                "hitlInputMetadata": None,
             }
         ),
     )

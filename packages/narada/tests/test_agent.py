@@ -58,7 +58,7 @@ class _RemoteDispatchFakeClientSession:
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
-                "activeInputRequest": None,
+                "hitlInputMetadata": None,
             }
         )
 

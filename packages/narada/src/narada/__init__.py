@@ -1,6 +1,6 @@
 from narada_core.actions.models import (
-    ActiveInputRequest,
     CriticResult,
+    HitlInputMetadata,
     PressKeyEventItem,
 )
 from narada_core.errors import (
@@ -37,7 +37,7 @@ from narada.version import __version__
 
 __all__ = [
     "__version__",
-    "ActiveInputRequest",
+    "HitlInputMetadata",
     "Agent",
     "AgentKind",
     "BaseBrowserEnvironment",
