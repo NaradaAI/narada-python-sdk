@@ -1374,15 +1374,19 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
         *,
         browser_window_id: str,
         cloud_browser_session_id: str | None = None,
+        stop_cloud_browser_session_on_close: bool = True,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        base_url: str | None = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
             auth_headers=auth_headers,
+            base_url=base_url,
             browser_window_id=browser_window_id,
         )
         self._cloud_browser_session_id = cloud_browser_session_id
+        self._stop_cloud_browser_session_on_close = stop_cloud_browser_session_on_close
 
     @property
     def _validates_sdk_config(self) -> bool:
@@ -1396,13 +1400,16 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         """Closes the remote browser environment.
 
-        If this window is backed by a cloud browser session, this also stops the cloud
+        If this window is backed by an SDK-owned cloud browser session, this also stops the cloud
         session.
         """
         if self._cloud_browser_session_id is None:
             return await self._run_extension_action(
                 CloseWindowRequest(), timeout=timeout
             )
+
+        if not self._stop_cloud_browser_session_on_close:
+            return
 
         await _stop_cloud_browser_session(
             base_url=self._base_url,
@@ -1442,10 +1449,12 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_timeout: int | None = None,
         api_key: str | None = None,
         auth_headers: dict[str, str] | None = None,
+        base_url: str | None = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
             auth_headers=auth_headers,
+            base_url=base_url,
         )
         self._config = config or BrowserConfig()
         self._session_name = session_name
@@ -1597,6 +1606,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_id: str,
         login_url: str,
         cdp_auth_headers: dict[str, str],
+        expected_browser_window_id: str | None = None,
     ) -> None:
         assert self._playwright is not None
 
@@ -1608,6 +1618,17 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
+        if expected_browser_window_id is not None:
+            await context.add_init_script(
+                script=(
+                    "(() => {\n"
+                    f"  const expectedBrowserWindowId = {json.dumps(expected_browser_window_id)};\n"
+                    "  try {\n"
+                    "    sessionStorage.setItem('naradaBrowserWindowId', expectedBrowserWindowId);\n"
+                    "  } catch (_error) {}\n"
+                    "})();"
+                )
+            )
         await initialization_page.goto(
             login_url, timeout=15_000, wait_until="domcontentloaded"
         )
@@ -1628,7 +1649,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaTimeoutError:
+            except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
@@ -1636,6 +1657,15 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 await initialization_page.goto(
                     login_url, timeout=15_000, wait_until="domcontentloaded"
                 )
+
+        if (
+            expected_browser_window_id is not None
+            and browser_window_id != expected_browser_window_id
+        ):
+            raise RuntimeError(
+                "Initialized cloud session reported browserWindowId "
+                f"{browser_window_id!r}, expected {expected_browser_window_id!r}."
+            )
 
         self._browser_window_id = browser_window_id
         self._session_id = session_id
@@ -1770,6 +1800,53 @@ class LambdaEnvironment(Environment):
             auth_headers=self._auth_headers,
             session_id=self.session_id,
         )
+
+
+async def initialize_existing_cloud_browser_session(
+    *,
+    cdp_websocket_url: str,
+    session_id: str,
+    login_url: str,
+    cdp_auth_headers: dict[str, str],
+    config: BrowserConfig | None = None,
+    expected_browser_window_id: str | None = None,
+    api_key: str | None = None,
+    auth_headers: dict[str, str] | None = None,
+    base_url: str | None = None,
+) -> RemoteBrowserEnvironment:
+    """Initialize a backend-owned AgentCore Browser session.
+
+    This is for services that already created the cloud-browser session and need the SDK's
+    CDP/bootstrap flow only. The returned remote environment can dispatch through the initialized
+    browser window, but closing it does not stop the backend-owned cloud session.
+    """
+    cloud_env = CloudBrowserEnvironment(
+        api_key=api_key,
+        auth_headers=auth_headers,
+        base_url=base_url,
+        config=config,
+    )
+    try:
+        await cloud_env._validate_sdk_config()
+        cloud_env._playwright_context_manager = async_playwright()
+        cloud_env._playwright = await cloud_env._playwright_context_manager.__aenter__()
+        await cloud_env._initialize_cloud_browser_window(
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            login_url=login_url,
+            cdp_auth_headers=cdp_auth_headers,
+            expected_browser_window_id=expected_browser_window_id,
+        )
+        return RemoteBrowserEnvironment(
+            api_key=api_key,
+            auth_headers=auth_headers,
+            base_url=base_url,
+            browser_window_id=cloud_env.browser_window_id,
+            cloud_browser_session_id=session_id,
+            stop_cloud_browser_session_on_close=False,
+        )
+    finally:
+        await cloud_env._stop_playwright()
 
 
 async def _fetch_presigned_download_url(

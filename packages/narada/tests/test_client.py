@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import narada.environment as environment_module
 import pytest
 from narada import CloudBrowserEnvironment, RemoteBrowserEnvironment
 from narada.config import BrowserConfig
+from narada.environment import initialize_existing_cloud_browser_session
 
 
 class _FakePage:
@@ -19,6 +22,10 @@ class _FakePage:
 class _FakeContext:
     def __init__(self, page: _FakePage) -> None:
         self.pages = [page]
+        self.init_scripts: list[str] = []
+
+    async def add_init_script(self, *, script: str) -> None:
+        self.init_scripts.append(script)
 
 
 class _FakeBrowser:
@@ -43,6 +50,18 @@ class _FakeChromium:
 class _FakePlaywright:
     def __init__(self, page: _FakePage) -> None:
         self.chromium = _FakeChromium(page)
+
+
+class _FakePlaywrightContextManager:
+    def __init__(self, playwright: _FakePlaywright) -> None:
+        self.playwright = playwright
+        self.exited = False
+
+    async def __aenter__(self) -> _FakePlaywright:
+        return self.playwright
+
+    async def __aexit__(self, *_args: object) -> None:
+        self.exited = True
 
 
 class _FakeRemoteDispatchPostResponse:
@@ -145,6 +164,94 @@ async def test_cloud_browser_initialization_uses_domcontentloaded_navigation(
             "wait_until": "domcontentloaded",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_initialization_can_preseed_browser_window_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage()
+    env = CloudBrowserEnvironment(
+        config=BrowserConfig(interactive=False),
+        auth_headers={"x-test": "true"},
+    )
+    fake_playwright = _FakePlaywright(page)
+    env._playwright = fake_playwright
+
+    async def wait_for_browser_window_id(*args: object, **kwargs: object) -> str:
+        return "expected-window-123"
+
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
+
+    await env._initialize_cloud_browser_window(
+        cdp_websocket_url="wss://example.test/cdp",
+        session_id="session-123",
+        login_url="https://example.test/initialize",
+        cdp_auth_headers={"authorization": "Bearer test"},
+        expected_browser_window_id="expected-window-123",
+    )
+
+    context = fake_playwright.chromium.browser.contexts[0]
+    assert len(context.init_scripts) == 1
+    assert "expected-window-123" in context.init_scripts[0]
+    assert "naradaBrowserWindowId" in context.init_scripts[0]
+    assert env.browser_window_id == "expected-window-123"
+    assert env.cloud_browser_session_id == "session-123"
+
+
+@pytest.mark.asyncio
+async def test_initialize_existing_cloud_browser_session_returns_non_owning_remote_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage()
+    manager = _FakePlaywrightContextManager(_FakePlaywright(page))
+    monkeypatch.setattr(environment_module, "async_playwright", lambda: manager)
+
+    async def validate_sdk_config(self: CloudBrowserEnvironment) -> None:
+        return None
+
+    async def wait_for_browser_window_id(*args: object, **kwargs: object) -> str:
+        return "expected-window-123"
+
+    monkeypatch.setattr(
+        CloudBrowserEnvironment, "_validate_sdk_config", validate_sdk_config
+    )
+    monkeypatch.setattr(
+        CloudBrowserEnvironment,
+        "_wait_for_cloud_browser_window_id",
+        wait_for_browser_window_id,
+    )
+
+    env = await initialize_existing_cloud_browser_session(
+        cdp_websocket_url="wss://example.test/cdp",
+        session_id="session-123",
+        login_url="https://example.test/initialize",
+        cdp_auth_headers={"authorization": "Bearer test"},
+        config=BrowserConfig(interactive=False),
+        expected_browser_window_id="expected-window-123",
+        auth_headers={"x-test": "true"},
+        base_url="https://api.example.test/fast/v2",
+    )
+
+    assert manager.exited is True
+    assert isinstance(env, RemoteBrowserEnvironment)
+    assert env.browser_window_id == "expected-window-123"
+    assert env.cloud_browser_session_id == "session-123"
+    assert env._base_url == "https://api.example.test/fast/v2"
+
+    stop_cloud_browser_session = AsyncMock()
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(
+        environment_module, "_stop_cloud_browser_session", stop_cloud_browser_session
+    )
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    await env.close()
+
+    stop_cloud_browser_session.assert_not_awaited()
+    run_extension_action.assert_not_awaited()
 
 
 @pytest.mark.asyncio
