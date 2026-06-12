@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
-from narada_core.actions.critic import run_critic
+from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     AgenticMatchingSelectorsFinderRequest,
@@ -197,6 +197,10 @@ class Agent(Generic[_StructuredOutput]):
                 critic=critic,
                 time_zone=time_zone,
                 timeout=timeout,
+            )
+            workflow_trace = merge_critic_workflow_trace(
+                workflow_trace=workflow_trace,
+                critic_result=critic_result,
             )
 
         return AgentResponse(

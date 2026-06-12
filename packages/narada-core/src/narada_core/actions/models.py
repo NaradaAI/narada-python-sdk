@@ -43,10 +43,13 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 
 
 class CriticResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):

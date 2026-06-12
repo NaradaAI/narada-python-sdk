@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
-from narada_core.actions.critic import run_critic
+from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     AgenticMatchingSelectorsFinderRequest,
@@ -189,10 +189,6 @@ class Agent(Generic[_StructuredOutput]):
         )
         workflow_trace = response_content.get("workflowTrace")
         parent_request_id = self.environment._current_parent_request_id()
-        # Preserve the response contract for direct callers, but avoid adding a second
-        # child node when the backend will stitch the child request into the parent row.
-        if workflow_trace is not None and parent_request_id is None:
-            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         critic_result: CriticResult | None = None
         if critic is not None:
@@ -205,6 +201,15 @@ class Agent(Generic[_StructuredOutput]):
                 time_zone=time_zone,
                 timeout=timeout,
             )
+            workflow_trace = merge_critic_workflow_trace(
+                workflow_trace=workflow_trace,
+                critic_result=critic_result,
+            )
+
+        # Preserve the response contract for direct callers, but avoid adding a second
+        # child node when the backend will stitch the child request into the parent row.
+        if workflow_trace is not None and parent_request_id is None:
+            _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
