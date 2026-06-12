@@ -32,6 +32,7 @@ from narada.environment import (
     RemoteBrowserEnvironment,
     SessionDownloadItem,
 )
+from narada.tracing import TraceSession, trace
 from narada.utils import download_file, render_html
 from narada.version import __version__
 
@@ -64,5 +65,7 @@ __all__ = [
     "Response",
     "ResponseContent",
     "SessionDownloadItem",
+    "trace",
+    "TraceSession",
     "UserAbortedError",
 ]

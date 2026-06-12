@@ -70,6 +70,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     execution_trace_context: dict[str, Any] | None = Field(
         default=None, alias="executionTraceContext"
     )
+    execution_trace_path: str | None = None
 
 
 class AgenticSelectorClickAction(TypedDict):

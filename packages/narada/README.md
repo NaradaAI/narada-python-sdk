@@ -92,7 +92,53 @@ This version introduces a non-backward-compatible, agent-centered API:
 - **Parallel Execution**: Run multiple browser tasks simultaneously across different windows
 - **Error Handling**: Built-in timeout handling and retry mechanisms
 - **Action Recording**: Generate GIFs of agent actions for debugging and documentation
+- **Trace Materialization**: Materialize returned execution traces into local proof roots for
+  debugging and validation
 - **Async Support**: Full async/await support for efficient operations
+
+## Workbench Trace Materialization
+
+When a Narada run returns an `executionTraceContext`, the SDK can materialize the trace into a local
+filesystem proof root:
+
+```python
+import asyncio
+
+from narada import Agent, BrowserEnvironment, trace
+
+
+async def main() -> None:
+    env = BrowserEnvironment()
+    try:
+        async with trace("workflow-v3", out="./narada-runs/workflow-v3") as tr:
+            response = await Agent(environment=env).run("/me/workflow-v3")
+            print(response.execution_trace_context)
+        print("Trace proof root:", tr.path)
+        print("Response trace path:", response.execution_trace_path)
+    finally:
+        await env.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The CLI exposes the same materializer and verifier:
+
+```bash
+narada workbench trace materialize --request-id req_123 --out ./narada-runs/run-1
+narada workbench trace materialize --context-file context.json --source-status success --out ./narada-runs/run-1
+narada workbench score ./narada-runs/run-1 --json
+narada workbench verify ./narada-runs/run-1 --json
+```
+
+The materializer uses Narada's backend ownership checks and short-lived artifact URLs. It writes
+hash-linked local artifacts and redacted reports; it does not require local AWS credentials.
+`--request-id` is the preferred proof path because it binds the trace to the authoritative
+remote-dispatch run status. A raw context file can materialize trace artifacts, but it is not a
+clean run-success proof unless the caller provides explicit source-run status.
+For a one-off run, `await agent.run("/me/workflow-v3", trace=True)` materializes the returned
+trace immediately and sets `response.execution_trace_path` to the local proof root.
 
 ## Key Capabilities
 
