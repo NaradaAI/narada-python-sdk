@@ -1,25 +1,26 @@
 import asyncio
 
-from narada import Narada
+from narada import Agent, BrowserEnvironment
 
 
 async def main() -> None:
-    async with Narada() as narada:
-        window = await narada.open_and_initialize_browser_window()
+    env = BrowserEnvironment()
+    agent = Agent(environment=env)
 
-        await window.go_to_url(
+    try:
+        await agent.go_to_url(
             url="https://w3c.github.io/uievents/tools/key-event-viewer.html", timeout=60
         )
 
         # Dict items are accepted (same shape as JSON); PressKeyEventItem is optional.
-        await window.press_key(
+        await agent.press_key(
             events=[
                 {"type": "keyDown", "code": "KeyA", "key": "a"},
                 {"type": "keyUp", "code": "KeyA", "key": "a"},
             ],
         )
 
-        await window.press_key(
+        await agent.press_key(
             events=[
                 {
                     "type": "keyDown",
@@ -42,6 +43,8 @@ async def main() -> None:
                 {"type": "keyUp", "code": "ShiftLeft", "key": "Shift"},
             ],
         )
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":

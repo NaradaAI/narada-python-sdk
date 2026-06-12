@@ -16,8 +16,6 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     CriticResult,
-    DispatchKeyEventItem,
-    DispatchKeyEventRequest,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
     GetFullHtmlRequest,
@@ -31,6 +29,8 @@ from narada_core.actions.models import (
     GoToUrlRequest,
     JsonValue,
     PrintMessageRequest,
+    PressKeyEventItem,
+    PressKeyRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -361,35 +361,26 @@ class Agent(Generic[_StructuredOutput]):
         )
         return result.selectors
 
-    async def dispatch_key_event(
+    async def press_key(
         self,
         *,
-        events: list[DispatchKeyEventItem | Mapping[str, Any]],
+        events: list[PressKeyEventItem | Mapping[str, Any]],
         timeout: int | None = 60,
     ) -> None:
         """Dispatch keyboard events on the active tab through the extension."""
         if not events:
-            raise ValueError("dispatch_key_event requires a non-empty events= list")
+            raise ValueError("press_key requires a non-empty events= list")
 
         normalized_events = [
             event
-            if isinstance(event, DispatchKeyEventItem)
-            else DispatchKeyEventItem.model_validate(event)
+            if isinstance(event, PressKeyEventItem)
+            else PressKeyEventItem.model_validate(event)
             for event in events
         ]
         return await self._browser_environment()._run_extension_action(
-            DispatchKeyEventRequest(events=normalized_events),
+            PressKeyRequest(events=normalized_events),
             timeout=timeout,
         )
-
-    async def press_key(
-        self,
-        *,
-        events: list[DispatchKeyEventItem | Mapping[str, Any]],
-        timeout: int | None = 60,
-    ) -> None:
-        """Compatibility alias for :meth:`dispatch_key_event`."""
-        return await self.dispatch_key_event(events=events, timeout=timeout)
 
     async def agentic_mouse_action(
         self,

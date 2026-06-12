@@ -1,7 +1,6 @@
 from narada_core.actions.models import (
     ActiveInputRequest,
     CriticResult,
-    DispatchKeyEventItem,
     PressKeyEventItem,
 )
 from narada_core.errors import (
@@ -40,7 +39,6 @@ __all__ = [
     "CloudBrowserEnvironment",
     "CriticConfig",
     "CriticResult",
-    "DispatchKeyEventItem",
     "PressKeyEventItem",
     "download_file",
     "Environment",

@@ -458,25 +458,21 @@ class KeyEventModifiers(TypedDict, total=False):
     meta: bool
 
 
-class DispatchKeyEventItem(BaseModel):
+class PressKeyEventItem(BaseModel):
     type: Literal["keyDown", "keyUp", "press"] = "keyDown"  # noqa: A003
     code: str
     key: str | None = None
     modifiers: KeyEventModifiers | None = None
 
 
-PressKeyEventItem = DispatchKeyEventItem
 RecordedKeyModifiers = KeyEventModifiers
 
 
-class DispatchKeyEventRequest(BaseModel):
+class PressKeyRequest(BaseModel):
     """Wire payload: key events for the extension to replay on the active tab."""
 
-    name: Literal["dispatch_key_event"] = "dispatch_key_event"
-    events: list[DispatchKeyEventItem]
-
-
-PressKeyRequest = DispatchKeyEventRequest
+    name: Literal["press_key"] = "press_key"
+    events: list[PressKeyEventItem]
 
 
 ActiveInputAction = Annotated[
@@ -492,7 +488,7 @@ class ActiveInputRequest(BaseModel):
 
 type ExtensionActionRequest = (
     AgenticSelectorRequest
-    | DispatchKeyEventRequest
+    | PressKeyRequest
     | AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | CloseWindowRequest
