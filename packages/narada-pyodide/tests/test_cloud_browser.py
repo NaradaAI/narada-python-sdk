@@ -1187,7 +1187,7 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
     env = narada_pkg.BrowserEnvironment()
 
     env_module._narada_parent_run_ids = _FakeJsProxy(["run-a"])
-    first_response = await env._dispatch_request(prompt="first prompt")
+    first_response = await env._dispatch_request(prompt="first prompt", timeout=17)
 
     env_module._narada_parent_run_ids = _FakeJsProxy(["run-b", "run-c"])
     second_response = await env._dispatch_request(prompt="second prompt")
@@ -1197,6 +1197,8 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
 
     first_post = json.loads(pyfetch.await_args_list[1].kwargs["body"])
     second_post = json.loads(pyfetch.await_args_list[3].kwargs["body"])
+    assert first_post["timeout"] == 17
+    assert second_post["timeout"] == 1000
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
     assert first_post["executionTraceContext"] == {

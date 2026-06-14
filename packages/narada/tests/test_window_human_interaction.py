@@ -44,6 +44,44 @@ class _FakeSession:
         self.post_bodies.append(kwargs["json"])
         return _FakeResponse(next(self._responses))
 
+    def get(self, _url: str, **_kwargs: Any) -> _FakeResponse:
+        return _FakeResponse(next(self._responses))
+
+
+@pytest.mark.asyncio
+async def test_agent_run_forwards_timeout_to_remote_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {"requestId": "request-123"},
+            {
+                "status": "success",
+                "response": {
+                    "text": "ok",
+                    "output": {"type": "text", "content": "ok"},
+                },
+                "usage": {"actions": 0, "credits": 0},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    response = await agent.run("hello", timeout=17)
+
+    assert response.status == "success"
+    assert fake_session.post_bodies[0]["timeout"] == 17
+
 
 @pytest.mark.asyncio
 async def test_prompt_for_user_input_uses_hitl_default_timeout(

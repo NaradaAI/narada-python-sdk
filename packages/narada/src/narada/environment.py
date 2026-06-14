@@ -716,6 +716,7 @@ class Environment(ABC):
         body: dict[str, Any] = {
             "prompt": agent_prefix + prompt,
             "timeZone": time_zone,
+            "timeout": timeout,
         }
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
