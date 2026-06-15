@@ -135,6 +135,7 @@ async def test_agent_run_forwards_test_mode(
     env = _CountingEnvironment()
     agent = Agent(environment=env)
 
-    await agent.run("automated eval", test=True)
+    await agent.run("/agentMaker repair workflow", test=True)
 
+    assert fake_session.dispatched_bodies[0]["prompt"] == "/agentMaker repair workflow"
     assert fake_session.dispatched_bodies[0]["test"] is True

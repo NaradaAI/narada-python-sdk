@@ -504,9 +504,12 @@ async def test_agent_run_forwards_test_mode(
         cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    await narada_pkg.Agent(environment=env).run("automated eval", test=True)
+    await narada_pkg.Agent(environment=env).run(
+        "/agentMaker repair workflow", test=True
+    )
 
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["prompt"] == "/agentMaker repair workflow"
     assert payload["test"] is True
 
 

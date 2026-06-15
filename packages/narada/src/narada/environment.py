@@ -715,9 +715,12 @@ class Environment(ABC):
             )
         deadline = time.monotonic() + timeout
 
-        agent_prefix = (
-            agent.prompt_prefix() if isinstance(agent, AgentKind) else f"{agent} "
-        )
+        if isinstance(agent, AgentKind):
+            agent_prefix = (
+                "" if prompt.lstrip().startswith("/") else agent.prompt_prefix()
+            )
+        else:
+            agent_prefix = f"{agent} "
         body: dict[str, Any] = {
             "prompt": agent_prefix + prompt,
             "timeZone": time_zone,
