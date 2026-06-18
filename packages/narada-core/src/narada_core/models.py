@@ -5,7 +5,7 @@ from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, Typ
 
 from pydantic import BaseModel, Field
 
-from narada_core.actions.models import ActiveInputRequest
+from narada_core.actions.models import HitlInputMetadata
 
 
 class AgentKind(Enum):
@@ -430,7 +430,7 @@ class Response(TypedDict, Generic[_MaybeStructuredOutput]):
     createdAt: str
     completedAt: str | None
     usage: Usage
-    activeInputRequest: ActiveInputRequest | None
+    hitlInputMetadata: HitlInputMetadata | None
 
 
 class _RemoteDispatchPollResponse(TypedDict):
@@ -440,7 +440,7 @@ class _RemoteDispatchPollResponse(TypedDict):
     createdAt: str
     completedAt: str | None
     usage: Usage | None
-    activeInputRequest: ActiveInputRequest | None
+    hitlInputMetadata: HitlInputMetadata | None
 
 
 class File(TypedDict):

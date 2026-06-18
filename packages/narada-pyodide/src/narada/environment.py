@@ -31,10 +31,10 @@ from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
-    ActiveInputRequest,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
+    HitlInputMetadata,
 )
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
@@ -110,11 +110,11 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 # Optional remote-dispatch context. In frontend Pyodide runs, these are generated
 # by prepare-code.ts; extension-action calls forward them so the parent request
-# can report active input-required status.
+# can report HITL input-required status.
 _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
 _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
 
-type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
+type InputRequiredCallback = Callable[[HitlInputMetadata], Awaitable[None] | None]
 
 
 class _InputVariableFileReference(TypedDict):
@@ -148,16 +148,16 @@ async def _notify_input_required_callback(
     if callback is None or response.get("status") != "input-required":
         return
 
-    active_input_request_data = response.get("activeInputRequest")
-    if active_input_request_data is None:
+    hitl_input_metadata_data = response.get("hitlInputMetadata")
+    if hitl_input_metadata_data is None:
         return
 
-    active_input_request = ActiveInputRequest.model_validate(active_input_request_data)
-    if active_input_request.input_id in seen_input_ids:
+    hitl_input_metadata = HitlInputMetadata.model_validate(hitl_input_metadata_data)
+    if hitl_input_metadata.input_id in seen_input_ids:
         return
 
-    seen_input_ids.add(active_input_request.input_id)
-    callback_result = callback(active_input_request)
+    seen_input_ids.add(hitl_input_metadata.input_id)
+    callback_result = callback(hitl_input_metadata)
     if inspect.isawaitable(callback_result):
         await callback_result
 
