@@ -39,6 +39,7 @@ from narada_core.actions.models import (
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
     NaradaError,
+    NaradaOperatorMaxStepsExceededError,
     NaradaTimeoutError,
     UserAbortedError,
 )
@@ -113,8 +114,39 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 # can report active input-required status.
 _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
 _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+_MAX_OPERATOR_STEPS_ERROR_CODE = "OperatorMaxIterationsExceededError"
+_MAX_OPERATOR_STEPS_HARD_LIMIT = 100
 
 type InputRequiredCallback = Callable[[ActiveInputRequest], Awaitable[None] | None]
+
+
+def _validate_max_operator_steps(max_operator_steps: int | None) -> None:
+    if max_operator_steps is None:
+        return
+    if not 1 <= max_operator_steps <= _MAX_OPERATOR_STEPS_HARD_LIMIT:
+        raise ValueError(
+            "`max_operator_steps` must be between 1 and "
+            f"{_MAX_OPERATOR_STEPS_HARD_LIMIT}."
+        )
+
+
+def _raise_for_known_remote_dispatch_error(response_content: dict[str, Any]) -> None:
+    if response_content.get("errorCode") != _MAX_OPERATOR_STEPS_ERROR_CODE:
+        return
+
+    max_operator_steps: int | None = None
+    errors = response_content.get("errors")
+    if isinstance(errors, list) and len(errors) > 0 and isinstance(errors[0], dict):
+        chain_args = errors[0].get("chainArgs")
+        if isinstance(chain_args, dict):
+            raw_max_operator_steps = chain_args.get("maxIterations")
+            if isinstance(raw_max_operator_steps, int):
+                max_operator_steps = raw_max_operator_steps
+
+    raise NaradaOperatorMaxStepsExceededError(
+        response_content.get("text") or "The operator reached the maximum number of steps.",
+        max_operator_steps=max_operator_steps,
+    )
 
 
 class _InputVariableFileReference(TypedDict):
@@ -438,6 +470,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -464,6 +497,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -490,6 +524,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -516,6 +551,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -542,6 +578,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -558,6 +595,7 @@ class Environment(ABC):
                 "`reasoning` is only supported with `agent=AgentKind.CORE_AGENT` "
                 f"(got agent={agent!r})"
             )
+        _validate_max_operator_steps(max_operator_steps)
         # Trace instrumentation: the entire method body is wrapped so that any
         # exit (successful return, timeout, or non-timeout failure) produces a
         # ``subAgentCall`` trace event with matching status. See `_trace.py`.
@@ -632,6 +670,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if max_operator_steps is not None:
+            body["operatorMaxIterations"] = max_operator_steps
 
         try:
             seen_input_ids: set[str] = set()
@@ -689,6 +729,8 @@ class Environment(ABC):
 
                 response_content = response["response"]
                 if response_content is not None:
+                    if response["status"] == "error":
+                        _raise_for_known_remote_dispatch_error(response_content)
                     # Populate the `structuredOutput` field. This is a client-side field
                     # that's not directly returned by the API.
                     output_data = response_content.get("output")

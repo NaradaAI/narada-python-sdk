@@ -28,9 +28,9 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     JsonValue,
-    PrintMessageRequest,
     PressKeyEventItem,
     PressKeyRequest,
+    PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -105,6 +105,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -131,6 +132,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -156,6 +158,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
@@ -178,6 +181,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            max_operator_steps=max_operator_steps,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -248,6 +252,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -276,6 +281,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                max_operator_steps=max_operator_steps,
                 timeout=timeout,
             )
         else:
@@ -312,6 +318,7 @@ class Agent(Generic[_StructuredOutput]):
                 callback_headers=callback_headers,
                 on_input_required=on_input_required,
                 critic_context=critic_context,
+                max_operator_steps=max_operator_steps,
                 timeout=timeout,
             )
         return remote_dispatch_response

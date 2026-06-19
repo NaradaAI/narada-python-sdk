@@ -16,6 +16,17 @@ class NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(NaradaTimeoutError):
         )
 
 
+class NaradaOperatorMaxStepsExceededError(NaradaError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        max_operator_steps: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.max_operator_steps = max_operator_steps
+
+
 class NaradaUnsupportedBrowserError(NaradaError):
     pass
 
