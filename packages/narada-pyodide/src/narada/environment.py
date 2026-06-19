@@ -144,7 +144,8 @@ def _raise_for_known_remote_dispatch_error(response_content: dict[str, Any]) -> 
                 max_operator_steps = raw_max_operator_steps
 
     raise NaradaOperatorMaxStepsExceededError(
-        response_content.get("text") or "The operator reached the maximum number of steps.",
+        response_content.get("text")
+        or "The operator reached the maximum number of steps.",
         max_operator_steps=max_operator_steps,
     )
 
