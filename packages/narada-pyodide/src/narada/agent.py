@@ -161,7 +161,14 @@ class Agent(Generic[_StructuredOutput]):
         max_operator_steps: int | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
-        """Invokes an agent in the bound Narada environment."""
+        """Invokes an agent in the bound Narada environment.
+
+        Args:
+            max_operator_steps: Optional cap on cumulative Operator browser-action
+                steps for this run/session. Must be between 1 and 100. When
+                reached, ``Agent.run`` raises
+                ``NaradaOperatorMaxStepsExceededError``.
+        """
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
             clear_chat=clear_chat,
