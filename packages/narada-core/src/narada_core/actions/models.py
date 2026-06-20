@@ -314,16 +314,26 @@ class AgenticMouseActionRequest(BaseModel):
     recorded_click: RecordedClick
     fallback_operator_query: str
     resize_window: bool = False
+    verification_description: str | None = None
+    verification_delay_ms: int | None = None
 
     @override
     def model_dump(self) -> dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "action": _dump_agentic_mouse_action(self.action),
             "recorded_click": self.recorded_click,
             "resize_window": self.resize_window,
             "fallback_operator_query": self.fallback_operator_query,
         }
+        if self.verification_description is not None:
+            result["verification_description"] = self.verification_description
+            result["verification_delay_ms"] = self.verification_delay_ms
+        return result
+
+
+class AgenticMouseActionResponse(BaseModel):
+    verified: bool | None = None
 
 
 class CloseWindowRequest(BaseModel):

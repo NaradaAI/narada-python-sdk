@@ -9,6 +9,7 @@ from narada_core.actions.models import (
     AgenticMatchingSelectorsFinderResponse,
     AgenticMouseAction,
     AgenticMouseActionRequest,
+    AgenticMouseActionResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -28,9 +29,9 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     JsonValue,
-    PrintMessageRequest,
     PressKeyEventItem,
     PressKeyRequest,
+    PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -401,20 +402,27 @@ class Agent(Generic[_StructuredOutput]):
         recorded_click: RecordedClick,
         fallback_operator_query: str,
         resize_window: bool = True,
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
         timeout: int | None = 60,
-    ) -> None:
+    ) -> bool | None:
         """Performs a mouse action at the specified click coordinates, falling back to using
-        the Operator agent if the click fails.
+        the Operator agent if the click fails. Returns the verification status when
+        verification_description is provided and the verifier produced a status.
         """
-        return await self._browser_environment()._run_extension_action(
+        result = await self._browser_environment()._run_extension_action(
             AgenticMouseActionRequest(
                 action=action,
                 recorded_click=recorded_click,
                 resize_window=resize_window,
                 fallback_operator_query=fallback_operator_query,
+                verification_description=verification_description,
+                verification_delay_ms=verification_delay_ms,
             ),
+            AgenticMouseActionResponse if verification_description is not None else None,
             timeout=timeout,
         )
+        return result.verified if result is not None else None
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None
