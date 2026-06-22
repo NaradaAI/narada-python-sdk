@@ -1564,8 +1564,9 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                                 )
                 except Exception as cleanup_error:
                     logging.error(
-                        "Error cleaning up session %s: %s after %s retries",
+                        "Error cleaning up session %s (%s): %s after %s init attempts",
                         session_id,
+                        self._session_name,
                         cleanup_error,
                         max_attempts,
                     )
