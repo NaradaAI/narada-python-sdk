@@ -312,7 +312,7 @@ wheels = [
 
 [[package]]
 name = "narada"
-version = "0.2.2"
+version = "0.2.3a"
 source = { editable = "packages/narada" }
 dependencies = [
     { name = "aiohttp" },
