@@ -28,9 +28,9 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     JsonValue,
-    PrintMessageRequest,
     PressKeyEventItem,
     PressKeyRequest,
+    PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -39,6 +39,8 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    SavePdfFileRequest,
+    SavePdfFileResponse,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -594,6 +596,14 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             GetSimplifiedHtmlRequest(),
             GetSimplifiedHtmlResponse,
+            timeout=timeout,
+        )
+
+    async def save_pdf_file(self, *, timeout: int | None = None) -> SavePdfFileResponse:
+        """Saves the PDF file displayed in the current browser page."""
+        return await self._browser_environment()._run_extension_action(
+            SavePdfFileRequest(),
+            SavePdfFileResponse,
             timeout=timeout,
         )
 

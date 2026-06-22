@@ -140,3 +140,33 @@ async def test_execute_javascript_on_page_dispatches_extension_action(
         "name": "execute_javascript_on_page",
         "code": "(() => ({ title: document.title, count: 3 }))()",
     }
+
+
+@pytest.mark.asyncio
+async def test_save_pdf_file_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": '{"base64_content":"JVBERi0xLjQ=","name":"invoice.pdf","mime_type":"application/pdf","timestamp":"2026-06-22T00:00:00.000Z"}',
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.save_pdf_file()
+
+    assert result.name == "invoice.pdf"
+    assert result.mime_type == "application/pdf"
+    assert result.base64_content == "JVBERi0xLjQ="
+    assert "base64_content" not in result.model_dump()
+    assert fake_session.post_bodies[0]["action"] == {"name": "save_pdf_file"}
