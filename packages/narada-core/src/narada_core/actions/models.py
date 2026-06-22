@@ -393,6 +393,17 @@ class GetSimplifiedHtmlResponse(BaseModel):
     html: str
 
 
+class GetFileRequest(BaseModel):
+    name: Literal["get_file"] = "get_file"
+
+
+class GetFileResponse(BaseModel):
+    base64_content: str = Field(exclude=True)
+    name: str
+    mime_type: str
+    timestamp: str
+
+
 class GetScreenshotRequest(BaseModel):
     name: Literal["get_screenshot"] = "get_screenshot"
 
@@ -489,6 +500,7 @@ type ExtensionActionRequest = (
     | AgenticSelectorRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
+    | GetFileRequest
     | GetFullHtmlRequest
     | GetScreenshotRequest
     | GetSimplifiedHtmlRequest
