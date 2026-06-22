@@ -1563,8 +1563,15 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                                     resp.status,
                                 )
                 except Exception as cleanup_error:
-                    logging.warning(
+                    logging.error(
                         "Error cleaning up session %s: %s after %s retries", session_id, cleanup_error, max_attempts
+                    )
+                try:
+                    await self._stop_playwright()
+                except Exception as playwright_cleanup_error:
+                    logging.warning(
+                        "Error stopping Playwright after failed cloud browser initialization: %s",
+                        playwright_cleanup_error,
                     )
                 # Re-raise the original connection error
                 raise
