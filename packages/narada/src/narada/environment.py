@@ -1498,7 +1498,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 ):
                     raise
 
-                retry_backoff_with_jitter = attempt * 2 + 2 + random.uniform(0, 1)
+                retry_backoff_with_jitter = 2 ** (attempt + 1) + random.uniform(0, 1)
                 await asyncio.sleep(retry_backoff_with_jitter)
 
     async def _initialize_once(self) -> None:
