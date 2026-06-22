@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import random
 import subprocess
 import sys
 import time
@@ -1477,14 +1478,31 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
+        Retry up to 3 times on error.
 
         Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
         Playwright over CDP, opens ``login_url``, and waits for
         ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
         interactive prompts and related behavior.
         """
-        await self._start_playwright()
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                await self._initialize_once()
+                return
+            except Exception as error:
+                await self._cleanup_failed_initialization_attempt()
+                if (
+                    attempt == max_attempts - 1
+                    or self._is_non_retryable_initialization_error(error)
+                ):
+                    raise
 
+                retry_backoff_with_jitter = 2 ** (attempt + 1) + random.uniform(0, 1)
+                await asyncio.sleep(retry_backoff_with_jitter)
+
+    async def _initialize_once(self) -> None:
+        await self._start_playwright()
         request_body = {
             "require_extension": True,
             "session_name": self._session_name,
@@ -1503,61 +1521,63 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
-                    if resp.status == HTTPStatus.FORBIDDEN:
-                        error = ApiErrorPayload.from_error_text(error_text)
-                        err = RuntimeError(
-                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
-                            f"Endpoint URL: {endpoint_url}"
-                        )
-                        err.status_code = resp.status  # type: ignore[attr-defined]
-                        err.detail = error.detail  # type: ignore[attr-defined]
-                        raise err
-                    raise RuntimeError(
+                    err = RuntimeError(
                         f"Failed to create cloud browser session: {resp.status} {error_text}\n"
                         f"Endpoint URL: {endpoint_url}"
                     )
+                    err.status_code = resp.status  # type: ignore[attr-defined]
+                    if resp.status == HTTPStatus.FORBIDDEN:
+                        error = ApiErrorPayload.from_error_text(error_text)
+                        err.detail = error.detail  # type: ignore[attr-defined]
+                    raise err
                 response_data = await resp.json()
 
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
+        self._session_id = session_id
 
         # Connect to browser via CDP with authentication headers and log the user in.
-        try:
-            await self._initialize_cloud_browser_window(
-                cdp_websocket_url=cdp_websocket_url,
-                session_id=session_id,
-                login_url=login_url,
-                cdp_auth_headers=cdp_auth_headers,
-            )
-        except Exception:
-            # Clean up the session if CDP connection fails
+        await self._initialize_cloud_browser_window(
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            login_url=login_url,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+
+    @staticmethod
+    def _is_non_retryable_initialization_error(error: Exception) -> bool:
+        status_code = getattr(error, "status_code", None)
+        return isinstance(status_code, int) and 400 <= status_code < 500
+
+    async def _cleanup_failed_initialization_attempt(self) -> None:
+        if self._session_id is not None:
             try:
-                async with aiohttp.ClientSession() as cleanup_session:
-                    async with cleanup_session.post(
-                        f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
-                        headers=self._auth_headers,
-                        json={"session_id": session_id, "status": "failed"},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.ok:
-                            logging.info(
-                                "Cleaned up session %s after CDP connection failure",
-                                session_id,
-                            )
-                        else:
-                            logging.warning(
-                                "Failed to cleanup session %s: %s",
-                                session_id,
-                                resp.status,
-                            )
-            except Exception as cleanup_error:
-                logging.warning(
-                    "Error cleaning up session %s: %s", session_id, cleanup_error
+                await _stop_cloud_browser_session(
+                    base_url=self._base_url,
+                    auth_headers=self._auth_headers,
+                    session_id=self._session_id,
+                    status="failed",
+                    timeout=10,
                 )
-            # Re-raise the original connection error
-            raise
+            except Exception:
+                logger.exception(
+                    "Error cleaning up session %s (%s) after failed initialization",
+                    self._session_id,
+                    self._session_name,
+                )
+
+        try:
+            await self._stop_playwright()
+        except Exception:
+            logger.exception(
+                "Error stopping Playwright after failed cloud browser initialization"
+            )
+        finally:
+            self._session_id = None
+            self._browser_window_id = None
+            self._context = None
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
@@ -1874,6 +1894,7 @@ async def _stop_cloud_browser_session(
     base_url: str,
     auth_headers: dict[str, str],
     session_id: str,
+    status: Literal["complete", "terminated", "failed", "timed_out"] = "complete",
     timeout: int | None = None,
 ) -> None:
     try:
@@ -1881,7 +1902,7 @@ async def _stop_cloud_browser_session(
             async with session.post(
                 f"{base_url}/cloud-browser/stop-cloud-browser-session",
                 headers=auth_headers,
-                json={"session_id": session_id},
+                json={"session_id": session_id, "status": status},
                 timeout=aiohttp.ClientTimeout(total=timeout or 40),
             ) as resp:
                 if resp.ok:
