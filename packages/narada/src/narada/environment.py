@@ -74,6 +74,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
+import random
 
 from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import assert_never, assert_not_none
@@ -1523,41 +1524,49 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
 
-        # Connect to browser via CDP with authentication headers and log the user in.
-        try:
-            await self._initialize_cloud_browser_window(
-                cdp_websocket_url=cdp_websocket_url,
-                session_id=session_id,
-                login_url=login_url,
-                cdp_auth_headers=cdp_auth_headers,
-            )
-        except Exception:
-            # Clean up the session if CDP connection fails
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
-                async with aiohttp.ClientSession() as cleanup_session:
-                    async with cleanup_session.post(
-                        f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
-                        headers=self._auth_headers,
-                        json={"session_id": session_id, "status": "failed"},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.ok:
-                            logging.info(
-                                "Cleaned up session %s after CDP connection failure",
-                                session_id,
-                            )
-                        else:
-                            logging.warning(
-                                "Failed to cleanup session %s: %s",
-                                session_id,
-                                resp.status,
-                            )
-            except Exception as cleanup_error:
-                logging.warning(
-                    "Error cleaning up session %s: %s", session_id, cleanup_error
+                # Connect to browser via CDP with authentication headers and log the user in.
+                # Due to unknown network issues, sometimes initialization fails
+                await self._initialize_cloud_browser_window(
+                    cdp_websocket_url=cdp_websocket_url,
+                    session_id=session_id,
+                    login_url=login_url,
+                    cdp_auth_headers=cdp_auth_headers,
                 )
-            # Re-raise the original connection error
-            raise
+            except Exception:
+                # Retry if max attempts hasn't been reached yet
+                if attempt < max_attempts - 1:
+                    retry_backoff_with_jitter = random.uniform(1, 4)
+                    await asyncio.sleep(retry_backoff_seconds[attempt])
+                    continue
+                # Clean up the session if CDP connection fails after multiple attempts
+                try:
+                    async with aiohttp.ClientSession() as cleanup_session:
+                        async with cleanup_session.post(
+                            f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
+                            headers=self._auth_headers,
+                            json={"session_id": session_id, "status": "failed"},
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.ok:
+                                logging.info(
+                                    "Cleaned up session %s after CDP connection failure",
+                                    session_id,
+                                )
+                            else:
+                                logging.warning(
+                                    "Failed to cleanup session %s: %s",
+                                    session_id,
+                                    resp.status,
+                                )
+                except Exception as cleanup_error:
+                    logging.warning(
+                        "Error cleaning up session %s: %s after %s retries", session_id, cleanup_error, max_attempts
+                    )
+                # Re-raise the original connection error
+                raise
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
