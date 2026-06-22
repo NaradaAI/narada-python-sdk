@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import random
 import subprocess
 import sys
 import time
@@ -74,7 +75,6 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
-import random
 
 from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import assert_never, assert_not_none
@@ -1564,7 +1564,10 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                                 )
                 except Exception as cleanup_error:
                     logging.error(
-                        "Error cleaning up session %s: %s after %s retries", session_id, cleanup_error, max_attempts
+                        "Error cleaning up session %s: %s after %s retries",
+                        session_id,
+                        cleanup_error,
+                        max_attempts,
                     )
                 try:
                     await self._stop_playwright()
