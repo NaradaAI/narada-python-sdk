@@ -393,11 +393,11 @@ class GetSimplifiedHtmlResponse(BaseModel):
     html: str
 
 
-class GetFileRequest(BaseModel):
-    name: Literal["get_file"] = "get_file"
+class SavePdfFileRequest(BaseModel):
+    name: Literal["save_pdf_file"] = "save_pdf_file"
 
 
-class GetFileResponse(BaseModel):
+class SavePdfFileResponse(BaseModel):
     base64_content: str = Field(exclude=True)
     name: str
     mime_type: str
@@ -500,7 +500,7 @@ type ExtensionActionRequest = (
     | AgenticSelectorRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
-    | GetFileRequest
+    | SavePdfFileRequest
     | GetFullHtmlRequest
     | GetScreenshotRequest
     | GetSimplifiedHtmlRequest

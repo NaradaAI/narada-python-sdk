@@ -18,8 +18,6 @@ from narada_core.actions.models import (
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
-    GetFileRequest,
-    GetFileResponse,
     GetFullHtmlRequest,
     GetFullHtmlResponse,
     GetScreenshotRequest,
@@ -41,6 +39,8 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    SavePdfFileRequest,
+    SavePdfFileResponse,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -599,11 +599,11 @@ class Agent(Generic[_StructuredOutput]):
             timeout=timeout,
         )
 
-    async def get_file(self, *, timeout: int | None = None) -> GetFileResponse:
-        """Gets the PDF file displayed in the current browser page."""
+    async def save_pdf_file(self, *, timeout: int | None = None) -> SavePdfFileResponse:
+        """Saves the PDF file displayed in the current browser page."""
         return await self._browser_environment()._run_extension_action(
-            GetFileRequest(),
-            GetFileResponse,
+            SavePdfFileRequest(),
+            SavePdfFileResponse,
             timeout=timeout,
         )
 

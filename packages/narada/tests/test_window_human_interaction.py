@@ -143,7 +143,7 @@ async def test_execute_javascript_on_page_dispatches_extension_action(
 
 
 @pytest.mark.asyncio
-async def test_get_file_dispatches_extension_action(
+async def test_save_pdf_file_dispatches_extension_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_session = _FakeSession(
@@ -163,10 +163,10 @@ async def test_get_file_dispatches_extension_action(
         )
     )
 
-    result = await agent.get_file()
+    result = await agent.save_pdf_file()
 
     assert result.name == "invoice.pdf"
     assert result.mime_type == "application/pdf"
     assert result.base64_content == "JVBERi0xLjQ="
     assert "base64_content" not in result.model_dump()
-    assert fake_session.post_bodies[0]["action"] == {"name": "get_file"}
+    assert fake_session.post_bodies[0]["action"] == {"name": "save_pdf_file"}
