@@ -1525,7 +1525,6 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         cdp_auth_headers = response_data["cdp_auth_headers"]
 
         max_attempts = 3
-        retry_base_backoff_seconds = (2.0, 4.0, 0.0)  # no wait after last attempt
         for attempt in range(max_attempts):
             try:
                 # Connect to browser via CDP with authentication headers and log the user in.
@@ -1540,8 +1539,8 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             except Exception:
                 # Retry if max attempts hasn't been reached yet
                 if attempt < max_attempts - 1:
-                    sleep_time = retry_base_backoff_seconds[attempt] + random.uniform(0, 1)  # add jitter
-                    await asyncio.sleep(sleep_time)
+                    retry_backoff_with_jitter = attempt * 2 + 2 + random.uniform(0, 1)
+                    await asyncio.sleep(retry_backoff_with_jitter)
                     continue
                 # Clean up the session if CDP connection fails after multiple attempts
                 try:
