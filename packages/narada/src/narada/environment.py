@@ -1535,11 +1535,12 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     login_url=login_url,
                     cdp_auth_headers=cdp_auth_headers,
                 )
+                break  # stop retrying if an error wast raised
             except Exception:
                 # Retry if max attempts hasn't been reached yet
                 if attempt < max_attempts - 1:
                     retry_backoff_with_jitter = random.uniform(1, 4)
-                    await asyncio.sleep(retry_backoff_seconds[attempt])
+                    await asyncio.sleep(retry_backoff_with_jitter)
                     continue
                 # Clean up the session if CDP connection fails after multiple attempts
                 try:
