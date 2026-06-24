@@ -5,6 +5,7 @@ from narada_core.actions.models import (
 )
 from narada_core.errors import (
     NaradaError,
+    NaradaOperatorMaxStepsExceededError,
     NaradaTimeoutError,
 )
 from narada_core.models import (
@@ -44,6 +45,7 @@ __all__ = [
     "File",
     "LambdaEnvironment",
     "NaradaError",
+    "NaradaOperatorMaxStepsExceededError",
     "NaradaTimeoutError",
     "PressKeyEventItem",
     "ReasoningEffort",

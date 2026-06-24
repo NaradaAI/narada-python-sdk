@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from narada import Agent, Environment
+from narada import Agent, AgentKind, Environment, NaradaOperatorMaxStepsExceededError
 
 
 class _FakeResponse:
@@ -56,6 +56,37 @@ class _RemoteDispatchFakeClientSession:
                     "output": {"type": "text", "content": f"ok-{self._poll_count}"},
                 },
                 "usage": {"actions": 1, "credits": 1},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:00:01Z",
+                "activeInputRequest": None,
+            }
+        )
+
+
+class _MaxStepsErrorFakeClientSession(_RemoteDispatchFakeClientSession):
+    def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+        if "/remote-dispatch/responses/" not in url:
+            raise AssertionError(f"Unexpected GET URL: {url}")
+
+        return _FakeResponse(
+            {
+                "status": "error",
+                "response": {
+                    "text": "The operator reached the maximum number of steps (7).",
+                    "output": {
+                        "type": "text",
+                        "content": "The operator reached the maximum number of steps (7).",
+                    },
+                    "errorCode": "OperatorMaxIterationsExceededError",
+                    "errors": [
+                        {
+                            "errorCode": "OperatorMaxIterationsExceededError",
+                            "message": "The operator reached the maximum number of steps (7).",
+                            "chainArgs": {"maxIterations": 7},
+                        }
+                    ],
+                },
+                "usage": {"actions": 7, "credits": 7},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
                 "activeInputRequest": None,
@@ -119,3 +150,61 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_forwards_max_operator_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = _CountingEnvironment()
+    agent = Agent(environment=env)
+
+    await agent.run("long task", max_operator_steps=80)
+
+    assert fake_session.dispatched_bodies[0]["operatorMaxIterations"] == 80
+
+
+@pytest.mark.asyncio
+async def test_max_operator_steps_passes_through_non_operator_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = _CountingEnvironment()
+    agent = Agent(environment=env, kind=AgentKind.PRODUCTIVITY)
+
+    await agent.run("hello", max_operator_steps=2)
+
+    assert fake_session.dispatched_bodies[0]["operatorMaxIterations"] == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_run_raises_specific_max_operator_steps_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _MaxStepsErrorFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    env = _CountingEnvironment()
+    agent = Agent(environment=env)
+
+    with pytest.raises(NaradaOperatorMaxStepsExceededError) as exc_info:
+        await agent.run("loop forever")
+
+    assert exc_info.value.max_operator_steps == 7

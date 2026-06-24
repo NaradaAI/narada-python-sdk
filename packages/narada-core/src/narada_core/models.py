@@ -414,6 +414,8 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
     structuredOutput: _MaybeStructuredOutput
     actionTrace: NotRequired[ActionTrace]
+    errorCode: NotRequired[str]
+    errors: NotRequired[list[dict[str, Any]]]
     executionTraceContext: NotRequired[dict[str, object]]
     workflowTrace: NotRequired[dict[str, Any]]
 
