@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock
 import pytest
 from narada import BrowserEnvironment
 from narada.config import BrowserConfig
-from narada_core.errors import NaradaExtensionUnauthenticatedError
+from narada_core.errors import (
+    NaradaExtensionMissingError,
+    NaradaExtensionUnauthenticatedError,
+    NaradaInitializationError,
+    NaradaTimeoutError,
+    NaradaUnsupportedBrowserError,
+)
 
 
 @pytest.mark.asyncio
@@ -79,3 +85,82 @@ async def test_browser_environment_fetches_login_token_after_unauthenticated_sta
         timeout=15_000,
         wait_until="domcontentloaded",
     )
+
+
+@pytest.mark.asyncio
+async def test_browser_window_id_wait_prefers_dom_observer() -> None:
+    import narada.environment as environment_module
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(
+        side_effect=[
+            None,
+            {"type": "browser_window_id", "browserWindowId": "browser-window-123"},
+        ]
+    )
+
+    browser_window_id = await environment_module._BrowserInitializationHelper.wait_for_browser_window_id_silently(
+        page,
+        timeout=1_000,
+    )
+
+    assert browser_window_id == "browser-window-123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("observer_result", "expected_error", "match"),
+    [
+        (
+            {"type": "unsupported_browser"},
+            NaradaUnsupportedBrowserError,
+            "Unsupported browser",
+        ),
+        (
+            {"type": "extension_missing"},
+            NaradaExtensionMissingError,
+            "Narada extension missing",
+        ),
+        (
+            {"type": "extension_unauthenticated"},
+            NaradaExtensionUnauthenticatedError,
+            "Sign in to the Narada extension first",
+        ),
+        (
+            {"type": "initialization_error"},
+            NaradaInitializationError,
+            "Initialization error",
+        ),
+    ],
+)
+async def test_browser_window_id_wait_maps_dom_observer_error_markers(
+    observer_result: dict[str, str],
+    expected_error: type[Exception],
+    match: str,
+) -> None:
+    import narada.environment as environment_module
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(side_effect=[None, observer_result])
+
+    with pytest.raises(expected_error, match=match):
+        await environment_module._BrowserInitializationHelper.wait_for_browser_window_id_silently(
+            page,
+            timeout=1_000,
+        )
+
+
+@pytest.mark.asyncio
+async def test_browser_window_id_wait_times_out_when_dom_observer_finds_no_marker() -> (
+    None
+):
+    import narada.environment as environment_module
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(side_effect=[None, None])
+
+    with pytest.raises(NaradaTimeoutError, match="Timed out"):
+        await environment_module._BrowserInitializationHelper.wait_for_browser_window_id_silently(
+            page,
+            timeout=1_000,
+        )

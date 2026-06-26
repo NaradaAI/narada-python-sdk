@@ -367,7 +367,8 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigat
         BrowserConfig(interactive=False),
         timeout=30_000,
     )
-    context.add_init_script.assert_not_awaited()
+    context.add_init_script.assert_awaited_once()
+    assert "MutationObserver" in context.add_init_script.await_args.kwargs["script"]
     assert env.browser_window_id == "browser-window-123"
     assert env.cloud_browser_session_id == "session-123"
 
@@ -402,8 +403,11 @@ async def test_cloud_browser_environment_seeds_expected_browser_window_id_before
         expected_browser_window_id="backend-window-123",
     )
 
-    assert events[:2] == ["seed", "goto"]
-    script = context.add_init_script.await_args.kwargs["script"]
+    assert events[:3] == ["seed", "seed", "goto"]
+    seeded_script = context.add_init_script.await_args_list[0].kwargs["script"]
+    observer_script = context.add_init_script.await_args_list[1].kwargs["script"]
+    assert "MutationObserver" in observer_script
+    script = seeded_script
     assert "naradaBrowserWindowId" in script
     assert "backend-window-123" in script
     assert env.browser_window_id == "backend-window-123"
