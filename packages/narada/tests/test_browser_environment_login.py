@@ -209,7 +209,6 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
         const legacyKey = "__naradaBrowserWindowIdObserver";
         const markers = new Map();
         const clearedIntervals = [];
-        let nextIntervalId = 1;
         let lastObserver = null;
         let legacyDisconnected = false;
 
@@ -221,7 +220,9 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
 
         const windowObject = {{}};
         windowObject.top = windowObject;
-        windowObject.setInterval = () => nextIntervalId++;
+        windowObject.setInterval = () => {{
+          throw new Error("observer should not poll");
+        }};
         globalThis.window = windowObject;
         globalThis.clearInterval = (intervalId) => {{
           clearedIntervals.push(intervalId);
@@ -264,13 +265,11 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
         assert(clearedIntervals.includes(99), "legacy interval cleared");
         assert(state?.version === 3, "v3 state installed");
         assert(typeof state.dispose === "function", "dispose exposed");
-        assert(state.intervalId === 1, "poll interval installed");
         assert(lastObserver !== null, "mutation observer installed");
 
         state.dispose();
         assert(windowObject[symbol] === undefined, "symbol state deleted on dispose");
         assert(lastObserver.disconnected, "observer disconnected on dispose");
-        assert(clearedIntervals.includes(1), "poll interval cleared on dispose");
 
         markers.set("#narada-browser-window-id", {{ textContent: "browser-window-123" }});
         markers.set("#narada-initialization-error", {{ textContent: "" }});
@@ -281,7 +280,6 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
           precedenceState.result?.type === "initialization_error",
           "error marker wins over browser window ID"
         );
-        assert(precedenceState.intervalId === null, "no interval left after immediate result");
     """
 
     result = subprocess.run(

@@ -162,7 +162,6 @@ def _build_browser_window_id_observer_script() -> str:
             version: 3,
             result: null,
             observer: null,
-            intervalId: null,
             resolved: false,
             disposed: false,
             resolve: null,
@@ -175,10 +174,6 @@ def _build_browser_window_id_observer_script() -> str:
             if (state.observer !== null) {
               state.observer.disconnect();
               state.observer = null;
-            }
-            if (state.intervalId !== null) {
-              clearInterval(state.intervalId);
-              state.intervalId = null;
             }
           }
 
@@ -263,7 +258,6 @@ def _build_browser_window_id_observer_script() -> str:
               subtree: true,
               characterData: true,
             });
-            state.intervalId = window.setInterval(finishIfReady, 50);
           }
 
           if (document.documentElement !== null) {
