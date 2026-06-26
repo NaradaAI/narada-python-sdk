@@ -179,11 +179,116 @@ def test_browser_window_id_observer_script_limits_global_and_resource_leak_risk(
     )
 
     assert "Symbol.for" in script
-    assert "__naradaBrowserWindowIdObserver" not in script
+    assert "legacyGlobalKey" in script
     assert "window.top !== window" in script
     assert "function dispose()" in script
     assert "delete window[globalSymbol]" in script
+    assert "delete window[legacyGlobalKey]" in script
     assert "observerState.dispose?.()" in wait_source
     assert script.index("#narada-initialization-error") < script.index(
         "#narada-browser-window-id"
     )
+
+
+def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
+    import json
+    import shutil
+    import subprocess
+    import textwrap
+
+    import narada.environment as environment_module
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to execute observer lifecycle harness")
+
+    installer_script = environment_module._build_browser_window_id_observer_script()
+    harness = f"""
+        const installerScript = {json.dumps(installer_script)};
+        const observerKey = "narada.sdk.browserWindowIdObserver";
+        const legacyKey = "__naradaBrowserWindowIdObserver";
+        const markers = new Map();
+        const clearedIntervals = [];
+        let nextIntervalId = 1;
+        let lastObserver = null;
+        let legacyDisconnected = false;
+
+        function assert(condition, message) {{
+          if (!condition) {{
+            throw new Error(message);
+          }}
+        }}
+
+        const windowObject = {{}};
+        windowObject.top = windowObject;
+        windowObject.setInterval = () => nextIntervalId++;
+        globalThis.window = windowObject;
+        globalThis.clearInterval = (intervalId) => {{
+          clearedIntervals.push(intervalId);
+        }};
+
+        globalThis.document = windowObject.document = {{
+          documentElement: {{}},
+          querySelector: (selector) => markers.get(selector) ?? null,
+          addEventListener: () => {{}},
+        }};
+
+        globalThis.MutationObserver = class {{
+          constructor(callback) {{
+            this.callback = callback;
+            this.disconnected = false;
+            lastObserver = this;
+          }}
+          observe() {{}}
+          disconnect() {{
+            this.disconnected = true;
+          }}
+        }};
+
+        windowObject[legacyKey] = {{
+          version: 2,
+          observer: {{
+            disconnect: () => {{
+              legacyDisconnected = true;
+            }},
+          }},
+          intervalId: 99,
+        }};
+
+        eval(installerScript);
+        const symbol = Symbol.for(observerKey);
+        const state = windowObject[symbol];
+
+        assert(windowObject[legacyKey] === undefined, "legacy string global deleted");
+        assert(legacyDisconnected, "legacy observer disconnected");
+        assert(clearedIntervals.includes(99), "legacy interval cleared");
+        assert(state?.version === 3, "v3 state installed");
+        assert(typeof state.dispose === "function", "dispose exposed");
+        assert(state.intervalId === 1, "poll interval installed");
+        assert(lastObserver !== null, "mutation observer installed");
+
+        state.dispose();
+        assert(windowObject[symbol] === undefined, "symbol state deleted on dispose");
+        assert(lastObserver.disconnected, "observer disconnected on dispose");
+        assert(clearedIntervals.includes(1), "poll interval cleared on dispose");
+
+        markers.set("#narada-browser-window-id", {{ textContent: "browser-window-123" }});
+        markers.set("#narada-initialization-error", {{ textContent: "" }});
+        eval(installerScript);
+
+        const precedenceState = windowObject[symbol];
+        assert(
+          precedenceState.result?.type === "initialization_error",
+          "error marker wins over browser window ID"
+        );
+        assert(precedenceState.intervalId === null, "no interval left after immediate result");
+    """
+
+    result = subprocess.run(
+        [node, "-e", textwrap.dedent(harness)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout

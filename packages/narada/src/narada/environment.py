@@ -96,6 +96,7 @@ _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
 _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
 _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 _BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
+_BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
 
 
 type _BrowserInitializationResultType = Literal[
@@ -140,15 +141,20 @@ def _build_browser_window_id_observer_script() -> str:
 
           const targets = __TARGETS__;
           const globalSymbol = Symbol.for(__GLOBAL_KEY__);
+          const legacyGlobalKey = __LEGACY_GLOBAL_KEY__;
+          const legacyState = window[legacyGlobalKey];
+          if (legacyState !== undefined) {
+            cleanupPreviousState(legacyState);
+            delete window[legacyGlobalKey];
+          }
+
           const existingState = window[globalSymbol];
           if (existingState?.version === 3) {
             return;
           }
-          if (existingState?.version === 2) {
-            existingState.observer?.disconnect();
-            if (existingState.intervalId !== null && existingState.intervalId !== undefined) {
-              clearInterval(existingState.intervalId);
-            }
+
+          if (existingState !== undefined) {
+            cleanupPreviousState(existingState);
             delete window[globalSymbol];
           }
 
@@ -173,6 +179,17 @@ def _build_browser_window_id_observer_script() -> str:
             if (state.intervalId !== null) {
               clearInterval(state.intervalId);
               state.intervalId = null;
+            }
+          }
+
+          function cleanupPreviousState(previousState) {
+            previousState?.dispose?.();
+            previousState?.observer?.disconnect?.();
+            if (
+              previousState?.intervalId !== null
+              && previousState?.intervalId !== undefined
+            ) {
+              clearInterval(previousState.intervalId);
             }
           }
 
@@ -256,8 +273,13 @@ def _build_browser_window_id_observer_script() -> str:
           }
         })();
     """
-    return script.replace("__TARGETS__", json.dumps(targets)).replace(
-        "__GLOBAL_KEY__", json.dumps(_BROWSER_WINDOW_ID_OBSERVER_KEY)
+    return (
+        script.replace("__TARGETS__", json.dumps(targets))
+        .replace("__GLOBAL_KEY__", json.dumps(_BROWSER_WINDOW_ID_OBSERVER_KEY))
+        .replace(
+            "__LEGACY_GLOBAL_KEY__",
+            json.dumps(_BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL),
+        )
     )
 
 
