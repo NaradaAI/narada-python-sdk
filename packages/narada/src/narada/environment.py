@@ -95,7 +95,7 @@ _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
 _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
 _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
 _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
-_BROWSER_WINDOW_ID_OBSERVER_GLOBAL = "__naradaBrowserWindowIdObserver"
+_BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
 
 
 type _BrowserInitializationResultType = Literal[
@@ -114,7 +114,6 @@ class _BrowserInitializationResult(TypedDict, total=False):
 
 def _build_browser_window_id_observer_script() -> str:
     targets = [
-        {"type": "browser_window_id", "selector": _BROWSER_WINDOW_ID_SELECTOR},
         {
             "type": "unsupported_browser",
             "selector": _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
@@ -131,29 +130,39 @@ def _build_browser_window_id_observer_script() -> str:
             "type": "initialization_error",
             "selector": _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
         },
+        {"type": "browser_window_id", "selector": _BROWSER_WINDOW_ID_SELECTOR},
     ]
     script = """
         (() => {
-          const targets = __TARGETS__;
-          const globalKey = __GLOBAL_KEY__;
-          const existingState = window[globalKey];
-          if (existingState?.version === 2) {
+          if (window.top !== window) {
             return;
           }
-          existingState?.observer?.disconnect();
-          if (existingState?.intervalId !== null && existingState?.intervalId !== undefined) {
-            clearInterval(existingState.intervalId);
+
+          const targets = __TARGETS__;
+          const globalSymbol = Symbol.for(__GLOBAL_KEY__);
+          const existingState = window[globalSymbol];
+          if (existingState?.version === 3) {
+            return;
+          }
+          if (existingState?.version === 2) {
+            existingState.observer?.disconnect();
+            if (existingState.intervalId !== null && existingState.intervalId !== undefined) {
+              clearInterval(existingState.intervalId);
+            }
+            delete window[globalSymbol];
           }
 
           const state = {
-            version: 2,
+            version: 3,
             result: null,
             observer: null,
             intervalId: null,
             resolved: false,
+            disposed: false,
             resolve: null,
             promise: null,
             readInitializationResult: null,
+            dispose: null,
           };
 
           function cleanup() {
@@ -164,6 +173,14 @@ def _build_browser_window_id_observer_script() -> str:
             if (state.intervalId !== null) {
               clearInterval(state.intervalId);
               state.intervalId = null;
+            }
+          }
+
+          function dispose() {
+            state.disposed = true;
+            cleanup();
+            if (window[globalSymbol] === state) {
+              delete window[globalSymbol];
             }
           }
 
@@ -188,6 +205,9 @@ def _build_browser_window_id_observer_script() -> str:
           }
 
           function finishIfReady() {
+            if (state.disposed) {
+              return true;
+            }
             const result = readInitializationResult();
             if (result === null) {
               return false;
@@ -207,7 +227,12 @@ def _build_browser_window_id_observer_script() -> str:
             state.resolve = resolve;
           });
           state.readInitializationResult = readInitializationResult;
-          window[globalKey] = state;
+          state.dispose = dispose;
+          Object.defineProperty(window, globalSymbol, {
+            value: state,
+            configurable: true,
+            writable: true,
+          });
 
           function startObserving() {
             if (finishIfReady()) {
@@ -232,7 +257,7 @@ def _build_browser_window_id_observer_script() -> str:
         })();
     """
     return script.replace("__TARGETS__", json.dumps(targets)).replace(
-        "__GLOBAL_KEY__", json.dumps(_BROWSER_WINDOW_ID_OBSERVER_GLOBAL)
+        "__GLOBAL_KEY__", json.dumps(_BROWSER_WINDOW_ID_OBSERVER_KEY)
     )
 
 
@@ -364,8 +389,8 @@ class _BrowserInitializationHelper:
         self._console = console
 
     @staticmethod
-    async def install_browser_window_id_observer(context: BrowserContext) -> None:
-        await context.add_init_script(script=_build_browser_window_id_observer_script())
+    async def install_browser_window_id_observer(page: Page) -> None:
+        await page.add_init_script(script=_build_browser_window_id_observer_script())
 
     @staticmethod
     async def wait_for_browser_initialization_result(
@@ -375,7 +400,7 @@ class _BrowserInitializationHelper:
         result = await page.evaluate(
             """
             async ({ globalKey, timeoutMs }) => {
-              const observerState = window[globalKey];
+              const observerState = window[Symbol.for(globalKey)];
               const immediateResult =
                 observerState?.readInitializationResult?.() ?? null;
               if (immediateResult !== null) {
@@ -386,18 +411,30 @@ class _BrowserInitializationHelper:
                 return null;
               }
 
+              let timeoutId = null;
               const timeoutPromise = new Promise((resolve) => {
-                window.setTimeout(() => resolve(null), timeoutMs);
+                timeoutId = window.setTimeout(
+                  () => resolve({ type: 'timeout' }),
+                  timeoutMs
+                );
               });
 
-              return await Promise.race([
+              const result = await Promise.race([
                 observerState.promise,
                 timeoutPromise,
               ]);
+              if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+              }
+              if (result?.type === 'timeout') {
+                observerState.dispose?.();
+                return null;
+              }
+              return result;
             }
             """,
             {
-                "globalKey": _BROWSER_WINDOW_ID_OBSERVER_GLOBAL,
+                "globalKey": _BROWSER_WINDOW_ID_OBSERVER_KEY,
                 "timeoutMs": timeout,
             },
         )
@@ -1191,8 +1228,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
-        await _BrowserInitializationHelper.install_browser_window_id_observer(context)
         initialization_page = await context.new_page()
+        await _BrowserInitializationHelper.install_browser_window_id_observer(
+            initialization_page
+        )
         await initialization_page.goto(tagged_initialization_url)
 
         browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
@@ -1307,9 +1346,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 continue
 
             context = browser.contexts[0]
-            await _BrowserInitializationHelper.install_browser_window_id_observer(
-                context
-            )
 
             # If proxy auth is needed, set up the handler at browser level then navigate to the
             # initialization page. After navigation succeeds, Chrome has cached the proxy
@@ -1323,6 +1359,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                     )
                 )
                 blank_page = context.pages[0]
+                await _BrowserInitializationHelper.install_browser_window_id_observer(
+                    blank_page
+                )
                 await blank_page.goto(tagged_initialization_url)
                 await proxy_cdp_session.detach()
                 did_initial_navigation = True
@@ -1789,7 +1828,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             # Put the backend-owned browser ID into sessionStorage before hydration
             # so AgentCore sessions use the right Firestore route when needed.
             expected_browser_window_id_json = json.dumps(expected_browser_window_id)
-            await context.add_init_script(
+            await initialization_page.add_init_script(
                 script=f"""
                     (() => {{
                       const expectedBrowserWindowId = {expected_browser_window_id_json};
@@ -1802,7 +1841,9 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     }})();
                 """
             )
-        await _BrowserInitializationHelper.install_browser_window_id_observer(context)
+        await _BrowserInitializationHelper.install_browser_window_id_observer(
+            initialization_page
+        )
         await initialization_page.goto(
             login_url, timeout=15_000, wait_until="domcontentloaded"
         )

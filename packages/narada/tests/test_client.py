@@ -12,6 +12,7 @@ class _FakePage:
     def __init__(self) -> None:
         self.goto_calls: list[dict[str, object]] = []
         self.url = "about:blank"
+        self.add_init_script = AsyncMock()
 
     async def goto(self, url: str, **kwargs: object) -> None:
         self.url = url

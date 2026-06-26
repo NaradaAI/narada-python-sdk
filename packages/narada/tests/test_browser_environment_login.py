@@ -164,3 +164,26 @@ async def test_browser_window_id_wait_times_out_when_dom_observer_finds_no_marke
             page,
             timeout=1_000,
         )
+
+
+def test_browser_window_id_observer_script_limits_global_and_resource_leak_risk() -> (
+    None
+):
+    import inspect
+
+    import narada.environment as environment_module
+
+    script = environment_module._build_browser_window_id_observer_script()
+    wait_source = inspect.getsource(
+        environment_module._BrowserInitializationHelper.wait_for_browser_initialization_result
+    )
+
+    assert "Symbol.for" in script
+    assert "__naradaBrowserWindowIdObserver" not in script
+    assert "window.top !== window" in script
+    assert "function dispose()" in script
+    assert "delete window[globalSymbol]" in script
+    assert "observerState.dispose?.()" in wait_source
+    assert script.index("#narada-initialization-error") < script.index(
+        "#narada-browser-window-id"
+    )
