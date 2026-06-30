@@ -292,6 +292,13 @@ class Environment(ABC):
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         pass
 
+    async def detach(self) -> None:
+        """Release local client resources without closing the backing environment."""
+        await self._detach_impl()
+
+    async def _detach_impl(self) -> None:
+        pass
+
     @property
     def _dispatch_browser_window_id(self) -> str | None:
         return None

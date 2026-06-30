@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from narada import BrowserEnvironment
 from narada.config import BrowserConfig
+from narada_core.actions.models import CloseWindowRequest
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -10,6 +12,83 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_detach_releases_playwright_without_closing_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    env._browser_process_id = 456
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    env._browser = browser
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = playwright_context_manager
+    env._playwright = object()
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    await env.detach()
+    await env.detach()
+
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    run_extension_action.assert_not_awaited()
+    assert env.browser_window_id == "browser-window-123"
+    assert env.browser_process_id == 456
+    assert env._browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_closes_window_before_detaching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    async def run_extension_action(*args: object, **kwargs: object) -> None:
+        events.append("close-window")
+
+    async def close_browser() -> None:
+        events.append("close-browser")
+
+    async def stop_playwright(*args: object) -> None:
+        events.append("stop-playwright")
+
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    env._browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = SimpleNamespace(
+        __aexit__=AsyncMock(side_effect=stop_playwright)
+    )
+    env._playwright = object()
+    run_extension_action_mock = AsyncMock(side_effect=run_extension_action)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action_mock)
+
+    await env.close(timeout=7)
+
+    run_extension_action_mock.assert_awaited_once()
+    request = run_extension_action_mock.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert run_extension_action_mock.await_args.kwargs == {"timeout": 7}
+    assert events == ["close-window", "close-browser", "stop-playwright"]
+    assert env._browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
 
 
 @pytest.mark.asyncio
