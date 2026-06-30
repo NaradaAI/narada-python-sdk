@@ -269,6 +269,101 @@ async def test_remote_browser_environment_with_cloud_session_stops_session_by_de
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_environment_detach_releases_playwright_without_stopping_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    stop_cloud_browser_session = AsyncMock()
+    monkeypatch.setattr(
+        environment_module,
+        "_stop_cloud_browser_session",
+        stop_cloud_browser_session,
+    )
+
+    env = CloudBrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._session_id = "session-123"
+    env._browser_window_id = "browser-window-123"
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    env._browser = browser
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = playwright_context_manager
+    env._playwright = object()
+
+    await env.detach()
+    await env.detach()
+
+    stop_cloud_browser_session.assert_not_awaited()
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env.browser_window_id == "browser-window-123"
+    assert env.cloud_browser_session_id == "session-123"
+    assert env._browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_environment_close_stops_session_before_detaching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    events: list[str] = []
+
+    async def stop_cloud_session(**kwargs: object) -> None:
+        events.append("stop-session")
+
+    async def close_browser() -> None:
+        events.append("close-browser")
+
+    async def stop_playwright(*args: object) -> None:
+        events.append("stop-playwright")
+
+    stop_cloud_browser_session = AsyncMock(side_effect=stop_cloud_session)
+    monkeypatch.setattr(
+        environment_module,
+        "_stop_cloud_browser_session",
+        stop_cloud_browser_session,
+    )
+
+    env = CloudBrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._session_id = "session-123"
+    env._browser_window_id = "browser-window-123"
+    env._browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = SimpleNamespace(
+        __aexit__=AsyncMock(side_effect=stop_playwright)
+    )
+    env._playwright = object()
+
+    await env.close(timeout=7)
+
+    stop_cloud_browser_session.assert_awaited_once_with(
+        base_url=env._base_url,
+        auth_headers={"x-api-key": "test-key"},
+        session_id="session-123",
+        timeout=7,
+    )
+    assert events == ["stop-session", "close-browser", "stop-playwright"]
+    assert env.cloud_browser_session_id == "session-123"
+    assert env._browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
 async def test_lambda_environment_uses_backend_initialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -356,6 +356,7 @@ class SessionDownloadItem:
 
 @dataclass
 class _LaunchBrowserResult:
+    browser: Browser
     browser_process_id: int
     browser_window_id: str
     side_panel_page: Page
@@ -636,6 +637,13 @@ class Environment(ABC):
         await self._close_impl(timeout=timeout)
 
     async def _close_impl(self, *, timeout: int | None = None) -> None:
+        pass
+
+    async def detach(self) -> None:
+        """Release local client resources without closing the backing environment."""
+        await self._detach_impl()
+
+    async def _detach_impl(self) -> None:
         pass
 
     @property
@@ -1151,6 +1159,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._config = config or BrowserConfig()
         self._context = None
         self._attach_to_existing = attach_to_existing
+        self._browser: Browser | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
         self._browser_initialization = _BrowserInitializationHelper(
@@ -1194,19 +1203,33 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             if self._initialized and self._browser_window_id is not None:
                 await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
         finally:
-            await self._stop_playwright()
+            await self.detach()
+
+    @override
+    async def detach(self) -> None:
+        await self._detach_impl()
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
         self._playwright = await self._playwright_context_manager.__aenter__()
 
     async def _stop_playwright(self) -> None:
-        if self._playwright_context_manager is None:
-            return
-
-        await self._playwright_context_manager.__aexit__(None, None, None)
+        browser = self._browser
+        playwright_context_manager = self._playwright_context_manager
+        self._browser = None
+        self._context = None
         self._playwright_context_manager = None
         self._playwright = None
+
+        try:
+            if browser is not None:
+                await browser.close()
+        finally:
+            if playwright_context_manager is not None:
+                await playwright_context_manager.__aexit__(None, None, None)
+
+    async def _detach_impl(self) -> None:
+        await self._stop_playwright()
 
     async def _open_and_initialize_browser_window(self) -> None:
         assert self._playwright is not None
@@ -1217,6 +1240,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
         await self._fix_download_behavior(side_panel_page)
 
+        self._browser = launch_browser_result.browser
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
         self._context = side_panel_page.context
@@ -1271,6 +1295,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         if self._config.interactive:
             self._print_success_message(browser_window_id)
 
+        self._browser = browser
         self._browser_process_id = None
         self._browser_window_id = browser_window_id
         self._context = context
@@ -1417,6 +1442,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             self._print_success_message(browser_window_id)
 
         return _LaunchBrowserResult(
+            browser=browser,
             browser_process_id=browser_process.pid,
             browser_window_id=browser_window_id,
             side_panel_page=side_panel_page,
@@ -1661,6 +1687,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         self._session_timeout = session_timeout
         self._session_id: str | None = None
         self._context: BrowserContext | None = None
+        self._browser: Browser | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
         self._browser_initialization = _BrowserInitializationHelper(
@@ -1789,12 +1816,22 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         self._playwright = await self._playwright_context_manager.__aenter__()
 
     async def _stop_playwright(self) -> None:
-        if self._playwright_context_manager is None:
-            return
-
-        await self._playwright_context_manager.__aexit__(None, None, None)
+        browser = self._browser
+        playwright_context_manager = self._playwright_context_manager
+        self._browser = None
+        self._context = None
         self._playwright_context_manager = None
         self._playwright = None
+
+        try:
+            if browser is not None:
+                await browser.close()
+        finally:
+            if playwright_context_manager is not None:
+                await playwright_context_manager.__aexit__(None, None, None)
+
+    async def _detach_impl(self) -> None:
+        await self._stop_playwright()
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
@@ -1836,6 +1873,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         browser = await self._playwright.chromium.connect_over_cdp(
             cdp_websocket_url, headers=cdp_auth_headers
         )
+        self._browser = browser
 
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
@@ -1921,7 +1959,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     timeout=timeout,
                 )
         finally:
-            await self._stop_playwright()
+            await self.detach()
 
     async def get_downloaded_files(self) -> list[SessionDownloadItem]:
         """Return files downloaded during this cloud browser session (file name, size, presigned GET URL per file)."""
