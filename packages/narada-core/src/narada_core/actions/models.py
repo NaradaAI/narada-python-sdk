@@ -6,13 +6,14 @@ from typing import (
     Generic,
     Literal,
     NotRequired,
+    Self,
     TypedDict,
     TypeVar,
     cast,
     override,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.tracing import model as tracing_model
 
@@ -316,6 +317,21 @@ class AgenticMouseActionRequest(BaseModel):
     resize_window: bool = False
     verification_description: str | None = None
     verification_delay_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _normalize_verification_fields(self) -> Self:
+        if self.verification_description is None:
+            self.verification_delay_ms = None
+            return self
+
+        verification_description = self.verification_description.strip()
+        if not verification_description:
+            self.verification_description = None
+            self.verification_delay_ms = None
+            return self
+
+        self.verification_description = verification_description
+        return self
 
     @override
     def model_dump(self) -> dict[str, Any]:

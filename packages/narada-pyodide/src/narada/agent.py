@@ -410,19 +410,27 @@ class Agent(Generic[_StructuredOutput]):
         the Operator agent if the click fails. Returns the verification status when
         verification_description is provided and the verifier produced a status.
         """
+        request = AgenticMouseActionRequest(
+            action=action,
+            recorded_click=recorded_click,
+            resize_window=resize_window,
+            fallback_operator_query=fallback_operator_query,
+            verification_description=verification_description,
+            verification_delay_ms=verification_delay_ms,
+        )
+        if request.verification_description is None:
+            await self._browser_environment()._run_extension_action(
+                request,
+                timeout=timeout,
+            )
+            return None
+
         result = await self._browser_environment()._run_extension_action(
-            AgenticMouseActionRequest(
-                action=action,
-                recorded_click=recorded_click,
-                resize_window=resize_window,
-                fallback_operator_query=fallback_operator_query,
-                verification_description=verification_description,
-                verification_delay_ms=verification_delay_ms,
-            ),
-            AgenticMouseActionResponse if verification_description is not None else None,
+            request,
+            AgenticMouseActionResponse,
             timeout=timeout,
         )
-        return result.verified if result is not None else None
+        return result.verified
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None
