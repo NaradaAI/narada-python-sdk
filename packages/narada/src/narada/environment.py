@@ -97,6 +97,8 @@ _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticat
 _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 _BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
 _BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
+_EXTENSION_MISSING_RETRY_ATTEMPTS = 8
+_EXTENSION_MISSING_RETRY_DELAY_SECONDS = 1
 
 
 type _BrowserInitializationResultType = Literal[
@@ -376,6 +378,22 @@ def _with_query_params(url: str, params: Mapping[str, str]) -> str:
             urlencode(query_params),
             parsed_url.fragment,
         )
+    )
+
+
+def _url_matches_without_fragment(url: str, expected_url: str) -> bool:
+    url_parts = urlsplit(url)
+    expected_url_parts = urlsplit(expected_url)
+    return (
+        url_parts.scheme,
+        url_parts.netloc,
+        url_parts.path,
+        url_parts.query,
+    ) == (
+        expected_url_parts.scheme,
+        expected_url_parts.netloc,
+        expected_url_parts.path,
+        expected_url_parts.query,
     )
 
 
@@ -1503,6 +1521,19 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         timeout=timeout,
                     )
                 except NaradaExtensionMissingError:
+                    try:
+                        retry_browser_window_id = (
+                            await self._retry_browser_window_id_after_extension_missing(
+                                initialization_page,
+                                initialization_url,
+                            )
+                        )
+                    except NaradaExtensionUnauthenticatedError:
+                        continue
+
+                    if retry_browser_window_id is not None:
+                        return retry_browser_window_id
+
                     if not config.interactive:
                         raise
 
@@ -1543,6 +1574,37 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 "retry the action and keep the Narada web page open.[/bold red]",
             )
             sys.exit(1)
+
+    async def _retry_browser_window_id_after_extension_missing(
+        self,
+        initialization_page: Page,
+        initialization_url: str,
+    ) -> str | None:
+        retry_timeout = int(_EXTENSION_MISSING_RETRY_DELAY_SECONDS * 1_000)
+
+        for _ in range(_EXTENSION_MISSING_RETRY_ATTEMPTS):
+            await asyncio.sleep(_EXTENSION_MISSING_RETRY_DELAY_SECONDS)
+
+            if not _url_matches_without_fragment(
+                initialization_page.url,
+                initialization_url,
+            ):
+                return None
+
+            await initialization_page.reload(
+                timeout=15_000,
+                wait_until="domcontentloaded",
+            )
+
+            try:
+                return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
+                    initialization_page,
+                    timeout=retry_timeout,
+                )
+            except (NaradaExtensionMissingError, NaradaTimeoutError):
+                continue
+
+        return None
 
     async def _setup_proxy_authentication_browser_level(
         self, browser: Browser, proxy_config: ProxyConfig

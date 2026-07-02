@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from narada import BrowserEnvironment
@@ -79,6 +79,185 @@ async def test_browser_environment_fetches_login_token_after_unauthenticated_sta
     )
 
     assert browser_window_id == "browser-window-123"
+    fetch_browser_login_token.assert_awaited_once()
+    page.goto.assert_awaited_once_with(
+        "https://app.narada.ai/initialize?t=window-tag&customToken=custom+token",
+        timeout=15_000,
+        wait_until="domcontentloaded",
+    )
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_retries_missing_extension_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=[
+            NaradaExtensionMissingError("Narada extension missing"),
+            NaradaExtensionMissingError("Narada extension missing"),
+            "browser-window-123",
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    console_input = Mock()
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=True),
+    )
+    monkeypatch.setattr(env._console, "input", console_input)
+
+    browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
+        page,
+        BrowserConfig(interactive=True),
+        initialization_url,
+    )
+
+    assert browser_window_id == "browser-window-123"
+    assert sleep.await_count == 2
+    assert page.reload.await_count == 2
+    console_input.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_retries_missing_extension_before_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=[
+            NaradaExtensionMissingError("Narada extension missing")
+            for _ in range(environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS + 1)
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+
+    with pytest.raises(NaradaExtensionMissingError, match="Narada extension missing"):
+        await env._wait_for_browser_window_id_with_lazy_login(
+            page,
+            BrowserConfig(interactive=False),
+            initialization_url,
+        )
+
+    assert wait_for_browser_window_id.await_count == (
+        environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS + 1
+    )
+    assert sleep.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    assert page.reload.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_does_not_reload_after_user_leaves_initialization_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=NaradaExtensionMissingError("Narada extension missing")
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = "https://chromewebstore.google.com/detail/narada/example"
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+
+    with pytest.raises(NaradaExtensionMissingError, match="Narada extension missing"):
+        await env._wait_for_browser_window_id_with_lazy_login(
+            page,
+            BrowserConfig(interactive=False),
+            initialization_url,
+        )
+
+    sleep.assert_awaited_once_with(
+        environment_module._EXTENSION_MISSING_RETRY_DELAY_SECONDS
+    )
+    page.reload.assert_not_awaited()
+    wait_for_browser_window_id.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_uses_lazy_login_after_extension_retry_auth_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=[
+            NaradaExtensionMissingError("Narada extension missing"),
+            NaradaExtensionUnauthenticatedError(
+                "Sign in to the Narada extension first"
+            ),
+            NaradaExtensionUnauthenticatedError(
+                "Sign in to the Narada extension first"
+            ),
+            "browser-window-123",
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    fetch_browser_login_token = AsyncMock(return_value="custom token")
+    monkeypatch.setattr(env, "_fetch_browser_login_token", fetch_browser_login_token)
+
+    browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
+        page,
+        BrowserConfig(interactive=False),
+        initialization_url,
+    )
+
+    assert browser_window_id == "browser-window-123"
+    page.reload.assert_awaited_once_with(
+        timeout=15_000,
+        wait_until="domcontentloaded",
+    )
     fetch_browser_login_token.assert_awaited_once()
     page.goto.assert_awaited_once_with(
         "https://app.narada.ai/initialize?t=window-tag&customToken=custom+token",
