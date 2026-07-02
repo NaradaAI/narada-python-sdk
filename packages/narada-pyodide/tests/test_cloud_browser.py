@@ -1027,7 +1027,11 @@ async def test_agentic_mouse_action_returns_verification_status(
     assert payload["action"] == {
         "name": "agentic_mouse_action",
         "action": {"type": "click"},
-        "recorded_click": {"x": 500, "y": 300, "viewport": {"width": 1280, "height": 720}},
+        "recorded_click": {
+            "x": 500,
+            "y": 300,
+            "viewport": {"width": 1280, "height": 720},
+        },
         "resize_window": True,
         "fallback_operator_query": "click the target",
         "verification_description": "The target was clicked.",
