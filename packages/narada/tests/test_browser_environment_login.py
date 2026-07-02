@@ -292,7 +292,7 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
-def test_side_panel_page_lookup_scans_all_browser_contexts() -> None:
+def test_find_page_by_url_scans_all_browser_contexts() -> None:
     import narada.environment as environment_module
 
     class Page:
@@ -316,17 +316,20 @@ def test_side_panel_page_lookup_scans_all_browser_contexts() -> None:
             ),
         ]
 
-    page = environment_module._find_side_panel_page_in_browser(
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+    page = environment_module._find_page_by_url(
         Browser(),
-        BrowserConfig(),
-        "browser-window-123",
+        side_panel_url,
     )
 
     assert page is Browser.contexts[1].pages[0]
 
 
 @pytest.mark.asyncio
-async def test_side_panel_target_lookup_accepts_cdp_target_without_page() -> None:
+async def test_has_cdp_target_url_accepts_target_without_page() -> None:
     import narada.environment as environment_module
 
     class CdpSession:
@@ -348,8 +351,39 @@ async def test_side_panel_target_lookup_accepts_cdp_target_without_page() -> Non
         async def new_browser_cdp_session(self) -> CdpSession:
             return CdpSession()
 
-    assert await environment_module._has_side_panel_target_for_browser_window_id(
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+
+    assert await environment_module._has_cdp_target_url(
         Browser(),
-        BrowserConfig(),
-        "browser-window-123",
+        side_panel_url,
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_cdp_target_url_rejects_missing_target() -> None:
+    import narada.environment as environment_module
+
+    class CdpSession:
+        async def send(self, method: str) -> dict[str, list[dict[str, str]]]:
+            assert method == "Target.getTargets"
+            return {"targetInfos": [{"url": "https://app.narada.ai/initialize?t=tag"}]}
+
+        async def detach(self) -> None:
+            pass
+
+    class Browser:
+        async def new_browser_cdp_session(self) -> CdpSession:
+            return CdpSession()
+
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+
+    assert not await environment_module._has_cdp_target_url(
+        Browser(),
+        side_panel_url,
     )

@@ -1265,16 +1265,12 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         browser = await self._playwright.chromium.connect_over_cdp(self._config.cdp_url)
         context = browser.contexts[0]
 
-        side_panel_page = _find_side_panel_page_in_browser(
-            browser,
-            self._config,
-            browser_window_id,
-        )
+        side_panel_url = create_side_panel_url(self._config, browser_window_id)
+        side_panel_page = _find_page_by_url(browser, side_panel_url)
         if side_panel_page is None:
-            if not await _has_side_panel_target_for_browser_window_id(
+            if not await _has_cdp_target_url(
                 browser,
-                self._config,
-                browser_window_id,
+                side_panel_url,
             ):
                 raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
         else:
@@ -1376,19 +1372,15 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             context = browser.contexts[0]
 
             if browser_window_id is not None:
-                side_panel_page = _find_side_panel_page_in_browser(
-                    browser,
-                    config,
-                    browser_window_id,
-                )
+                side_panel_url = create_side_panel_url(config, browser_window_id)
+                side_panel_page = _find_page_by_url(browser, side_panel_url)
                 if side_panel_page is not None:
                     break
                 # Chrome extension side panels can be visible as raw CDP targets without being
                 # promoted to Playwright pages.
-                if await _has_side_panel_target_for_browser_window_id(
+                if await _has_cdp_target_url(
                     browser,
-                    config,
-                    browser_window_id,
+                    side_panel_url,
                 ):
                     break
 
@@ -1425,50 +1417,38 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         )
                     )
                 except NaradaTimeoutError:
-                    recovered_side_panel = _find_any_side_panel_page_in_browser(
-                        browser,
-                        config,
-                    )
-                    if recovered_side_panel is None:
-                        recovered_side_panel_target = (
-                            await _find_any_side_panel_target_in_browser(
-                                browser,
-                                config,
-                            )
-                        )
-                        if recovered_side_panel_target is not None:
-                            browser_window_id = recovered_side_panel_target[0]
-                            break
+                    if attempt == max_cdp_connect_attempts - 1:
+                        raise
 
-                        if attempt == max_cdp_connect_attempts - 1:
-                            raise
-
-                        await _reload_initialization_page_for_retry(
-                            initialization_page,
+                    try:
+                        await initialization_page.bring_to_front()
+                        await initialization_page.goto(
                             tagged_initialization_url,
+                            timeout=15_000,
+                            wait_until="domcontentloaded",
                         )
-                        await browser.close()
-                        await asyncio.sleep(3)
-                        continue
+                    except Exception:
+                        pass
 
-                    browser_window_id, side_panel_page = recovered_side_panel
-                    break
+                    await browser.close()
+                    await asyncio.sleep(3)
+                    continue
 
-                side_panel_page = _find_side_panel_page_in_browser(
-                    browser,
-                    config,
-                    browser_window_id,
-                )
+                side_panel_url = create_side_panel_url(config, browser_window_id)
+                side_panel_page = _find_page_by_url(browser, side_panel_url)
                 if side_panel_page is not None:
                     break
-                if await _has_side_panel_target_for_browser_window_id(
+                if await _has_cdp_target_url(
                     browser,
-                    config,
-                    browser_window_id,
+                    side_panel_url,
                 ):
                     break
 
             if attempt == max_cdp_connect_attempts - 1:
+                if browser_window_id is not None:
+                    raise NaradaTimeoutError(
+                        "Timed out waiting for Narada side panel page"
+                    )
                 raise NaradaTimeoutError("Timed out waiting for initialization page")
 
             # Close the current CDP connection and try again.
@@ -2196,111 +2176,22 @@ def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
     return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
 
 
-def _browser_window_id_from_side_panel_url(
-    config: BrowserConfig, url: str
-) -> str | None:
-    parsed_url = urlsplit(url)
-    expected_scheme = "chrome-extension"
-    expected_netloc = config.extension_id
-    expected_path = "/sidepanel.html"
-    if (
-        parsed_url.scheme != expected_scheme
-        or parsed_url.netloc != expected_netloc
-        or parsed_url.path != expected_path
-    ):
-        return None
-
-    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
-    browser_window_id = query_params.get("browserWindowId")
-    if not browser_window_id:
-        return None
-
-    return browser_window_id
-
-
-def _find_side_panel_page_in_browser(
-    browser: Browser,
-    config: BrowserConfig,
-    browser_window_id: str,
-) -> Page | None:
+def _find_page_by_url(browser: Browser, url: str) -> Page | None:
     for context in browser.contexts:
         for page in context.pages:
-            if (
-                _browser_window_id_from_side_panel_url(config, page.url)
-                == browser_window_id
-            ):
+            if page.url == url:
                 return page
 
     return None
 
 
-def _find_any_side_panel_page_in_browser(
-    browser: Browser,
-    config: BrowserConfig,
-) -> tuple[str, Page] | None:
-    for context in browser.contexts:
-        for page in context.pages:
-            browser_window_id = _browser_window_id_from_side_panel_url(
-                config,
-                page.url,
-            )
-            if browser_window_id is not None:
-                return browser_window_id, page
-
-    return None
-
-
-async def _has_side_panel_target_for_browser_window_id(
-    browser: Browser,
-    config: BrowserConfig,
-    browser_window_id: str,
-) -> bool:
-    for target_url in await _browser_target_urls(browser):
-        if (
-            _browser_window_id_from_side_panel_url(config, target_url)
-            == browser_window_id
-        ):
-            return True
-
-    return False
-
-
-async def _find_any_side_panel_target_in_browser(
-    browser: Browser,
-    config: BrowserConfig,
-) -> tuple[str, str] | None:
-    for target_url in await _browser_target_urls(browser):
-        browser_window_id = _browser_window_id_from_side_panel_url(
-            config,
-            target_url,
-        )
-        if browser_window_id is not None:
-            return browser_window_id, target_url
-
-    return None
-
-
-async def _reload_initialization_page_for_retry(
-    page: Page, tagged_initialization_url: str
-) -> None:
-    try:
-        await page.bring_to_front()
-        await page.goto(
-            tagged_initialization_url,
-            timeout=15_000,
-            wait_until="domcontentloaded",
-        )
-    except Exception:
-        pass
-
-
-async def _browser_target_urls(browser: Browser) -> list[str]:
+async def _has_cdp_target_url(browser: Browser, url: str) -> bool:
     cdp_session = None
     try:
         cdp_session = await browser.new_browser_cdp_session()
         result = await cdp_session.send("Target.getTargets")
     except Exception:
-        return []
+        return False
     finally:
         if cdp_session is not None:
             try:
@@ -2310,15 +2201,13 @@ async def _browser_target_urls(browser: Browser) -> list[str]:
 
     target_infos = result.get("targetInfos")
     if not isinstance(target_infos, list):
-        return []
+        return False
 
-    urls: list[str] = []
     for target_info in target_infos:
         if not isinstance(target_info, dict):
             continue
 
-        url = target_info.get("url")
-        if isinstance(url, str) and url:
-            urls.append(url)
+        if target_info.get("url") == url:
+            return True
 
-    return urls
+    return False
