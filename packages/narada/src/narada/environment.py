@@ -397,6 +397,46 @@ def _url_matches_without_fragment(url: str, expected_url: str) -> bool:
     )
 
 
+def _is_extension_installed_in_local_profile(config: BrowserConfig) -> bool:
+    extension_dir = (
+        Path(config.user_data_dir).expanduser()
+        / config.profile_directory
+        / "Extensions"
+        / config.extension_id
+    )
+    try:
+        return extension_dir.is_dir()
+    except OSError:
+        return False
+
+
+def _is_extension_force_listed_in_chrome_policy(config: BrowserConfig) -> bool:
+    if sys.platform != "win32":
+        return False
+
+    try:
+        import winreg
+    except ModuleNotFoundError:
+        return False
+
+    policy_path = r"Software\Policies\Google\Chrome\ExtensionInstallForcelist"
+    for root_key in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(root_key, policy_path) as key:
+                value_count = winreg.QueryInfoKey(key)[1]
+                for index in range(value_count):
+                    value = winreg.EnumValue(key, index)[1]
+                    if not isinstance(value, str):
+                        continue
+
+                    if value.split(";", 1)[0] == config.extension_id:
+                        return True
+        except OSError:
+            continue
+
+    return False
+
+
 class ApiErrorPayload(BaseModel):
     detail: Any | None = None
 
@@ -499,6 +539,10 @@ class _BrowserInitializationHelper:
         if result is None:
             raise NaradaTimeoutError("Timed out waiting for browser window ID")
 
+        return _BrowserInitializationHelper.browser_window_id_from_result(result)
+
+    @staticmethod
+    def browser_window_id_from_result(result: _BrowserInitializationResult) -> str:
         result_type = result.get("type")
         if result_type == "browser_window_id":
             browser_window_id = result.get("browserWindowId")
@@ -523,6 +567,67 @@ class _BrowserInitializationHelper:
             raise NaradaInitializationError("Initialization error")
 
         raise NaradaInitializationError("Unexpected initialization result")
+
+    @staticmethod
+    async def read_browser_initialization_result_ignoring_extension_missing(
+        page: Page,
+    ) -> _BrowserInitializationResult | None:
+        result = await page.evaluate(
+            """
+            ({ selectors }) => {
+              for (const target of selectors) {
+                const element = document.querySelector(target.selector);
+                if (element === null) {
+                  continue;
+                }
+
+                if (target.type !== 'browser_window_id') {
+                  return { type: target.type };
+                }
+
+                const browserWindowId = element.textContent?.trim();
+                if (browserWindowId) {
+                  return { type: target.type, browserWindowId };
+                }
+              }
+
+              return null;
+            }
+            """,
+            {
+                "selectors": [
+                    {
+                        "type": "unsupported_browser",
+                        "selector": _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
+                    },
+                    {
+                        "type": "initialization_error",
+                        "selector": _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
+                    },
+                    {
+                        "type": "extension_unauthenticated",
+                        "selector": _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
+                    },
+                    {
+                        "type": "browser_window_id",
+                        "selector": _BROWSER_WINDOW_ID_SELECTOR,
+                    },
+                ]
+            },
+        )
+        if not isinstance(result, dict):
+            return None
+
+        result_type = result.get("type")
+        if result_type not in {
+            "browser_window_id",
+            "unsupported_browser",
+            "extension_unauthenticated",
+            "initialization_error",
+        }:
+            return None
+
+        return cast(_BrowserInitializationResult, result)
 
     async def wait_for_browser_window_id_interactively(
         self, page: Page, *, per_attempt_timeout: int
@@ -1525,7 +1630,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         retry_browser_window_id = (
                             await self._retry_browser_window_id_after_extension_missing(
                                 initialization_page,
+                                config,
                                 initialization_url,
+                                timeout=timeout,
                             )
                         )
                     except NaradaExtensionUnauthenticatedError:
@@ -1578,11 +1685,14 @@ class BrowserEnvironment(BaseBrowserEnvironment):
     async def _retry_browser_window_id_after_extension_missing(
         self,
         initialization_page: Page,
+        config: BrowserConfig,
         initialization_url: str,
+        *,
+        timeout: int,
     ) -> str | None:
-        retry_timeout = int(_EXTENSION_MISSING_RETRY_DELAY_SECONDS * 1_000)
+        reloaded_after_extension_detected = False
 
-        for _ in range(_EXTENSION_MISSING_RETRY_ATTEMPTS):
+        for attempt in range(_EXTENSION_MISSING_RETRY_ATTEMPTS):
             await asyncio.sleep(_EXTENSION_MISSING_RETRY_DELAY_SECONDS)
 
             if not _url_matches_without_fragment(
@@ -1591,20 +1701,58 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             ):
                 return None
 
-            await initialization_page.reload(
-                timeout=15_000,
-                wait_until="domcontentloaded",
+            result = await _BrowserInitializationHelper.read_browser_initialization_result_ignoring_extension_missing(
+                initialization_page,
             )
+            if result is not None:
+                return _BrowserInitializationHelper.browser_window_id_from_result(result)
+
+            if reloaded_after_extension_detected:
+                continue
+
+            extension_target_is_active = await self._has_extension_cdp_target_for_browser_page(
+                initialization_page,
+                config,
+            )
+            extension_is_in_profile = _is_extension_installed_in_local_profile(config)
+            extension_is_force_listed = _is_extension_force_listed_in_chrome_policy(
+                config
+            )
+            is_last_attempt = attempt == _EXTENSION_MISSING_RETRY_ATTEMPTS - 1
+            if not extension_target_is_active and not (
+                (extension_is_in_profile or extension_is_force_listed) and is_last_attempt
+            ):
+                continue
+
+            reloaded_after_extension_detected = True
 
             try:
+                await initialization_page.reload(
+                    timeout=15_000,
+                    wait_until="domcontentloaded",
+                )
                 return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
                     initialization_page,
-                    timeout=retry_timeout,
+                    timeout=timeout,
                 )
             except (NaradaExtensionMissingError, NaradaTimeoutError):
                 continue
 
         return None
+
+    async def _has_extension_cdp_target_for_browser_page(
+        self,
+        page: Page,
+        config: BrowserConfig,
+    ) -> bool:
+        browser = page.context.browser
+        if browser is None:
+            return False
+
+        return await _has_cdp_target_url_prefix(
+            browser,
+            f"chrome-extension://{config.extension_id}/",
+        )
 
     async def _setup_proxy_authentication_browser_level(
         self, browser: Browser, proxy_config: ProxyConfig
@@ -2248,6 +2396,23 @@ def _find_page_by_url(browser: Browser, url: str) -> Page | None:
 
 
 async def _has_cdp_target_url(browser: Browser, url: str) -> bool:
+    return await _has_cdp_target_url_matching(
+        browser,
+        lambda target_url: target_url == url,
+    )
+
+
+async def _has_cdp_target_url_prefix(browser: Browser, url_prefix: str) -> bool:
+    return await _has_cdp_target_url_matching(
+        browser,
+        lambda target_url: target_url.startswith(url_prefix),
+    )
+
+
+async def _has_cdp_target_url_matching(
+    browser: Browser,
+    matches_url: Callable[[str], bool],
+) -> bool:
     cdp_session = None
     try:
         cdp_session = await browser.new_browser_cdp_session()
@@ -2269,7 +2434,8 @@ async def _has_cdp_target_url(browser: Browser, url: str) -> bool:
         if not isinstance(target_info, dict):
             continue
 
-        if target_info.get("url") == url:
+        target_url = target_info.get("url")
+        if isinstance(target_url, str) and matches_url(target_url):
             return True
 
     return False

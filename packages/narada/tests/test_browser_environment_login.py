@@ -96,14 +96,24 @@ async def test_browser_environment_retries_missing_extension_silently(
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
             NaradaExtensionMissingError("Narada extension missing"),
-            NaradaExtensionMissingError("Narada extension missing"),
-            "browser-window-123",
         ]
     )
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(
+        side_effect=[
+            None,
+            None,
+            {"type": "browser_window_id", "browserWindowId": "browser-window-123"},
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
     )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
@@ -117,6 +127,20 @@ async def test_browser_environment_retries_missing_extension_silently(
         config=BrowserConfig(interactive=True),
     )
     monkeypatch.setattr(env._console, "input", console_input)
+    extension_target_active = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        Mock(return_value=False),
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        Mock(return_value=False),
+    )
 
     browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
         page,
@@ -125,27 +149,35 @@ async def test_browser_environment_retries_missing_extension_silently(
     )
 
     assert browser_window_id == "browser-window-123"
-    assert sleep.await_count == 2
-    assert page.reload.await_count == 2
+    assert sleep.await_count == 3
+    assert read_initialization_result.await_count == 3
+    assert extension_target_active.await_count == 2
+    page.reload.assert_not_awaited()
     console_input.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_browser_environment_retries_missing_extension_before_raising(
+async def test_browser_environment_reloads_once_after_extension_target_is_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import narada.environment as environment_module
 
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
-            NaradaExtensionMissingError("Narada extension missing")
-            for _ in range(environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS + 1)
+            NaradaExtensionMissingError("Narada extension missing"),
+            "browser-window-123",
         ]
     )
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
     )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
@@ -157,6 +189,220 @@ async def test_browser_environment_retries_missing_extension_before_raising(
         auth_headers={"x-api-key": "test-key"},
         config=BrowserConfig(interactive=False),
     )
+    extension_target_active = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        Mock(return_value=False),
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        Mock(return_value=False),
+    )
+
+    browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
+        page,
+        BrowserConfig(interactive=False),
+        initialization_url,
+    )
+
+    assert browser_window_id == "browser-window-123"
+    assert sleep.await_count == 2
+    page.reload.assert_awaited_once_with(
+        timeout=15_000,
+        wait_until="domcontentloaded",
+    )
+    assert wait_for_browser_window_id.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_reloads_once_on_final_profile_install_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=[
+            NaradaExtensionMissingError("Narada extension missing"),
+            "browser-window-123",
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+    local_profile_check = Mock(
+        side_effect=[
+            *[False] * (environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS - 1),
+            True,
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        local_profile_check,
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        Mock(return_value=False),
+    )
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    extension_target_active = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+
+    browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
+        page,
+        BrowserConfig(interactive=False),
+        initialization_url,
+    )
+
+    assert browser_window_id == "browser-window-123"
+    assert sleep.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    assert local_profile_check.call_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    page.reload.assert_awaited_once_with(
+        timeout=15_000,
+        wait_until="domcontentloaded",
+    )
+    assert wait_for_browser_window_id.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_reloads_once_on_final_policy_install_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=[
+            NaradaExtensionMissingError("Narada extension missing"),
+            "browser-window-123",
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        Mock(return_value=False),
+    )
+    policy_check = Mock(
+        side_effect=[
+            *[False] * (environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS - 1),
+            True,
+        ]
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        policy_check,
+    )
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    extension_target_active = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+
+    browser_window_id = await env._wait_for_browser_window_id_with_lazy_login(
+        page,
+        BrowserConfig(interactive=False),
+        initialization_url,
+    )
+
+    assert browser_window_id == "browser-window-123"
+    assert sleep.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    assert policy_check.call_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    page.reload.assert_awaited_once_with(
+        timeout=15_000,
+        wait_until="domcontentloaded",
+    )
+    assert wait_for_browser_window_id.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_retries_missing_extension_before_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=NaradaExtensionMissingError("Narada extension missing")
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    page = AsyncMock()
+    page.url = initialization_url
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    extension_target_active = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        Mock(return_value=False),
+    )
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        Mock(return_value=False),
+    )
 
     with pytest.raises(NaradaExtensionMissingError, match="Narada extension missing"):
         await env._wait_for_browser_window_id_with_lazy_login(
@@ -165,11 +411,14 @@ async def test_browser_environment_retries_missing_extension_before_raising(
             initialization_url,
         )
 
-    assert wait_for_browser_window_id.await_count == (
-        environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS + 1
-    )
+    wait_for_browser_window_id.assert_awaited_once()
     assert sleep.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
-    assert page.reload.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    assert (
+        read_initialization_result.await_count
+        == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    )
+    assert extension_target_active.await_count == environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS
+    page.reload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -186,6 +435,12 @@ async def test_browser_environment_does_not_reload_after_user_leaves_initializat
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
     )
+    read_initialization_result = AsyncMock()
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
+    )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
@@ -195,6 +450,22 @@ async def test_browser_environment_does_not_reload_after_user_leaves_initializat
     env = BrowserEnvironment(
         auth_headers={"x-api-key": "test-key"},
         config=BrowserConfig(interactive=False),
+    )
+    extension_target_active = AsyncMock()
+    monkeypatch.setattr(
+        env, "_has_extension_cdp_target_for_browser_page", extension_target_active
+    )
+    local_profile_check = Mock()
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_installed_in_local_profile",
+        local_profile_check,
+    )
+    policy_check = Mock()
+    monkeypatch.setattr(
+        environment_module,
+        "_is_extension_force_listed_in_chrome_policy",
+        policy_check,
     )
 
     with pytest.raises(NaradaExtensionMissingError, match="Narada extension missing"):
@@ -207,6 +478,10 @@ async def test_browser_environment_does_not_reload_after_user_leaves_initializat
     sleep.assert_awaited_once_with(
         environment_module._EXTENSION_MISSING_RETRY_DELAY_SECONDS
     )
+    read_initialization_result.assert_not_awaited()
+    extension_target_active.assert_not_awaited()
+    local_profile_check.assert_not_called()
+    policy_check.assert_not_called()
     page.reload.assert_not_awaited()
     wait_for_browser_window_id.assert_awaited_once()
 
@@ -223,9 +498,6 @@ async def test_browser_environment_uses_lazy_login_after_extension_retry_auth_st
             NaradaExtensionUnauthenticatedError(
                 "Sign in to the Narada extension first"
             ),
-            NaradaExtensionUnauthenticatedError(
-                "Sign in to the Narada extension first"
-            ),
             "browser-window-123",
         ]
     )
@@ -233,6 +505,14 @@ async def test_browser_environment_uses_lazy_login_after_extension_retry_auth_st
         environment_module._BrowserInitializationHelper,
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
+    )
+    read_initialization_result = AsyncMock(
+        return_value={"type": "extension_unauthenticated"}
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "read_browser_initialization_result_ignoring_extension_missing",
+        read_initialization_result,
     )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
@@ -254,10 +534,7 @@ async def test_browser_environment_uses_lazy_login_after_extension_retry_auth_st
     )
 
     assert browser_window_id == "browser-window-123"
-    page.reload.assert_awaited_once_with(
-        timeout=15_000,
-        wait_until="domcontentloaded",
-    )
+    page.reload.assert_not_awaited()
     fetch_browser_login_token.assert_awaited_once()
     page.goto.assert_awaited_once_with(
         "https://app.narada.ai/initialize?t=window-tag&customToken=custom+token",
