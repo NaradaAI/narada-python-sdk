@@ -143,6 +143,55 @@ async def test_execute_javascript_on_page_dispatches_extension_action(
 
 
 @pytest.mark.asyncio
+async def test_agentic_mouse_action_returns_verification_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": '{"verified":false}',
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    verified = await agent.agentic_mouse_action(
+        action={"type": "click"},
+        recorded_click={
+            "x": 500,
+            "y": 300,
+            "viewport": {"width": 1280, "height": 720},
+        },
+        fallback_operator_query="click the target",
+        verification_description="The target was clicked.",
+        verification_delay_ms=750,
+    )
+
+    assert verified is False
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_mouse_action",
+        "action": {"type": "click"},
+        "recorded_click": {
+            "x": 500,
+            "y": 300,
+            "viewport": {"width": 1280, "height": 720},
+        },
+        "resize_window": True,
+        "fallback_operator_query": "click the target",
+        "verification_description": "The target was clicked.",
+        "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
 async def test_save_pdf_file_dispatches_extension_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
