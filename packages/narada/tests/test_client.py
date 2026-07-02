@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import narada.environment as environment_module
 import pytest
 from narada import CloudBrowserEnvironment, RemoteBrowserEnvironment
@@ -10,6 +12,7 @@ class _FakePage:
     def __init__(self) -> None:
         self.goto_calls: list[dict[str, object]] = []
         self.url = "about:blank"
+        self.add_init_script = AsyncMock()
 
     async def goto(self, url: str, **kwargs: object) -> None:
         self.url = url
@@ -19,6 +22,7 @@ class _FakePage:
 class _FakeContext:
     def __init__(self, page: _FakePage) -> None:
         self.pages = [page]
+        self.add_init_script = AsyncMock()
 
 
 class _FakeBrowser:
