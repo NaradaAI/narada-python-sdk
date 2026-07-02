@@ -358,7 +358,8 @@ class SessionDownloadItem:
 class _LaunchBrowserResult:
     browser_process_id: int
     browser_window_id: str
-    side_panel_page: Page
+    browser_context: BrowserContext
+    side_panel_page: Page | None
 
 
 def _with_query_params(url: str, params: Mapping[str, str]) -> str:
@@ -1215,11 +1216,12 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         )
         side_panel_page = launch_browser_result.side_panel_page
 
-        await self._fix_download_behavior(side_panel_page)
+        if side_panel_page is not None:
+            await self._fix_download_behavior(side_panel_page)
 
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
-        self._context = side_panel_page.context
+        self._context = launch_browser_result.browser_context
 
     async def _initialize_in_existing_browser_window(self) -> None:
         """Initializes the Narada extension in an existing browser window.
@@ -1263,10 +1265,20 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         browser = await self._playwright.chromium.connect_over_cdp(self._config.cdp_url)
         context = browser.contexts[0]
 
-        side_panel_url = create_side_panel_url(self._config, browser_window_id)
-        side_panel_page = next(p for p in context.pages if p.url == side_panel_url)
-
-        await self._fix_download_behavior(side_panel_page)
+        side_panel_page = _find_side_panel_page_in_browser(
+            browser,
+            self._config,
+            browser_window_id,
+        )
+        if side_panel_page is None:
+            if not await _has_side_panel_target_for_browser_window_id(
+                browser,
+                self._config,
+                browser_window_id,
+            ):
+                raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
+        else:
+            await self._fix_download_behavior(side_panel_page)
 
         if self._config.interactive:
             self._print_success_message(browser_window_id)
@@ -1363,6 +1375,23 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
             context = browser.contexts[0]
 
+            if browser_window_id is not None:
+                side_panel_page = _find_side_panel_page_in_browser(
+                    browser,
+                    config,
+                    browser_window_id,
+                )
+                if side_panel_page is not None:
+                    break
+                # Chrome extension side panels can be visible as raw CDP targets without being
+                # promoted to Playwright pages.
+                if await _has_side_panel_target_for_browser_window_id(
+                    browser,
+                    config,
+                    browser_window_id,
+                ):
+                    break
+
             # If proxy auth is needed, set up the handler at browser level then navigate to the
             # initialization page. After navigation succeeds, Chrome has cached the proxy
             # credentials, so we can detach the CDP session.
@@ -1387,19 +1416,56 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
             if initialization_page is not None:
-                browser_window_id = (
-                    await self._wait_for_browser_window_id_with_lazy_login(
-                        initialization_page,
-                        config,
-                        tagged_initialization_url,
+                try:
+                    browser_window_id = (
+                        await self._wait_for_browser_window_id_with_lazy_login(
+                            initialization_page,
+                            config,
+                            tagged_initialization_url,
+                        )
                     )
-                )
+                except NaradaTimeoutError:
+                    recovered_side_panel = _find_any_side_panel_page_in_browser(
+                        browser,
+                        config,
+                    )
+                    if recovered_side_panel is None:
+                        recovered_side_panel_target = (
+                            await _find_any_side_panel_target_in_browser(
+                                browser,
+                                config,
+                            )
+                        )
+                        if recovered_side_panel_target is not None:
+                            browser_window_id = recovered_side_panel_target[0]
+                            break
 
-                side_panel_url = create_side_panel_url(config, browser_window_id)
-                side_panel_page = next(
-                    (p for p in context.pages if p.url == side_panel_url), None
+                        if attempt == max_cdp_connect_attempts - 1:
+                            raise
+
+                        await _reload_initialization_page_for_retry(
+                            initialization_page,
+                            tagged_initialization_url,
+                        )
+                        await browser.close()
+                        await asyncio.sleep(3)
+                        continue
+
+                    browser_window_id, side_panel_page = recovered_side_panel
+                    break
+
+                side_panel_page = _find_side_panel_page_in_browser(
+                    browser,
+                    config,
+                    browser_window_id,
                 )
                 if side_panel_page is not None:
+                    break
+                if await _has_side_panel_target_for_browser_window_id(
+                    browser,
+                    config,
+                    browser_window_id,
+                ):
                     break
 
             if attempt == max_cdp_connect_attempts - 1:
@@ -1411,7 +1477,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
         # These are impossible as we would've raised an exception above otherwise.
         assert browser_window_id is not None
-        assert side_panel_page is not None
 
         if config.interactive:
             self._print_success_message(browser_window_id)
@@ -1419,6 +1484,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         return _LaunchBrowserResult(
             browser_process_id=browser_process.pid,
             browser_window_id=browser_window_id,
+            browser_context=context,
             side_panel_page=side_panel_page,
         )
 
@@ -2128,3 +2194,131 @@ async def _stop_cloud_browser_session(
 
 def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
     return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
+
+
+def _browser_window_id_from_side_panel_url(
+    config: BrowserConfig, url: str
+) -> str | None:
+    parsed_url = urlsplit(url)
+    expected_scheme = "chrome-extension"
+    expected_netloc = config.extension_id
+    expected_path = "/sidepanel.html"
+    if (
+        parsed_url.scheme != expected_scheme
+        or parsed_url.netloc != expected_netloc
+        or parsed_url.path != expected_path
+    ):
+        return None
+
+    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    browser_window_id = query_params.get("browserWindowId")
+    if not browser_window_id:
+        return None
+
+    return browser_window_id
+
+
+def _find_side_panel_page_in_browser(
+    browser: Browser,
+    config: BrowserConfig,
+    browser_window_id: str,
+) -> Page | None:
+    for context in browser.contexts:
+        for page in context.pages:
+            if (
+                _browser_window_id_from_side_panel_url(config, page.url)
+                == browser_window_id
+            ):
+                return page
+
+    return None
+
+
+def _find_any_side_panel_page_in_browser(
+    browser: Browser,
+    config: BrowserConfig,
+) -> tuple[str, Page] | None:
+    for context in browser.contexts:
+        for page in context.pages:
+            browser_window_id = _browser_window_id_from_side_panel_url(
+                config,
+                page.url,
+            )
+            if browser_window_id is not None:
+                return browser_window_id, page
+
+    return None
+
+
+async def _has_side_panel_target_for_browser_window_id(
+    browser: Browser,
+    config: BrowserConfig,
+    browser_window_id: str,
+) -> bool:
+    for target_url in await _browser_target_urls(browser):
+        if (
+            _browser_window_id_from_side_panel_url(config, target_url)
+            == browser_window_id
+        ):
+            return True
+
+    return False
+
+
+async def _find_any_side_panel_target_in_browser(
+    browser: Browser,
+    config: BrowserConfig,
+) -> tuple[str, str] | None:
+    for target_url in await _browser_target_urls(browser):
+        browser_window_id = _browser_window_id_from_side_panel_url(
+            config,
+            target_url,
+        )
+        if browser_window_id is not None:
+            return browser_window_id, target_url
+
+    return None
+
+
+async def _reload_initialization_page_for_retry(
+    page: Page, tagged_initialization_url: str
+) -> None:
+    try:
+        await page.bring_to_front()
+        await page.goto(
+            tagged_initialization_url,
+            timeout=15_000,
+            wait_until="domcontentloaded",
+        )
+    except Exception:
+        pass
+
+
+async def _browser_target_urls(browser: Browser) -> list[str]:
+    cdp_session = None
+    try:
+        cdp_session = await browser.new_browser_cdp_session()
+        result = await cdp_session.send("Target.getTargets")
+    except Exception:
+        return []
+    finally:
+        if cdp_session is not None:
+            try:
+                await cdp_session.detach()
+            except Exception:
+                pass
+
+    target_infos = result.get("targetInfos")
+    if not isinstance(target_infos, list):
+        return []
+
+    urls: list[str] = []
+    for target_info in target_infos:
+        if not isinstance(target_info, dict):
+            continue
+
+        url = target_info.get("url")
+        if isinstance(url, str) and url:
+            urls.append(url)
+
+    return urls

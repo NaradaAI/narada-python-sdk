@@ -290,3 +290,66 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_side_panel_page_lookup_scans_all_browser_contexts() -> None:
+    import narada.environment as environment_module
+
+    class Page:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    class Context:
+        def __init__(self, pages: list[Page]) -> None:
+            self.pages = pages
+
+    class Browser:
+        contexts = [
+            Context([Page("https://app.narada.ai/initialize?t=tag")]),
+            Context(
+                [
+                    Page(
+                        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+                        "sidepanel.html?browserWindowId=browser-window-123"
+                    )
+                ]
+            ),
+        ]
+
+    page = environment_module._find_side_panel_page_in_browser(
+        Browser(),
+        BrowserConfig(),
+        "browser-window-123",
+    )
+
+    assert page is Browser.contexts[1].pages[0]
+
+
+@pytest.mark.asyncio
+async def test_side_panel_target_lookup_accepts_cdp_target_without_page() -> None:
+    import narada.environment as environment_module
+
+    class CdpSession:
+        async def send(self, method: str) -> dict[str, list[dict[str, str]]]:
+            assert method == "Target.getTargets"
+            return {
+                "targetInfos": [
+                    {
+                        "url": "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+                        "sidepanel.html?browserWindowId=browser-window-123"
+                    }
+                ]
+            }
+
+        async def detach(self) -> None:
+            pass
+
+    class Browser:
+        async def new_browser_cdp_session(self) -> CdpSession:
+            return CdpSession()
+
+    assert await environment_module._has_side_panel_target_for_browser_window_id(
+        Browser(),
+        BrowserConfig(),
+        "browser-window-123",
+    )
