@@ -1632,7 +1632,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                                 initialization_page,
                                 config,
                                 initialization_url,
-                                timeout=timeout,
                             )
                         )
                     except NaradaExtensionUnauthenticatedError:
@@ -1687,8 +1686,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         initialization_page: Page,
         config: BrowserConfig,
         initialization_url: str,
-        *,
-        timeout: int,
     ) -> str | None:
         reloaded_after_extension_detected = False
 
@@ -1727,16 +1724,34 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             reloaded_after_extension_detected = True
 
             try:
+                await initialization_page.bring_to_front()
                 await initialization_page.reload(
                     timeout=15_000,
                     wait_until="domcontentloaded",
                 )
-                return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
-                    initialization_page,
-                    timeout=timeout,
+                browser_window_id = await self._wait_for_browser_window_id_after_extension_reload(
+                    initialization_page
                 )
-            except (NaradaExtensionMissingError, NaradaTimeoutError):
+                if browser_window_id is not None:
+                    return browser_window_id
+            except NaradaTimeoutError:
                 continue
+
+        return None
+
+    async def _wait_for_browser_window_id_after_extension_reload(
+        self,
+        initialization_page: Page,
+    ) -> str | None:
+        for attempt in range(_EXTENSION_MISSING_RETRY_ATTEMPTS):
+            result = await _BrowserInitializationHelper.read_browser_initialization_result_ignoring_extension_missing(
+                initialization_page,
+            )
+            if result is not None:
+                return _BrowserInitializationHelper.browser_window_id_from_result(result)
+
+            if attempt < _EXTENSION_MISSING_RETRY_ATTEMPTS - 1:
+                await asyncio.sleep(_EXTENSION_MISSING_RETRY_DELAY_SECONDS)
 
         return None
 

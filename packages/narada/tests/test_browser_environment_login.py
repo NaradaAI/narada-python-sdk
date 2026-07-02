@@ -165,7 +165,6 @@ async def test_browser_environment_reloads_once_after_extension_target_is_active
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
             NaradaExtensionMissingError("Narada extension missing"),
-            "browser-window-123",
         ]
     )
     monkeypatch.setattr(
@@ -173,7 +172,13 @@ async def test_browser_environment_reloads_once_after_extension_target_is_active
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
     )
-    read_initialization_result = AsyncMock(return_value=None)
+    read_initialization_result = AsyncMock(
+        side_effect=[
+            None,
+            None,
+            {"type": "browser_window_id", "browserWindowId": "browser-window-123"},
+        ]
+    )
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
         "read_browser_initialization_result_ignoring_extension_missing",
@@ -216,7 +221,8 @@ async def test_browser_environment_reloads_once_after_extension_target_is_active
         timeout=15_000,
         wait_until="domcontentloaded",
     )
-    assert wait_for_browser_window_id.await_count == 2
+    page.bring_to_front.assert_awaited_once()
+    wait_for_browser_window_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -228,7 +234,6 @@ async def test_browser_environment_reloads_once_on_final_profile_install_check(
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
             NaradaExtensionMissingError("Narada extension missing"),
-            "browser-window-123",
         ]
     )
     monkeypatch.setattr(
@@ -236,7 +241,12 @@ async def test_browser_environment_reloads_once_on_final_profile_install_check(
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
     )
-    read_initialization_result = AsyncMock(return_value=None)
+    read_initialization_result = AsyncMock(
+        side_effect=[
+            *[None] * environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS,
+            {"type": "browser_window_id", "browserWindowId": "browser-window-123"},
+        ]
+    )
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
         "read_browser_initialization_result_ignoring_extension_missing",
@@ -286,7 +296,8 @@ async def test_browser_environment_reloads_once_on_final_profile_install_check(
         timeout=15_000,
         wait_until="domcontentloaded",
     )
-    assert wait_for_browser_window_id.await_count == 2
+    page.bring_to_front.assert_awaited_once()
+    wait_for_browser_window_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -298,7 +309,6 @@ async def test_browser_environment_reloads_once_on_final_policy_install_check(
     wait_for_browser_window_id = AsyncMock(
         side_effect=[
             NaradaExtensionMissingError("Narada extension missing"),
-            "browser-window-123",
         ]
     )
     monkeypatch.setattr(
@@ -306,7 +316,12 @@ async def test_browser_environment_reloads_once_on_final_policy_install_check(
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
     )
-    read_initialization_result = AsyncMock(return_value=None)
+    read_initialization_result = AsyncMock(
+        side_effect=[
+            *[None] * environment_module._EXTENSION_MISSING_RETRY_ATTEMPTS,
+            {"type": "browser_window_id", "browserWindowId": "browser-window-123"},
+        ]
+    )
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
         "read_browser_initialization_result_ignoring_extension_missing",
@@ -356,7 +371,8 @@ async def test_browser_environment_reloads_once_on_final_policy_install_check(
         timeout=15_000,
         wait_until="domcontentloaded",
     )
-    assert wait_for_browser_window_id.await_count == 2
+    page.bring_to_front.assert_awaited_once()
+    wait_for_browser_window_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
