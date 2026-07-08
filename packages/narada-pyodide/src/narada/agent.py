@@ -9,6 +9,7 @@ from narada_core.actions.models import (
     AgenticMatchingSelectorsFinderResponse,
     AgenticMouseAction,
     AgenticMouseActionRequest,
+    AgenticMouseActionResponse,
     AgenticSelectorAction,
     AgenticSelectorRequest,
     AgenticSelectorResponse,
@@ -28,9 +29,9 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     JsonValue,
-    PrintMessageRequest,
     PressKeyEventItem,
     PressKeyRequest,
+    PrintMessageRequest,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -39,6 +40,8 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    SavePdfFileRequest,
+    SavePdfFileResponse,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -401,20 +404,35 @@ class Agent(Generic[_StructuredOutput]):
         recorded_click: RecordedClick,
         fallback_operator_query: str,
         resize_window: bool = True,
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
         timeout: int | None = 60,
-    ) -> None:
+    ) -> bool | None:
         """Performs a mouse action at the specified click coordinates, falling back to using
-        the Operator agent if the click fails.
+        the Operator agent if the click fails. Returns the verification status when
+        verification_description is provided and the verifier produced a status.
         """
-        return await self._browser_environment()._run_extension_action(
-            AgenticMouseActionRequest(
-                action=action,
-                recorded_click=recorded_click,
-                resize_window=resize_window,
-                fallback_operator_query=fallback_operator_query,
-            ),
+        request = AgenticMouseActionRequest(
+            action=action,
+            recorded_click=recorded_click,
+            resize_window=resize_window,
+            fallback_operator_query=fallback_operator_query,
+            verification_description=verification_description,
+            verification_delay_ms=verification_delay_ms,
+        )
+        if request.verification_description is None:
+            await self._browser_environment()._run_extension_action(
+                request,
+                timeout=timeout,
+            )
+            return None
+
+        result = await self._browser_environment()._run_extension_action(
+            request,
+            AgenticMouseActionResponse,
             timeout=timeout,
         )
+        return result.verified
 
     async def go_to_url(
         self, *, url: str, new_tab: bool = False, timeout: int | None = None
@@ -594,6 +612,14 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             GetSimplifiedHtmlRequest(),
             GetSimplifiedHtmlResponse,
+            timeout=timeout,
+        )
+
+    async def save_pdf_file(self, *, timeout: int | None = None) -> SavePdfFileResponse:
+        """Saves the PDF file displayed in the current browser page."""
+        return await self._browser_environment()._run_extension_action(
+            SavePdfFileRequest(),
+            SavePdfFileResponse,
             timeout=timeout,
         )
 

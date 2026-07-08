@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import random
 import subprocess
 import sys
 import time
@@ -65,18 +66,16 @@ from playwright.async_api import (
     Browser,
     BrowserContext,
     CDPSession,
-    ElementHandle,
     Page,
     Playwright,
     async_playwright,
 )
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
-from narada.utils import assert_never, assert_not_none
+from narada.utils import assert_not_none
 from narada.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -96,6 +95,187 @@ _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR = "#narada-unsupported-browser"
 _EXTENSION_MISSING_INDICATOR_SELECTOR = "#narada-extension-missing"
 _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticated"
 _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
+_BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
+_BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
+
+
+type _BrowserInitializationResultType = Literal[
+    "browser_window_id",
+    "unsupported_browser",
+    "extension_missing",
+    "extension_unauthenticated",
+    "initialization_error",
+]
+
+
+class _BrowserInitializationResult(TypedDict, total=False):
+    type: _BrowserInitializationResultType
+    browserWindowId: str
+
+
+def _build_browser_window_id_observer_script() -> str:
+    targets = [
+        {
+            "type": "unsupported_browser",
+            "selector": _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
+        },
+        {
+            "type": "extension_missing",
+            "selector": _EXTENSION_MISSING_INDICATOR_SELECTOR,
+        },
+        {
+            "type": "extension_unauthenticated",
+            "selector": _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
+        },
+        {
+            "type": "initialization_error",
+            "selector": _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
+        },
+        {"type": "browser_window_id", "selector": _BROWSER_WINDOW_ID_SELECTOR},
+    ]
+    script = """
+        (() => {
+          if (window.top !== window) {
+            return;
+          }
+
+          const targets = __TARGETS__;
+          const globalSymbol = Symbol.for(__GLOBAL_KEY__);
+          const legacyGlobalKey = __LEGACY_GLOBAL_KEY__;
+          const legacyState = window[legacyGlobalKey];
+          if (legacyState !== undefined) {
+            cleanupPreviousState(legacyState);
+            delete window[legacyGlobalKey];
+          }
+
+          const existingState = window[globalSymbol];
+          if (existingState?.version === 3) {
+            return;
+          }
+
+          if (existingState !== undefined) {
+            cleanupPreviousState(existingState);
+            delete window[globalSymbol];
+          }
+
+          const state = {
+            version: 3,
+            result: null,
+            observer: null,
+            resolved: false,
+            disposed: false,
+            resolve: null,
+            promise: null,
+            readInitializationResult: null,
+            dispose: null,
+          };
+
+          function cleanup() {
+            if (state.observer !== null) {
+              state.observer.disconnect();
+              state.observer = null;
+            }
+          }
+
+          function cleanupPreviousState(previousState) {
+            previousState?.dispose?.();
+            previousState?.observer?.disconnect?.();
+            if (
+              previousState?.intervalId !== null
+              && previousState?.intervalId !== undefined
+            ) {
+              clearInterval(previousState.intervalId);
+            }
+          }
+
+          function dispose() {
+            state.disposed = true;
+            cleanup();
+            if (window[globalSymbol] === state) {
+              delete window[globalSymbol];
+            }
+          }
+
+          function readInitializationResult() {
+            for (const target of targets) {
+              const element = document.querySelector(target.selector);
+              if (element === null) {
+                continue;
+              }
+
+              if (target.type !== 'browser_window_id') {
+                return { type: target.type };
+              }
+
+              const browserWindowId = element.textContent?.trim();
+              if (browserWindowId) {
+                return { type: target.type, browserWindowId };
+              }
+            }
+
+            return null;
+          }
+
+          function finishIfReady() {
+            if (state.disposed) {
+              return true;
+            }
+            const result = readInitializationResult();
+            if (result === null) {
+              return false;
+            }
+            if (state.resolved) {
+              return true;
+            }
+
+            state.resolved = true;
+            state.result = result;
+            cleanup();
+            state.resolve(result);
+            return true;
+          }
+
+          state.promise = new Promise((resolve) => {
+            state.resolve = resolve;
+          });
+          state.readInitializationResult = readInitializationResult;
+          state.dispose = dispose;
+          Object.defineProperty(window, globalSymbol, {
+            value: state,
+            configurable: true,
+            writable: true,
+          });
+
+          function startObserving() {
+            if (finishIfReady()) {
+              return;
+            }
+
+            const root = document.documentElement ?? document;
+            state.observer = new MutationObserver(finishIfReady);
+            state.observer.observe(root, {
+              childList: true,
+              subtree: true,
+              characterData: true,
+            });
+          }
+
+          if (document.documentElement !== null) {
+            startObserving();
+          } else {
+            document.addEventListener('DOMContentLoaded', startObserving, { once: true });
+          }
+        })();
+    """
+    return (
+        script.replace("__TARGETS__", json.dumps(targets))
+        .replace("__GLOBAL_KEY__", json.dumps(_BROWSER_WINDOW_ID_OBSERVER_KEY))
+        .replace(
+            "__LEGACY_GLOBAL_KEY__",
+            json.dumps(_BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL),
+        )
+    )
+
 
 type InputRequiredCallback = Callable[[HitlInputMetadata], Awaitable[None] | None]
 
@@ -225,85 +405,105 @@ class _BrowserInitializationHelper:
         self._console = console
 
     @staticmethod
-    async def wait_for_selector_attached(
-        page: Page, selector: str, *, timeout: int
-    ) -> ElementHandle | None:
-        try:
-            return await page.wait_for_selector(
-                selector, state="attached", timeout=timeout
-            )
-        except PlaywrightTimeoutError:
+    async def install_browser_window_id_observer(page: Page) -> None:
+        await page.add_init_script(script=_build_browser_window_id_observer_script())
+
+    @staticmethod
+    async def wait_for_browser_initialization_result(
+        page: Page, *, timeout: int
+    ) -> _BrowserInitializationResult | None:
+        await page.evaluate(_build_browser_window_id_observer_script())
+        result = await page.evaluate(
+            """
+            async ({ globalKey, timeoutMs }) => {
+              const observerState = window[Symbol.for(globalKey)];
+              const immediateResult =
+                observerState?.readInitializationResult?.() ?? null;
+              if (immediateResult !== null) {
+                return immediateResult;
+              }
+
+              if (observerState?.promise === undefined) {
+                return null;
+              }
+
+              let timeoutId = null;
+              const timeoutPromise = new Promise((resolve) => {
+                timeoutId = window.setTimeout(
+                  () => resolve({ type: 'timeout' }),
+                  timeoutMs
+                );
+              });
+
+              const result = await Promise.race([
+                observerState.promise,
+                timeoutPromise,
+              ]);
+              if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+              }
+              if (result?.type === 'timeout') {
+                observerState.dispose?.();
+                return null;
+              }
+              return result;
+            }
+            """,
+            {
+                "globalKey": _BROWSER_WINDOW_ID_OBSERVER_KEY,
+                "timeoutMs": timeout,
+            },
+        )
+        if not isinstance(result, dict):
             return None
+
+        result_type = result.get("type")
+        if result_type not in {
+            "browser_window_id",
+            "unsupported_browser",
+            "extension_missing",
+            "extension_unauthenticated",
+            "initialization_error",
+        }:
+            return None
+
+        return cast(_BrowserInitializationResult, result)
 
     @staticmethod
     async def wait_for_browser_window_id_silently(page: Page, *, timeout: int) -> str:
-        selectors = [
-            _BROWSER_WINDOW_ID_SELECTOR,
-            _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
-            _EXTENSION_MISSING_INDICATOR_SELECTOR,
-            _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
-            _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
-        ]
-        tasks: list[asyncio.Task[ElementHandle | None]] = [
-            asyncio.create_task(
-                _BrowserInitializationHelper.wait_for_selector_attached(
-                    page, selector, timeout=timeout
-                )
+        result = (
+            await _BrowserInitializationHelper.wait_for_browser_initialization_result(
+                page,
+                timeout=timeout,
             )
-            for selector in selectors
-        ]
-        (
-            browser_window_id_task,
-            unsupported_browser_indicator_task,
-            extension_missing_indicator_task,
-            extension_unauthenticated_indicator_task,
-            initialization_error_indicator_task,
-        ) = tasks
-
-        done, pending = await asyncio.wait(
-            tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
         )
-
-        for task in pending:
-            task.cancel()
-
-        if len(done) == 0:
+        if result is None:
             raise NaradaTimeoutError("Timed out waiting for browser window ID")
 
-        for task in done:
-            if task == browser_window_id_task:
-                browser_window_id_elem = task.result()
-                if browser_window_id_elem is None:
-                    raise NaradaTimeoutError("Timed out waiting for browser window ID")
+        result_type = result.get("type")
+        if result_type == "browser_window_id":
+            browser_window_id = result.get("browserWindowId")
+            if not isinstance(browser_window_id, str) or not browser_window_id:
+                raise NaradaInitializationError("Browser window ID is empty")
 
-                browser_window_id = await browser_window_id_elem.text_content()
-                if browser_window_id is None:
-                    raise NaradaInitializationError("Browser window ID is empty")
+            return browser_window_id
 
-                return browser_window_id
+        # TODO: Create custom exception types for these cases.
+        if result_type == "unsupported_browser":
+            raise NaradaUnsupportedBrowserError("Unsupported browser")
 
-            # TODO: Create custom exception types for these cases.
-            if task == unsupported_browser_indicator_task and task.result() is not None:
-                raise NaradaUnsupportedBrowserError("Unsupported browser")
+        if result_type == "extension_missing":
+            raise NaradaExtensionMissingError("Narada extension missing")
 
-            if task == extension_missing_indicator_task and task.result() is not None:
-                raise NaradaExtensionMissingError("Narada extension missing")
+        if result_type == "extension_unauthenticated":
+            raise NaradaExtensionUnauthenticatedError(
+                "Sign in to the Narada extension first"
+            )
 
-            if (
-                task == extension_unauthenticated_indicator_task
-                and task.result() is not None
-            ):
-                raise NaradaExtensionUnauthenticatedError(
-                    "Sign in to the Narada extension first"
-                )
+        if result_type == "initialization_error":
+            raise NaradaInitializationError("Initialization error")
 
-            if (
-                task == initialization_error_indicator_task
-                and task.result() is not None
-            ):
-                raise NaradaInitializationError("Initialization error")
-
-        assert_never()
+        raise NaradaInitializationError("Unexpected initialization result")
 
     async def wait_for_browser_window_id_interactively(
         self, page: Page, *, per_attempt_timeout: int
@@ -970,8 +1170,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         )
 
     async def _initialize(self) -> None:
-        self._playwright_context_manager = async_playwright()
-        self._playwright = await self._playwright_context_manager.__aenter__()
+        await self._start_playwright()
         if self._attach_to_existing:
             await self._initialize_in_existing_browser_window()
         else:
@@ -996,6 +1195,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
         finally:
             await self._stop_playwright()
+
+    async def _start_playwright(self) -> None:
+        self._playwright_context_manager = async_playwright()
+        self._playwright = await self._playwright_context_manager.__aenter__()
 
     async def _stop_playwright(self) -> None:
         if self._playwright_context_manager is None:
@@ -1042,6 +1245,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
         initialization_page = await context.new_page()
+        await _BrowserInitializationHelper.install_browser_window_id_observer(
+            initialization_page
+        )
         await initialization_page.goto(tagged_initialization_url)
 
         browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
@@ -1169,6 +1375,9 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                     )
                 )
                 blank_page = context.pages[0]
+                await _BrowserInitializationHelper.install_browser_window_id_observer(
+                    blank_page
+                )
                 await blank_page.goto(tagged_initialization_url)
                 await proxy_cdp_session.detach()
                 did_initial_navigation = True
@@ -1474,15 +1683,31 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
+        Retry up to 3 times on error.
 
         Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
         Playwright over CDP, opens ``login_url``, and waits for
         ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
         interactive prompts and related behavior.
         """
-        self._playwright_context_manager = async_playwright()
-        self._playwright = await self._playwright_context_manager.__aenter__()
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                await self._initialize_once()
+                return
+            except Exception as error:
+                await self._cleanup_failed_initialization_attempt()
+                if (
+                    attempt == max_attempts - 1
+                    or self._is_non_retryable_initialization_error(error)
+                ):
+                    raise
 
+                retry_backoff_with_jitter = 2 ** (attempt + 1) + random.uniform(0, 1)
+                await asyncio.sleep(retry_backoff_with_jitter)
+
+    async def _initialize_once(self) -> None:
+        await self._start_playwright()
         request_body = {
             "require_extension": True,
             "session_name": self._session_name,
@@ -1501,61 +1726,67 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             ) as resp:
                 if not resp.ok:
                     error_text = await resp.text()
-                    if resp.status == HTTPStatus.FORBIDDEN:
-                        error = ApiErrorPayload.from_error_text(error_text)
-                        err = RuntimeError(
-                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
-                            f"Endpoint URL: {endpoint_url}"
-                        )
-                        err.status_code = resp.status  # type: ignore[attr-defined]
-                        err.detail = error.detail  # type: ignore[attr-defined]
-                        raise err
-                    raise RuntimeError(
+                    err = RuntimeError(
                         f"Failed to create cloud browser session: {resp.status} {error_text}\n"
                         f"Endpoint URL: {endpoint_url}"
                     )
+                    err.status_code = resp.status  # type: ignore[attr-defined]
+                    if resp.status == HTTPStatus.FORBIDDEN:
+                        error = ApiErrorPayload.from_error_text(error_text)
+                        err.detail = error.detail  # type: ignore[attr-defined]
+                    raise err
                 response_data = await resp.json()
 
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
+        self._session_id = session_id
 
         # Connect to browser via CDP with authentication headers and log the user in.
-        try:
-            await self._initialize_cloud_browser_window(
-                cdp_websocket_url=cdp_websocket_url,
-                session_id=session_id,
-                login_url=login_url,
-                cdp_auth_headers=cdp_auth_headers,
-            )
-        except Exception:
-            # Clean up the session if CDP connection fails
+        await self._initialize_cloud_browser_window(
+            cdp_websocket_url=cdp_websocket_url,
+            session_id=session_id,
+            login_url=login_url,
+            cdp_auth_headers=cdp_auth_headers,
+        )
+
+    @staticmethod
+    def _is_non_retryable_initialization_error(error: Exception) -> bool:
+        status_code = getattr(error, "status_code", None)
+        return isinstance(status_code, int) and 400 <= status_code < 500
+
+    async def _cleanup_failed_initialization_attempt(self) -> None:
+        if self._session_id is not None:
             try:
-                async with aiohttp.ClientSession() as cleanup_session:
-                    async with cleanup_session.post(
-                        f"{self._base_url}/cloud-browser/stop-cloud-browser-session",
-                        headers=self._auth_headers,
-                        json={"session_id": session_id, "status": "failed"},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.ok:
-                            logging.info(
-                                "Cleaned up session %s after CDP connection failure",
-                                session_id,
-                            )
-                        else:
-                            logging.warning(
-                                "Failed to cleanup session %s: %s",
-                                session_id,
-                                resp.status,
-                            )
-            except Exception as cleanup_error:
-                logging.warning(
-                    "Error cleaning up session %s: %s", session_id, cleanup_error
+                await _stop_cloud_browser_session(
+                    base_url=self._base_url,
+                    auth_headers=self._auth_headers,
+                    session_id=self._session_id,
+                    status="failed",
+                    timeout=10,
                 )
-            # Re-raise the original connection error
-            raise
+            except Exception:
+                logger.exception(
+                    "Error cleaning up session %s (%s) after failed initialization",
+                    self._session_id,
+                    self._session_name,
+                )
+
+        try:
+            await self._stop_playwright()
+        except Exception:
+            logger.exception(
+                "Error stopping Playwright after failed cloud browser initialization"
+            )
+        finally:
+            self._session_id = None
+            self._browser_window_id = None
+            self._context = None
+
+    async def _start_playwright(self) -> None:
+        self._playwright_context_manager = async_playwright()
+        self._playwright = await self._playwright_context_manager.__aenter__()
 
     async def _stop_playwright(self) -> None:
         if self._playwright_context_manager is None:
@@ -1597,6 +1828,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         session_id: str,
         login_url: str,
         cdp_auth_headers: dict[str, str],
+        expected_browser_window_id: str | None = None,
     ) -> None:
         assert self._playwright is not None
 
@@ -1608,6 +1840,26 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         # Navigate to login URL (provided by backend with custom token)
         context = browser.contexts[0]
         initialization_page = context.pages[0]
+        if expected_browser_window_id is not None:
+            # Put the backend-owned browser ID into sessionStorage before hydration
+            # so AgentCore sessions use the right Firestore route when needed.
+            expected_browser_window_id_json = json.dumps(expected_browser_window_id)
+            await initialization_page.add_init_script(
+                script=f"""
+                    (() => {{
+                      const expectedBrowserWindowId = {expected_browser_window_id_json};
+                      try {{
+                        sessionStorage.setItem(
+                          "naradaBrowserWindowId",
+                          expectedBrowserWindowId
+                        );
+                      }} catch (_error) {{}}
+                    }})();
+                """
+            )
+        await _BrowserInitializationHelper.install_browser_window_id_observer(
+            initialization_page
+        )
         await initialization_page.goto(
             login_url, timeout=15_000, wait_until="domcontentloaded"
         )
@@ -1628,7 +1880,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                     raise
                 logging.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
-            except NaradaTimeoutError:
+            except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
                     raise
                 # If browser window ID is not found, reload the page and try again
@@ -1636,6 +1888,15 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
                 await initialization_page.goto(
                     login_url, timeout=15_000, wait_until="domcontentloaded"
                 )
+
+        if (
+            expected_browser_window_id is not None
+            and browser_window_id != expected_browser_window_id
+        ):
+            raise RuntimeError(
+                "Initialized cloud session reported browserWindowId "
+                f"{browser_window_id!r}, expected {expected_browser_window_id!r}."
+            )
 
         self._browser_window_id = browser_window_id
         self._session_id = session_id
@@ -1841,6 +2102,7 @@ async def _stop_cloud_browser_session(
     base_url: str,
     auth_headers: dict[str, str],
     session_id: str,
+    status: Literal["complete", "terminated", "failed", "timed_out"] = "complete",
     timeout: int | None = None,
 ) -> None:
     try:
@@ -1848,7 +2110,7 @@ async def _stop_cloud_browser_session(
             async with session.post(
                 f"{base_url}/cloud-browser/stop-cloud-browser-session",
                 headers=auth_headers,
-                json={"session_id": session_id},
+                json={"session_id": session_id, "status": status},
                 timeout=aiohttp.ClientTimeout(total=timeout or 40),
             ) as resp:
                 if resp.ok:

@@ -80,7 +80,10 @@ def _build_cloud_environment_with_page(page: AsyncMock) -> CloudBrowserEnvironme
         auth_headers={"x-api-key": "test-key"},
         config=BrowserConfig(interactive=False),
     )
-    browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+    page.add_init_script = AsyncMock()
+    browser = SimpleNamespace(
+        contexts=[SimpleNamespace(pages=[page], add_init_script=AsyncMock())]
+    )
     env._playwright = SimpleNamespace(
         chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser))
     )
@@ -237,6 +240,35 @@ async def test_extension_action_request_includes_action_execution_id(
 
 
 @pytest.mark.asyncio
+async def test_remote_browser_environment_with_cloud_session_stops_session_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    stop_cloud_browser_session = AsyncMock()
+    monkeypatch.setattr(
+        environment_module,
+        "_stop_cloud_browser_session",
+        stop_cloud_browser_session,
+    )
+
+    env = RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        auth_headers={"x-api-key": "test-key"},
+    )
+
+    await env.close()
+
+    stop_cloud_browser_session.assert_awaited_once_with(
+        base_url=env._base_url,
+        auth_headers={"x-api-key": "test-key"},
+        session_id="session-123",
+        timeout=None,
+    )
+
+
+@pytest.mark.asyncio
 async def test_lambda_environment_uses_backend_initialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -312,6 +344,7 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigat
 ) -> None:
     page = AsyncMock()
     env = _build_cloud_environment_with_page(page)
+    context = env._playwright.chromium.connect_over_cdp.return_value.contexts[0]
 
     wait_for_browser_window_id = AsyncMock(return_value="browser-window-123")
     monkeypatch.setattr(
@@ -335,8 +368,71 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_login_navigat
         BrowserConfig(interactive=False),
         timeout=30_000,
     )
+    context.add_init_script.assert_not_awaited()
+    page.add_init_script.assert_awaited_once()
+    assert "MutationObserver" in page.add_init_script.await_args.kwargs["script"]
     assert env.browser_window_id == "browser-window-123"
     assert env.cloud_browser_session_id == "session-123"
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_environment_seeds_expected_browser_window_id_before_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    env = _build_cloud_environment_with_page(page)
+    events: list[str] = []
+
+    async def add_init_script(*args, **kwargs) -> None:
+        events.append("seed")
+
+    async def goto(*args, **kwargs) -> None:
+        events.append("goto")
+
+    page.add_init_script.side_effect = add_init_script
+    page.goto.side_effect = goto
+    wait_for_browser_window_id = AsyncMock(return_value="backend-window-123")
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
+
+    await env._initialize_cloud_browser_window(
+        cdp_websocket_url="wss://agentcore.example.test/session-123",
+        session_id="session-123",
+        login_url="https://app.narada.ai/chat?customToken=test-token",
+        cdp_auth_headers={"Authorization": "signed-cdp"},
+        expected_browser_window_id="backend-window-123",
+    )
+
+    assert events[:3] == ["seed", "seed", "goto"]
+    seeded_script = page.add_init_script.await_args_list[0].kwargs["script"]
+    observer_script = page.add_init_script.await_args_list[1].kwargs["script"]
+    assert "MutationObserver" in observer_script
+    script = seeded_script
+    assert "naradaBrowserWindowId" in script
+    assert "backend-window-123" in script
+    assert env.browser_window_id == "backend-window-123"
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_environment_rejects_unexpected_seeded_browser_window_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    env = _build_cloud_environment_with_page(page)
+    wait_for_browser_window_id = AsyncMock(return_value="frontend-window-123")
+    monkeypatch.setattr(
+        env, "_wait_for_cloud_browser_window_id", wait_for_browser_window_id
+    )
+
+    with pytest.raises(RuntimeError, match="expected 'backend-window-123'"):
+        await env._initialize_cloud_browser_window(
+            cdp_websocket_url="wss://agentcore.example.test/session-123",
+            session_id="session-123",
+            login_url="https://app.narada.ai/chat?customToken=test-token",
+            cdp_auth_headers={"Authorization": "signed-cdp"},
+            expected_browser_window_id="backend-window-123",
+        )
 
 
 @pytest.mark.asyncio

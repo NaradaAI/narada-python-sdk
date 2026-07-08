@@ -151,6 +151,8 @@ class AgenticMouseActionTrace(TypedDict):
     step_type: Literal["agenticMouseAction"]
     url: str
     description: str
+    verificationStatus: NotRequired[bool]
+    verificationStatusVariableName: NotRequired[str]
     action_trace: ActionTrace  # For operator agent fallback
 
 
