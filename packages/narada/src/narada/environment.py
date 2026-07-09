@@ -1160,6 +1160,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._context = None
         self._attach_to_existing = attach_to_existing
         self._browser: Browser | None = None
+        self._client_lock: asyncio.Lock | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
         self._browser_initialization = _BrowserInitializationHelper(
@@ -1184,18 +1185,20 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             await self._initialize_in_existing_browser_window()
         else:
             await self._open_and_initialize_browser_window()
+        await self._detach_after_initialization()
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        assert self._context is not None
-        side_panel_url = create_side_panel_url(self._config, self.browser_window_id)
-        side_panel_page = next(
-            p for p in self._context.pages if p.url == side_panel_url
-        )
+        async with self._get_client_lock():
+            await self._ensure_playwright_connected()
+            try:
+                side_panel_page = self._get_side_panel_page()
 
-        # Refresh the extension side panel, which ensures any inflight Narada operations are
-        # canceled.
-        await side_panel_page.reload()
+                # Refresh the extension side panel, which ensures any inflight Narada operations are
+                # canceled.
+                await side_panel_page.reload()
+            finally:
+                await self._detach_impl()
 
     @override
     async def _close_impl(self, *, timeout: int | None = None) -> None:
@@ -1207,7 +1210,22 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     @override
     async def detach(self) -> None:
-        await self._detach_impl()
+        async with self._get_client_lock():
+            await self._detach_impl()
+
+    def _get_client_lock(self) -> asyncio.Lock:
+        if self._client_lock is None:
+            self._client_lock = asyncio.Lock()
+        return self._client_lock
+
+    async def _detach_after_initialization(self) -> None:
+        try:
+            await self.detach()
+        except Exception:
+            logger.warning(
+                "Failed to detach Playwright resources after browser initialization",
+                exc_info=True,
+            )
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
@@ -1230,6 +1248,44 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     async def _detach_impl(self) -> None:
         await self._stop_playwright()
+
+    async def _ensure_playwright_connected(self) -> None:
+        if (
+            self._browser is not None
+            and self._context is not None
+            and self._playwright_context_manager is not None
+            and self._playwright is not None
+        ):
+            return
+
+        await self._detach_impl()
+        await self._start_playwright()
+
+        try:
+            assert self._playwright is not None
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                self._config.cdp_url
+            )
+            self._context = self._browser.contexts[0]
+            self._get_side_panel_page()
+        except Exception:
+            await self._detach_impl()
+            raise
+
+    def _get_side_panel_page(self) -> Page:
+        if self._context is None:
+            raise NaradaInitializationError("Browser client is not connected")
+
+        side_panel_url = create_side_panel_url(self._config, self.browser_window_id)
+        side_panel_page = next(
+            (p for p in self._context.pages if p.url == side_panel_url), None
+        )
+        if side_panel_page is None:
+            raise NaradaInitializationError(
+                f"Could not find Narada side panel page for browser window "
+                f"{self.browser_window_id!r}"
+            )
+        return side_panel_page
 
     async def _open_and_initialize_browser_window(self) -> None:
         assert self._playwright is not None
@@ -1688,6 +1744,9 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         self._session_id: str | None = None
         self._context: BrowserContext | None = None
         self._browser: Browser | None = None
+        self._client_lock: asyncio.Lock | None = None
+        self._cdp_websocket_url: str | None = None
+        self._cdp_auth_headers: dict[str, str] | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
         self._browser_initialization = _BrowserInitializationHelper(
@@ -1721,6 +1780,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         for attempt in range(max_attempts):
             try:
                 await self._initialize_once()
+                await self._detach_after_initialization()
                 return
             except Exception as error:
                 await self._cleanup_failed_initialization_attempt()
@@ -1769,6 +1829,8 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
         self._session_id = session_id
+        self._cdp_websocket_url = cdp_websocket_url
+        self._cdp_auth_headers = cdp_auth_headers
 
         # Connect to browser via CDP with authentication headers and log the user in.
         await self._initialize_cloud_browser_window(
@@ -1810,6 +1872,8 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
             self._session_id = None
             self._browser_window_id = None
             self._context = None
+            self._cdp_websocket_url = None
+            self._cdp_auth_headers = None
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
@@ -1835,15 +1899,79 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        assert self._context is not None
+        async with self._get_client_lock():
+            await self._ensure_playwright_connected()
+            try:
+                side_panel_page = self._get_side_panel_page()
+
+                # Refresh the extension side panel, which ensures any inflight Narada operations are
+                # canceled.
+                await side_panel_page.reload()
+            finally:
+                await self._detach_impl()
+
+    @override
+    async def detach(self) -> None:
+        async with self._get_client_lock():
+            await self._detach_impl()
+
+    def _get_client_lock(self) -> asyncio.Lock:
+        if self._client_lock is None:
+            self._client_lock = asyncio.Lock()
+        return self._client_lock
+
+    async def _detach_after_initialization(self) -> None:
+        try:
+            await self.detach()
+        except Exception:
+            logger.warning(
+                "Failed to detach Playwright resources after cloud browser initialization",
+                exc_info=True,
+            )
+
+    async def _ensure_playwright_connected(self) -> None:
+        if (
+            self._browser is not None
+            and self._context is not None
+            and self._playwright_context_manager is not None
+            and self._playwright is not None
+        ):
+            return
+
+        if self._cdp_websocket_url is None or self._cdp_auth_headers is None:
+            raise NaradaInitializationError(
+                "Cloud browser CDP connection details are unavailable"
+            )
+
+        await self._detach_impl()
+        await self._start_playwright()
+
+        try:
+            assert self._playwright is not None
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                self._cdp_websocket_url,
+                headers=self._cdp_auth_headers,
+            )
+            self._context = self._browser.contexts[0]
+            self._get_side_panel_page()
+        except Exception:
+            await self._detach_impl()
+            raise
+
+    def _get_side_panel_page(self) -> Page:
+        if self._context is None:
+            raise NaradaInitializationError("Cloud browser client is not connected")
+
         side_panel_url = create_side_panel_url(self._config, self.browser_window_id)
         side_panel_page = next(
-            p for p in self._context.pages if p.url == side_panel_url
+            (p for p in self._context.pages if p.url == side_panel_url), None
         )
-
-        # Refresh the extension side panel, which ensures any inflight Narada operations are
-        # canceled.
-        await side_panel_page.reload()
+        if side_panel_page is None:
+            raise NaradaInitializationError(
+                f"Could not find Narada side panel page for browser window "
+                f"{self.browser_window_id!r}"
+            )
+        return side_panel_page
 
     async def _wait_for_cloud_browser_window_id(
         self,

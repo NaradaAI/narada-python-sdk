@@ -76,9 +76,9 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 ### Split-script browser handoff
 
-If your workflow starts a browser in one script and reuses it from later scripts, call
-`detach()` after persisting the browser identifiers. This releases the local Playwright/CDP
-transport without closing the browser window.
+If your workflow starts a browser in one script and reuses it from later scripts, persist the
+browser identifiers after `start()`. The SDK automatically releases its local Playwright/CDP
+transport after initialization without closing the browser window.
 
 ```python
 from narada import BrowserEnvironment
@@ -90,9 +90,6 @@ async def start_browser() -> None:
 
     browser_window_id = env.browser_window_id
     browser_process_id = env.browser_process_id
-
-    # Persist these IDs for later scripts, then release local Playwright resources.
-    await env.detach()
 ```
 
 Later scripts can reconnect to the existing Narada browser window through
