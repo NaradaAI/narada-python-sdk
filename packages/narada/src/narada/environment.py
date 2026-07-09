@@ -1185,7 +1185,13 @@ class BrowserEnvironment(BaseBrowserEnvironment):
             await self._initialize_in_existing_browser_window()
         else:
             await self._open_and_initialize_browser_window()
-        await self._detach_after_initialization()
+        try:
+            await self.detach()
+        except Exception:
+            logger.warning(
+                "Failed to detach Playwright resources after browser initialization",
+                exc_info=True,
+            )
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
@@ -1219,15 +1225,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         if self._client_lock is None:
             self._client_lock = asyncio.Lock()
         return self._client_lock
-
-    async def _detach_after_initialization(self) -> None:
-        try:
-            await self.detach()
-        except Exception:
-            logger.warning(
-                "Failed to detach Playwright resources after browser initialization",
-                exc_info=True,
-            )
 
     async def _start_playwright(self) -> None:
         self._playwright_context_manager = async_playwright()
@@ -1782,7 +1779,13 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         for attempt in range(max_attempts):
             try:
                 await self._initialize_once()
-                await self._detach_after_initialization()
+                try:
+                    await self.detach()
+                except Exception:
+                    logger.warning(
+                        "Failed to detach Playwright resources after cloud browser initialization",
+                        exc_info=True,
+                    )
                 return
             except Exception as error:
                 await self._cleanup_failed_initialization_attempt()
@@ -1923,15 +1926,6 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         if self._client_lock is None:
             self._client_lock = asyncio.Lock()
         return self._client_lock
-
-    async def _detach_after_initialization(self) -> None:
-        try:
-            await self.detach()
-        except Exception:
-            logger.warning(
-                "Failed to detach Playwright resources after cloud browser initialization",
-                exc_info=True,
-            )
 
     async def _ensure_playwright_connected(self) -> None:
         if (
