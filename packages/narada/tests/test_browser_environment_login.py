@@ -329,7 +329,90 @@ def test_find_page_by_url_scans_all_browser_contexts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fix_download_behavior_uses_browser_level_cdp_without_page() -> None:
+async def test_open_initialization_stores_target_only_match_for_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    import narada.environment as environment_module
+
+    class BrowserCdpSession:
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, str]]] = []
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            self.commands.append((method, params))
+            if method == "Target.attachToTarget":
+                return {"sessionId": "target-session-123"}
+            return {}
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.cdp_session = BrowserCdpSession()
+
+        async def new_browser_cdp_session(self) -> BrowserCdpSession:
+            return self.cdp_session
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
+            self.pages: list[object] = []
+
+    context = Context()
+    side_panel_match = environment_module._SidePanelMatch(
+        page=None,
+        target_id="target-123",
+        browser_context_id="browser-context-123",
+    )
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+    env._playwright = object()  # type: ignore[assignment]
+    launch_browser = AsyncMock(
+        return_value=environment_module._LaunchBrowserResult(
+            browser_process_id=123,
+            browser_window_id="browser-window-123",
+            browser_context=context,
+            side_panel_match=side_panel_match,
+        )
+    )
+    fix_download_behavior = AsyncMock()
+    monkeypatch.setattr(env, "_launch_browser", launch_browser)
+    monkeypatch.setattr(env, "_fix_download_behavior", fix_download_behavior)
+
+    await env._open_and_initialize_browser_window()
+
+    assert env._side_panel_match is side_panel_match
+    fix_download_behavior.assert_awaited_once_with(context, side_panel_match)
+
+    env._initialized = True
+    await env.reset_agent_state()
+
+    commands = context.browser.cdp_session.commands
+    assert commands[0] == ("Target.attachToTarget", {"targetId": "target-123"})
+    assert commands[1][0] == "Target.sendMessageToTarget"
+    assert commands[1][1]["sessionId"] == "target-session-123"
+    assert json.loads(commands[1][1]["message"]) == {
+        "id": 1,
+        "method": "Page.reload",
+    }
+    assert commands[2] == (
+        "Target.detachFromTarget",
+        {"sessionId": "target-session-123"},
+    )
+    assert context.browser.cdp_session.detached
+
+
+@pytest.mark.asyncio
+async def test_fix_download_behavior_uses_browser_context_for_target_only_match() -> (
+    None
+):
+    import narada.environment as environment_module
+
     class BrowserCdpSession:
         def __init__(self) -> None:
             self.commands: list[tuple[str, dict[str, str]]] = []
@@ -354,29 +437,29 @@ async def test_fix_download_behavior_uses_browser_level_cdp_without_page() -> No
             self.browser = Browser()
 
     context = Context()
+    side_panel_match = environment_module._SidePanelMatch(
+        page=None,
+        target_id="target-123",
+        browser_context_id="browser-context-123",
+    )
     env = BrowserEnvironment(
         api_key="test-key", config=BrowserConfig(interactive=False)
     )
 
-    await env._fix_download_behavior(context, None)  # type: ignore[arg-type]
+    await env._fix_download_behavior(context, side_panel_match)  # type: ignore[arg-type]
 
     assert context.browser.cdp_session.commands == [
-        ("Browser.setDownloadBehavior", {"behavior": "default"})
+        (
+            "Browser.setDownloadBehavior",
+            {"behavior": "default", "browserContextId": "browser-context-123"},
+        )
     ]
     assert context.browser.cdp_session.detached
 
 
 @pytest.mark.asyncio
-async def test_fix_download_behavior_falls_back_to_page_cdp() -> None:
-    class BrowserCdpSession:
-        def __init__(self) -> None:
-            self.detached = False
-
-        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
-            raise RuntimeError("browser-level CDP unavailable")
-
-        async def detach(self) -> None:
-            self.detached = True
+async def test_fix_download_behavior_uses_page_cdp_for_page_match() -> None:
+    import narada.environment as environment_module
 
     class PageCdpSession:
         def __init__(self) -> None:
@@ -392,10 +475,11 @@ async def test_fix_download_behavior_falls_back_to_page_cdp() -> None:
 
     class Browser:
         def __init__(self) -> None:
-            self.cdp_session = BrowserCdpSession()
+            self.new_browser_cdp_session_called = False
 
-        async def new_browser_cdp_session(self) -> BrowserCdpSession:
-            return self.cdp_session
+        async def new_browser_cdp_session(self) -> object:
+            self.new_browser_cdp_session_called = True
+            raise AssertionError("browser-level CDP should not be used")
 
     class Context:
         def __init__(self) -> None:
@@ -414,13 +498,18 @@ async def test_fix_download_behavior_falls_back_to_page_cdp() -> None:
 
     context = Context()
     page = Page()
+    side_panel_match = environment_module._SidePanelMatch(
+        page=page,  # type: ignore[arg-type]
+        target_id=None,
+        browser_context_id=None,
+    )
     env = BrowserEnvironment(
         api_key="test-key", config=BrowserConfig(interactive=False)
     )
 
-    await env._fix_download_behavior(context, page)  # type: ignore[arg-type]
+    await env._fix_download_behavior(context, side_panel_match)  # type: ignore[arg-type]
 
-    assert context.browser.cdp_session.detached
+    assert not context.browser.new_browser_cdp_session_called
     assert page.context.cdp_session.commands == [
         ("Page.setDownloadBehavior", {"behavior": "default"})
     ]
@@ -428,16 +517,61 @@ async def test_fix_download_behavior_falls_back_to_page_cdp() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fix_download_behavior_detaches_page_cdp_after_failure() -> None:
+async def test_fix_download_behavior_detaches_browser_cdp_after_failure() -> None:
+    import narada.environment as environment_module
+
     class BrowserCdpSession:
         def __init__(self) -> None:
             self.detached = False
 
         async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
-            raise RuntimeError("browser-level CDP unavailable")
+            raise RuntimeError("browser-level CDP failed")
 
         async def detach(self) -> None:
             self.detached = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.cdp_session = BrowserCdpSession()
+
+        async def new_browser_cdp_session(self) -> BrowserCdpSession:
+            return self.cdp_session
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
+
+    context = Context()
+    side_panel_match = environment_module._SidePanelMatch(
+        page=None,
+        target_id="target-123",
+        browser_context_id="browser-context-123",
+    )
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+
+    with pytest.raises(NaradaInitializationError, match="CDP target"):
+        await env._fix_download_behavior(context, side_panel_match)  # type: ignore[arg-type]
+
+    assert context.browser.cdp_session.detached
+
+
+@pytest.mark.asyncio
+async def test_fix_download_behavior_detaches_page_cdp_after_failure() -> None:
+    import narada.environment as environment_module
+
+    class Browser:
+        def __init__(self) -> None:
+            self.new_browser_cdp_session_called = False
+
+        async def new_browser_cdp_session(self) -> object:
+            self.new_browser_cdp_session_called = True
+            raise AssertionError("browser-level CDP should not be used")
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
 
     class PageCdpSession:
         def __init__(self) -> None:
@@ -449,17 +583,6 @@ async def test_fix_download_behavior_detaches_page_cdp_after_failure() -> None:
         async def detach(self) -> None:
             self.detached = True
 
-    class Browser:
-        def __init__(self) -> None:
-            self.cdp_session = BrowserCdpSession()
-
-        async def new_browser_cdp_session(self) -> BrowserCdpSession:
-            return self.cdp_session
-
-    class Context:
-        def __init__(self) -> None:
-            self.browser = Browser()
-
     class PageContext:
         def __init__(self) -> None:
             self.cdp_session = PageCdpSession()
@@ -473,19 +596,24 @@ async def test_fix_download_behavior_detaches_page_cdp_after_failure() -> None:
 
     context = Context()
     page = Page()
+    side_panel_match = environment_module._SidePanelMatch(
+        page=page,  # type: ignore[arg-type]
+        target_id=None,
+        browser_context_id=None,
+    )
     env = BrowserEnvironment(
         api_key="test-key", config=BrowserConfig(interactive=False)
     )
 
     with pytest.raises(RuntimeError, match="page-level CDP failed"):
-        await env._fix_download_behavior(context, page)  # type: ignore[arg-type]
+        await env._fix_download_behavior(context, side_panel_match)  # type: ignore[arg-type]
 
-    assert context.browser.cdp_session.detached
+    assert not context.browser.new_browser_cdp_session_called
     assert page.context.cdp_session.detached
 
 
 @pytest.mark.asyncio
-async def test_has_cdp_target_url_accepts_target_without_page() -> None:
+async def test_find_side_panel_match_accepts_target_without_page() -> None:
     import narada.environment as environment_module
 
     class CdpSession:
@@ -494,8 +622,10 @@ async def test_has_cdp_target_url_accepts_target_without_page() -> None:
             return {
                 "targetInfos": [
                     {
+                        "targetId": "target-123",
+                        "browserContextId": "browser-context-123",
                         "url": "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
-                        "sidepanel.html?browserWindowId=browser-window-123"
+                        "sidepanel.html?browserWindowId=browser-window-123",
                     }
                 ]
             }
@@ -504,6 +634,8 @@ async def test_has_cdp_target_url_accepts_target_without_page() -> None:
             pass
 
     class Browser:
+        contexts: list[object] = []
+
         async def new_browser_cdp_session(self) -> CdpSession:
             return CdpSession()
 
@@ -512,14 +644,20 @@ async def test_has_cdp_target_url_accepts_target_without_page() -> None:
         "sidepanel.html?browserWindowId=browser-window-123"
     )
 
-    assert await environment_module._has_cdp_target_url(
+    side_panel_match = await environment_module._find_side_panel_match(
         Browser(),
         side_panel_url,
     )
 
+    assert side_panel_match == environment_module._SidePanelMatch(
+        page=None,
+        target_id="target-123",
+        browser_context_id="browser-context-123",
+    )
+
 
 @pytest.mark.asyncio
-async def test_has_cdp_target_url_rejects_missing_target() -> None:
+async def test_find_side_panel_match_rejects_missing_target() -> None:
     import narada.environment as environment_module
 
     class CdpSession:
@@ -531,6 +669,8 @@ async def test_has_cdp_target_url_rejects_missing_target() -> None:
             pass
 
     class Browser:
+        contexts: list[object] = []
+
         async def new_browser_cdp_session(self) -> CdpSession:
             return CdpSession()
 
@@ -539,7 +679,95 @@ async def test_has_cdp_target_url_rejects_missing_target() -> None:
         "sidepanel.html?browserWindowId=browser-window-123"
     )
 
-    assert not await environment_module._has_cdp_target_url(
-        Browser(),
-        side_panel_url,
+    assert (
+        await environment_module._find_side_panel_match(
+            Browser(),
+            side_panel_url,
+        )
+        is None
     )
+
+
+@pytest.mark.asyncio
+async def test_launch_browser_limits_browser_window_id_timeout_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    class BrowserProcess:
+        pid = 123
+
+    class Page:
+        def __init__(self, state: dict[str, str]) -> None:
+            self._state = state
+
+        @property
+        def url(self) -> str:
+            return self._state["initialization_url"]
+
+        async def bring_to_front(self) -> None:
+            pass
+
+        async def goto(self, url: str, *, timeout: int, wait_until: str) -> None:
+            self._state["initialization_url"] = url
+
+    class Context:
+        def __init__(self, state: dict[str, str]) -> None:
+            self.pages = [Page(state)]
+
+    class Browser:
+        def __init__(self, state: dict[str, str]) -> None:
+            self.contexts = [Context(state)]
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class Chromium:
+        def __init__(self, state: dict[str, str]) -> None:
+            self._state = state
+            self.connect_count = 0
+
+        async def connect_over_cdp(self, cdp_url: str) -> Browser:
+            self.connect_count += 1
+            return Browser(self._state)
+
+    class Playwright:
+        def __init__(self, state: dict[str, str]) -> None:
+            self.chromium = Chromium(state)
+
+    state = {"initialization_url": ""}
+
+    async def create_subprocess_exec(
+        executable_path: str,
+        *browser_args: str,
+        **kwargs: object,
+    ) -> BrowserProcess:
+        state["initialization_url"] = browser_args[-1]
+        return BrowserProcess()
+
+    monkeypatch.setattr(
+        environment_module.asyncio,
+        "create_subprocess_exec",
+        create_subprocess_exec,
+    )
+    monkeypatch.setattr(environment_module.asyncio, "sleep", AsyncMock())
+
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=NaradaTimeoutError("Timed out waiting for browser window ID")
+    )
+    monkeypatch.setattr(
+        env,
+        "_wait_for_browser_window_id_with_lazy_login",
+        wait_for_browser_window_id,
+    )
+    playwright = Playwright(state)
+
+    with pytest.raises(NaradaTimeoutError):
+        await env._launch_browser(playwright, env._config)  # type: ignore[arg-type]
+
+    assert wait_for_browser_window_id.await_count == 2
+    assert playwright.chromium.connect_count == 2
