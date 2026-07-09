@@ -452,3 +452,256 @@ def test_browser_window_id_observer_script_cleans_up_in_js_runtime() -> None:
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_find_page_by_url_scans_all_browser_contexts() -> None:
+    import narada.environment as environment_module
+
+    class Page:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    class Context:
+        def __init__(self, pages: list[Page]) -> None:
+            self.pages = pages
+
+    class Browser:
+        contexts = [
+            Context([Page("https://app.narada.ai/initialize?t=tag")]),
+            Context(
+                [
+                    Page(
+                        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+                        "sidepanel.html?browserWindowId=browser-window-123"
+                    )
+                ]
+            ),
+        ]
+
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+    page = environment_module._find_page_by_url(
+        Browser(),
+        side_panel_url,
+    )
+
+    assert page is Browser.contexts[1].pages[0]
+
+
+@pytest.mark.asyncio
+async def test_fix_download_behavior_uses_browser_level_cdp_without_page() -> None:
+    class BrowserCdpSession:
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, str]]] = []
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            self.commands.append((method, params))
+            return {}
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.cdp_session = BrowserCdpSession()
+
+        async def new_browser_cdp_session(self) -> BrowserCdpSession:
+            return self.cdp_session
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
+
+    context = Context()
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+
+    await env._fix_download_behavior(context, None)  # type: ignore[arg-type]
+
+    assert context.browser.cdp_session.commands == [
+        ("Browser.setDownloadBehavior", {"behavior": "default"})
+    ]
+    assert context.browser.cdp_session.detached
+
+
+@pytest.mark.asyncio
+async def test_fix_download_behavior_falls_back_to_page_cdp() -> None:
+    class BrowserCdpSession:
+        def __init__(self) -> None:
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            raise RuntimeError("browser-level CDP unavailable")
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class PageCdpSession:
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, str]]] = []
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            self.commands.append((method, params))
+            return {}
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.cdp_session = BrowserCdpSession()
+
+        async def new_browser_cdp_session(self) -> BrowserCdpSession:
+            return self.cdp_session
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
+
+    class PageContext:
+        def __init__(self) -> None:
+            self.cdp_session = PageCdpSession()
+
+        async def new_cdp_session(self, page: object) -> PageCdpSession:
+            return self.cdp_session
+
+    class Page:
+        def __init__(self) -> None:
+            self.context = PageContext()
+
+    context = Context()
+    page = Page()
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+
+    await env._fix_download_behavior(context, page)  # type: ignore[arg-type]
+
+    assert context.browser.cdp_session.detached
+    assert page.context.cdp_session.commands == [
+        ("Page.setDownloadBehavior", {"behavior": "default"})
+    ]
+    assert page.context.cdp_session.detached
+
+
+@pytest.mark.asyncio
+async def test_fix_download_behavior_detaches_page_cdp_after_failure() -> None:
+    class BrowserCdpSession:
+        def __init__(self) -> None:
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            raise RuntimeError("browser-level CDP unavailable")
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class PageCdpSession:
+        def __init__(self) -> None:
+            self.detached = False
+
+        async def send(self, method: str, params: dict[str, str]) -> dict[str, str]:
+            raise RuntimeError("page-level CDP failed")
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.cdp_session = BrowserCdpSession()
+
+        async def new_browser_cdp_session(self) -> BrowserCdpSession:
+            return self.cdp_session
+
+    class Context:
+        def __init__(self) -> None:
+            self.browser = Browser()
+
+    class PageContext:
+        def __init__(self) -> None:
+            self.cdp_session = PageCdpSession()
+
+        async def new_cdp_session(self, page: object) -> PageCdpSession:
+            return self.cdp_session
+
+    class Page:
+        def __init__(self) -> None:
+            self.context = PageContext()
+
+    context = Context()
+    page = Page()
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+
+    with pytest.raises(RuntimeError, match="page-level CDP failed"):
+        await env._fix_download_behavior(context, page)  # type: ignore[arg-type]
+
+    assert context.browser.cdp_session.detached
+    assert page.context.cdp_session.detached
+
+
+@pytest.mark.asyncio
+async def test_has_cdp_target_url_accepts_target_without_page() -> None:
+    import narada.environment as environment_module
+
+    class CdpSession:
+        async def send(self, method: str) -> dict[str, list[dict[str, str]]]:
+            assert method == "Target.getTargets"
+            return {
+                "targetInfos": [
+                    {
+                        "url": "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+                        "sidepanel.html?browserWindowId=browser-window-123"
+                    }
+                ]
+            }
+
+        async def detach(self) -> None:
+            pass
+
+    class Browser:
+        async def new_browser_cdp_session(self) -> CdpSession:
+            return CdpSession()
+
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+
+    assert await environment_module._has_cdp_target_url(
+        Browser(),
+        side_panel_url,
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_cdp_target_url_rejects_missing_target() -> None:
+    import narada.environment as environment_module
+
+    class CdpSession:
+        async def send(self, method: str) -> dict[str, list[dict[str, str]]]:
+            assert method == "Target.getTargets"
+            return {"targetInfos": [{"url": "https://app.narada.ai/initialize?t=tag"}]}
+
+        async def detach(self) -> None:
+            pass
+
+    class Browser:
+        async def new_browser_cdp_session(self) -> CdpSession:
+            return CdpSession()
+
+    side_panel_url = (
+        "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
+        "sidepanel.html?browserWindowId=browser-window-123"
+    )
+
+    assert not await environment_module._has_cdp_target_url(
+        Browser(),
+        side_panel_url,
+    )
