@@ -32,7 +32,7 @@ async def test_browser_environment_start_auto_detaches_after_initialization(
         env._playwright = object()
 
     async def open_browser_window() -> None:
-        env._browser = browser
+        env._playwright_browser = browser
         env._context = context
         env._browser_process_id = 456
         env._browser_window_id = "browser-window-123"
@@ -48,7 +48,7 @@ async def test_browser_environment_start_auto_detaches_after_initialization(
     assert env.browser_window_id == "browser-window-123"
     assert env.browser_process_id == 456
     assert env._initialized is True
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -67,22 +67,22 @@ async def test_browser_environment_detach_releases_playwright_without_closing_wi
     env._browser_process_id = 456
     browser = AsyncMock()
     playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
-    env._browser = browser
+    env._playwright_browser = browser
     env._context = SimpleNamespace()
     env._playwright_context_manager = playwright_context_manager
     env._playwright = object()
     run_extension_action = AsyncMock()
     monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
 
-    await env.detach()
-    await env.detach()
+    await env._detach()
+    await env._detach()
 
     browser.close.assert_awaited_once()
     playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
     run_extension_action.assert_not_awaited()
     assert env.browser_window_id == "browser-window-123"
     assert env.browser_process_id == 456
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -125,7 +125,7 @@ async def test_browser_environment_reset_agent_state_reconnects_after_detach(
     playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
     assert env.browser_window_id == "browser-window-123"
     assert env.browser_process_id == 456
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -152,7 +152,7 @@ async def test_browser_environment_close_closes_window_before_detaching(
     )
     env._initialized = True
     env._browser_window_id = "browser-window-123"
-    env._browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
+    env._playwright_browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
     env._context = SimpleNamespace()
     env._playwright_context_manager = SimpleNamespace(
         __aexit__=AsyncMock(side_effect=stop_playwright)
@@ -168,7 +168,7 @@ async def test_browser_environment_close_closes_window_before_detaching(
     assert isinstance(request, CloseWindowRequest)
     assert run_extension_action_mock.await_args.kwargs == {"timeout": 7}
     assert events == ["close-window", "close-browser", "stop-playwright"]
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None

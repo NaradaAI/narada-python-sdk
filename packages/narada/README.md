@@ -72,38 +72,6 @@ This would then result in the following trajectory:
   </a>
 </p>
 
-You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
-
-### Split-script browser handoff
-
-If your workflow starts a browser in one script and reuses it from later scripts, persist the
-browser identifiers after `start()`. The SDK automatically releases its local Playwright/CDP
-transport after initialization without closing the browser window.
-
-```python
-from narada import BrowserEnvironment
-
-
-async def start_browser() -> None:
-    env = BrowserEnvironment()
-    await env.start()
-
-    browser_window_id = env.browser_window_id
-    browser_process_id = env.browser_process_id
-```
-
-Later scripts can reconnect to the existing Narada browser window through
-`RemoteBrowserEnvironment`:
-
-```python
-from narada import Agent, RemoteBrowserEnvironment
-
-
-async def run_task(browser_window_id: str) -> None:
-    env = RemoteBrowserEnvironment(browser_window_id=browser_window_id)
-    agent = Agent(environment=env)
-    await agent.run("Continue in the existing browser window.")
-```
 
 ## Migration note
 
@@ -115,7 +83,7 @@ This version introduces a non-backward-compatible, agent-centered API:
 - Browser actions such as `go_to_url`, `agentic_selector`, and sheet operations are now methods on
   `Agent`.
 - Environments keep lifecycle/bookkeeping APIs such as `start()`, `close()`,
-  `detach()`, `browser_window_id`, and `cloud_browser_session_id`.
+  `browser_window_id`, and `cloud_browser_session_id`.
 
 ## Features
 

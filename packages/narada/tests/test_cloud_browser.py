@@ -286,7 +286,7 @@ async def test_cloud_browser_environment_start_auto_detaches_after_initializatio
         env._browser_window_id = "browser-window-123"
         env._cdp_websocket_url = "wss://agentcore.example.test/session-123"
         env._cdp_auth_headers = {"Authorization": "signed-cdp"}
-        env._browser = browser
+        env._playwright_browser = browser
         env._context = context
         env._playwright_context_manager = playwright_context_manager
         env._playwright = object()
@@ -301,7 +301,7 @@ async def test_cloud_browser_environment_start_auto_detaches_after_initializatio
     assert env.cloud_browser_session_id == "session-123"
     assert env._cdp_websocket_url == "wss://agentcore.example.test/session-123"
     assert env._cdp_auth_headers == {"Authorization": "signed-cdp"}
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -329,20 +329,20 @@ async def test_cloud_browser_environment_detach_releases_playwright_without_stop
     env._browser_window_id = "browser-window-123"
     browser = AsyncMock()
     playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
-    env._browser = browser
+    env._playwright_browser = browser
     env._context = SimpleNamespace()
     env._playwright_context_manager = playwright_context_manager
     env._playwright = object()
 
-    await env.detach()
-    await env.detach()
+    await env._detach()
+    await env._detach()
 
     stop_cloud_browser_session.assert_not_awaited()
     browser.close.assert_awaited_once()
     playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
     assert env.browser_window_id == "browser-window-123"
     assert env.cloud_browser_session_id == "session-123"
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -390,7 +390,7 @@ async def test_cloud_browser_environment_reset_agent_state_reconnects_after_deta
     playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
     assert env.browser_window_id == "browser-window-123"
     assert env.cloud_browser_session_id == "session-123"
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
@@ -427,7 +427,7 @@ async def test_cloud_browser_environment_close_stops_session_before_detaching(
     env._initialized = True
     env._session_id = "session-123"
     env._browser_window_id = "browser-window-123"
-    env._browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
+    env._playwright_browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
     env._context = SimpleNamespace()
     env._playwright_context_manager = SimpleNamespace(
         __aexit__=AsyncMock(side_effect=stop_playwright)
@@ -444,7 +444,7 @@ async def test_cloud_browser_environment_close_stops_session_before_detaching(
     )
     assert events == ["stop-session", "close-browser", "stop-playwright"]
     assert env.cloud_browser_session_id == "session-123"
-    assert env._browser is None
+    assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
