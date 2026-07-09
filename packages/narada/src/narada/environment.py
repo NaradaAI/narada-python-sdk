@@ -1375,9 +1375,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (
                     side_panel_page,
                     has_side_panel_target,
-                ) = await _find_side_panel_page_or_target(
-                    browser, side_panel_url
-                )
+                ) = await _find_side_panel_page_or_target(browser, side_panel_url)
                 if side_panel_page is not None or has_side_panel_target:
                     break
 
@@ -1435,9 +1433,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (
                     side_panel_page,
                     has_side_panel_target,
-                ) = await _find_side_panel_page_or_target(
-                    browser, side_panel_url
-                )
+                ) = await _find_side_panel_page_or_target(browser, side_panel_url)
                 if side_panel_page is not None or has_side_panel_target:
                     break
 
@@ -2200,7 +2196,9 @@ async def _get_cdp_target_infos(browser: Browser) -> list[dict[str, Any]]:
     if not isinstance(target_infos, list):
         return []
 
-    return [target_info for target_info in target_infos if isinstance(target_info, dict)]
+    return [
+        target_info for target_info in target_infos if isinstance(target_info, dict)
+    ]
 
 
 async def _find_side_panel_page_or_target(
