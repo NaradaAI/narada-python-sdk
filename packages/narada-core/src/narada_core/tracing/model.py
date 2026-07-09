@@ -89,6 +89,8 @@ class AgenticMouseActionTrace(BaseModel):
     step_type: Literal["agenticMouseAction"]
     url: str
     description: str
+    verificationStatus: bool | None = None
+    verificationStatusVariableName: str | None = None
     action_trace: ActionTrace | None = None
 
 
