@@ -900,13 +900,6 @@ class Environment(ABC):
         The higher-level `Agent.run` method should be preferred for most use cases.
         """
         await self._ensure_initialized()
-        _debug_print(
-            "Environment initialized before remote dispatch: browserWindowId=%s "
-            "cloudBrowserSessionId=%s environment=%s",
-            self._dispatch_browser_window_id,
-            self.cloud_browser_session_id,
-            type(self).__name__,
-        )
 
         # The overloads enforce this at type-check time when callers use
         # ``AgentKind.CORE_AGENT``; the runtime check covers string-form agents
@@ -979,20 +972,6 @@ class Environment(ABC):
 
         try:
             seen_input_ids: set[str] = set()
-            prompt_preview = body["prompt"].replace("\n", " ")[:200]
-            _debug_print(
-                "Remote dispatch starting: agent=%r browserWindowId=%s "
-                "cloudBrowserSessionId=%s promptPreview=%r saveScreenshots=%s "
-                "secretVariableKeys=%s inputVariableKeys=%s timeout=%s",
-                agent,
-                browser_window_id,
-                cloud_browser_session_id,
-                prompt_preview,
-                body.get("saveScreenshots"),
-                sorted(secret_variables.keys()) if secret_variables is not None else [],
-                sorted(input_variables.keys()) if input_variables is not None else [],
-                timeout,
-            )
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self._base_url}/remote-dispatch",
@@ -1002,13 +981,7 @@ class Environment(ABC):
                 ) as resp:
                     resp.raise_for_status()
                     request_id = (await resp.json())["requestId"]
-                    _debug_print(
-                        "Remote dispatch created: requestId=%s browserWindowId=%s",
-                        request_id,
-                        browser_window_id,
-                    )
 
-                poll_count = 0
                 while (now := time.monotonic()) < deadline:
                     async with session.get(
                         f"{self._base_url}/remote-dispatch/responses/{request_id}",
@@ -1019,17 +992,6 @@ class Environment(ABC):
                         response: _RemoteDispatchPollResponse = await resp.json()
 
                     response["requestId"] = request_id
-                    poll_count += 1
-                    _debug_print(
-                        "Remote dispatch poll: requestId=%s poll=%s status=%s "
-                        "completedAt=%s activeInputRequest=%s responsePresent=%s",
-                        request_id,
-                        poll_count,
-                        response.get("status"),
-                        response.get("completedAt"),
-                        response.get("activeInputRequest") is not None,
-                        response.get("response") is not None,
-                    )
 
                     if response["completedAt"] is None:
                         await _notify_input_required_callback(
@@ -1057,21 +1019,8 @@ class Environment(ABC):
                         else:
                             response_content["structuredOutput"] = None
 
-                    _debug_print(
-                        "Remote dispatch completed: requestId=%s status=%s "
-                        "responsePresent=%s",
-                        request_id,
-                        response.get("status"),
-                        response.get("response") is not None,
-                    )
                     return cast(Response, response)
                 else:
-                    _debug_print(
-                        "Remote dispatch timed out while polling: browserWindowId=%s "
-                        "timeout=%s",
-                        browser_window_id,
-                        timeout,
-                    )
                     raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
@@ -1123,15 +1072,6 @@ class Environment(ABC):
         if timeout is not None:
             body["timeout"] = timeout
 
-        _debug_print(
-            "Extension action starting: action=%s actionExecutionId=%s "
-            "browserWindowId=%s remoteDispatchRequestId=%s timeout=%s",
-            type(request).__name__,
-            action_execution_id,
-            browser_window_id,
-            remote_dispatch_request_id,
-            timeout,
-        )
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self._base_url}/extension-actions",
@@ -1145,14 +1085,6 @@ class Environment(ABC):
                 resp_json = await resp.json()
 
         response = ExtensionActionResponse.model_validate(resp_json)
-        _debug_print(
-            "Extension action response: action=%s actionExecutionId=%s "
-            "browserWindowId=%s status=%s",
-            type(request).__name__,
-            action_execution_id,
-            browser_window_id,
-            response.status,
-        )
         if response.status == "error":
             raise NaradaError(response.error)
         if response.status == "aborted":
@@ -1279,43 +1211,17 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     async def _open_and_initialize_browser_window(self) -> None:
         assert self._playwright is not None
-        _debug_print(
-            "Opening Narada browser window: executablePath=%s cdpUrl=%s "
-            "userDataDir=%s profileDirectory=%s initializationUrl=%s",
-            self._config.executable_path,
-            self._config.cdp_url,
-            self._config.user_data_dir,
-            self._config.profile_directory,
-            self._config.initialization_url,
-        )
         launch_browser_result = await self._launch_browser(
             self._playwright, self._config
         )
         side_panel_page = launch_browser_result.side_panel_page
 
         if side_panel_page is not None:
-            _debug_print(
-                "Applying download behavior fix to side panel page: browserWindowId=%s",
-                launch_browser_result.browser_window_id,
-            )
             await self._fix_download_behavior(side_panel_page)
-        else:
-            _debug_print(
-                "Skipping download behavior fix because side panel was only found "
-                "as a CDP target: browserWindowId=%s",
-                launch_browser_result.browser_window_id,
-            )
 
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
         self._context = launch_browser_result.browser_context
-        _debug_print(
-            "Narada browser window initialized: browserProcessId=%s "
-            "browserWindowId=%s contextPages=%s",
-            self._browser_process_id,
-            self._browser_window_id,
-            _browser_page_debug_state_from_context(self._context),
-        )
 
     async def _initialize_in_existing_browser_window(self) -> None:
         """Initializes the Narada extension in an existing browser window.
@@ -1332,16 +1238,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 "Chrome. Use `BrowserEnvironment` without `attach_to_existing` instead."
             )
 
-        _debug_print(
-            "Initializing existing browser window: cdpUrl=%s initializationUrl=%s",
-            self._config.cdp_url,
-            self._config.initialization_url,
-        )
         browser = await self._playwright.chromium.connect_over_cdp(self._config.cdp_url)
-        _debug_print(
-            "Connected to existing browser over CDP: pages=%s",
-            _browser_page_debug_state(browser),
-        )
 
         # Generate a unique tag for the initialization URL
         window_tag = uuid4().hex
@@ -1350,30 +1247,15 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
         initialization_page = await context.new_page()
-        _attach_page_debug_listeners(initialization_page, "existing-initialization-page")
         await _BrowserInitializationHelper.install_browser_window_id_observer(
             initialization_page
         )
         await initialization_page.goto(tagged_initialization_url)
-        _debug_print(
-            "Opened initialization page in existing browser: url=%s pages=%s",
-            tagged_initialization_url,
-            _browser_page_debug_state(browser),
-        )
-        await _log_any_side_panel_state(
-            browser,
-            self._config,
-            stage="existing-browser-before-browser-window-id",
-        )
 
         browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
             initialization_page,
             self._config,
             tagged_initialization_url,
-        )
-        _debug_print(
-            "Captured browser window ID in existing browser: browserWindowId=%s",
-            browser_window_id,
         )
 
         # Playwright seems unable to pick up the side panel page that is automatically opened by the
@@ -1384,20 +1266,13 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         context = browser.contexts[0]
 
         side_panel_url = create_side_panel_url(self._config, browser_window_id)
-        side_panel_page, has_side_panel_target = await _log_side_panel_state(
-            browser,
-            side_panel_url,
-            stage="existing-browser-after-reconnect",
+        side_panel_page, has_side_panel_target = await _find_side_panel_page_or_target(
+            browser, side_panel_url
         )
         if side_panel_page is None:
             if not has_side_panel_target:
                 raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
         else:
-            _debug_print(
-                "Applying download behavior fix to existing-browser side panel page: "
-                "browserWindowId=%s",
-                browser_window_id,
-            )
             await self._fix_download_behavior(side_panel_page)
 
         if self._config.interactive:
@@ -1415,12 +1290,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         # browser instance, we wouldn't be able to tell them apart.
         window_tag = uuid4().hex
         tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
-        _debug_print(
-            "Launching browser for Narada initialization: cdpUrl=%s "
-            "taggedInitializationUrl=%s",
-            config.cdp_url,
-            tagged_initialization_url,
-        )
 
         # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
         # We'll set up the CDP auth handler and then navigate to the init URL.
@@ -1471,7 +1340,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 start_new_session=True,
             )
 
-        _debug_print("Browser process started with PID: %s", browser_process.pid)
+        logging.debug("Browser process started with PID: %s", browser_process.pid)
 
         # We need to wait a bit for the initial page to open before connecting to the browser over
         # CDP, otherwise Playwright can see an empty context with no pages.
@@ -1491,43 +1360,23 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
-            except Exception as error:
+            except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
                 if attempt == max_cdp_connect_attempts - 1:
                     raise
-                _debug_print(
-                    "CDP connection attempt failed: attempt=%s/%s cdpUrl=%s error=%r",
-                    attempt + 1,
-                    max_cdp_connect_attempts,
-                    config.cdp_url,
-                    error,
-                )
                 await asyncio.sleep(2)
                 continue
 
             context = browser.contexts[0]
-            _debug_print(
-                "Connected to browser over CDP: attempt=%s/%s pages=%s",
-                attempt + 1,
-                max_cdp_connect_attempts,
-                _browser_page_debug_state(browser),
-            )
-            await _log_any_side_panel_state(
-                browser,
-                config,
-                stage=f"launch-before-browser-window-id-attempt-{attempt + 1}",
-            )
 
             if browser_window_id is not None:
                 side_panel_url = create_side_panel_url(config, browser_window_id)
                 (
                     side_panel_page,
                     has_side_panel_target,
-                ) = await _log_side_panel_state(
-                    browser,
-                    side_panel_url,
-                    stage=f"launch-retry-before-init-page-attempt-{attempt + 1}",
+                ) = await _find_side_panel_page_or_target(
+                    browser, side_panel_url
                 )
                 if side_panel_page is not None or has_side_panel_target:
                     break
@@ -1544,7 +1393,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                     )
                 )
                 blank_page = context.pages[0]
-                _attach_page_debug_listeners(blank_page, "proxy-initialization-page")
                 await _BrowserInitializationHelper.install_browser_window_id_observer(
                     blank_page
                 )
@@ -1557,16 +1405,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
             if initialization_page is not None:
-                _attach_page_debug_listeners(
-                    initialization_page,
-                    f"launch-initialization-page-attempt-{attempt + 1}",
-                )
-                _debug_print(
-                    "Found initialization page: attempt=%s/%s url=%s",
-                    attempt + 1,
-                    max_cdp_connect_attempts,
-                    tagged_initialization_url,
-                )
                 try:
                     browser_window_id = (
                         await self._wait_for_browser_window_id_with_lazy_login(
@@ -1575,32 +1413,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                             tagged_initialization_url,
                         )
                     )
-                    _debug_print(
-                        "Captured browser window ID from initialization page: "
-                        "browserWindowId=%s",
-                        browser_window_id,
-                    )
                 except NaradaTimeoutError:
-                    await _log_any_side_panel_state(
-                        browser,
-                        config,
-                        stage=(
-                            "launch-browser-window-id-timeout-before-reload-"
-                            f"attempt-{attempt + 1}"
-                        ),
-                    )
-                    _debug_print(
-                        "Initialization page timed out waiting for browser window ID: "
-                        "state=%s",
-                        await _initialization_page_debug_state(initialization_page),
-                    )
-                    _debug_print(
-                        "Timed out waiting for browser window ID; reloading "
-                        "initialization page: attempt=%s/%s pages=%s",
-                        attempt + 1,
-                        max_cdp_connect_attempts,
-                        _browser_page_debug_state(browser),
-                    )
                     if attempt == max_cdp_connect_attempts - 1:
                         raise
 
@@ -1622,22 +1435,11 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (
                     side_panel_page,
                     has_side_panel_target,
-                ) = await _log_side_panel_state(
-                    browser,
-                    side_panel_url,
-                    stage=f"launch-after-browser-window-id-attempt-{attempt + 1}",
+                ) = await _find_side_panel_page_or_target(
+                    browser, side_panel_url
                 )
                 if side_panel_page is not None or has_side_panel_target:
                     break
-            else:
-                _debug_print(
-                    "Initialization page not found in Playwright pages: "
-                    "attempt=%s/%s expectedUrl=%s pages=%s",
-                    attempt + 1,
-                    max_cdp_connect_attempts,
-                    tagged_initialization_url,
-                    _browser_page_debug_state(browser),
-                )
 
             if attempt == max_cdp_connect_attempts - 1:
                 if browser_window_id is not None:
@@ -1656,14 +1458,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         if config.interactive:
             self._print_success_message(browser_window_id)
 
-        _debug_print(
-            "Launch initialization complete: browserProcessId=%s browserWindowId=%s "
-            "sidePanelPageFound=%s contextPages=%s",
-            browser_process.pid,
-            browser_window_id,
-            side_panel_page is not None,
-            _browser_page_debug_state_from_context(context),
-        )
         return _LaunchBrowserResult(
             browser_process_id=browser_process.pid,
             browser_window_id=browser_window_id,
@@ -1706,10 +1500,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         timeout=timeout,
                     )
                 except NaradaExtensionMissingError:
-                    _debug_print(
-                        "Initialization page reported extension missing: state=%s",
-                        await _initialization_page_debug_state(initialization_page),
-                    )
                     if not config.interactive:
                         raise
 
@@ -1793,7 +1583,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         },
                     },
                 )
-                _debug_print("Browser-level proxy authentication credentials provided")
+                logging.debug("Browser-level proxy authentication credentials provided")
             except Exception as e:
                 logging.error("Failed to respond to proxy auth challenge: %s", e)
 
@@ -2383,50 +2173,6 @@ def create_side_panel_url(config: BrowserConfig, browser_window_id: str) -> str:
     return f"chrome-extension://{config.extension_id}/sidepanel.html?browserWindowId={browser_window_id}"
 
 
-def _side_panel_url_prefix(config: BrowserConfig) -> str:
-    return f"chrome-extension://{config.extension_id}/sidepanel.html"
-
-
-def _debug_print(message: str, *args: Any) -> None:
-    if args:
-        message = message % args
-    print(f"[narada debug] {message}", flush=True)
-
-
-def _attach_page_debug_listeners(page: Page, label: str) -> None:
-    if getattr(page, "_narada_debug_listeners_attached", False):
-        return
-
-    setattr(page, "_narada_debug_listeners_attached", True)
-
-    page.on(
-        "console",
-        lambda message: _debug_print(
-            "Page console: label=%s type=%s text=%s",
-            label,
-            message.type,
-            message.text,
-        ),
-    )
-    page.on(
-        "pageerror",
-        lambda error: _debug_print(
-            "Page error: label=%s error=%r",
-            label,
-            error,
-        ),
-    )
-    page.on(
-        "requestfailed",
-        lambda request: _debug_print(
-            "Page request failed: label=%s url=%s failure=%s",
-            label,
-            request.url,
-            request.failure,
-        ),
-    )
-
-
 def _find_page_by_url(browser: Browser, url: str) -> Page | None:
     for context in browser.contexts:
         for page in context.pages:
@@ -2436,94 +2182,12 @@ def _find_page_by_url(browser: Browser, url: str) -> Page | None:
     return None
 
 
-def _browser_page_debug_state(browser: Browser) -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    for context_index, context in enumerate(browser.contexts):
-        pages.extend(_browser_page_debug_state_from_context(context, context_index))
-
-    return pages
-
-
-def _browser_page_debug_state_from_context(
-    context: BrowserContext,
-    context_index: int | None = None,
-) -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    for page_index, page in enumerate(context.pages):
-        page_state: dict[str, Any] = {
-            "page": page_index,
-            "url": page.url,
-        }
-        if context_index is not None:
-            page_state["context"] = context_index
-        pages.append(page_state)
-
-    return pages
-
-
-async def _page_visibility_state(page: Page) -> str:
-    try:
-        visibility_state = await page.evaluate("document.visibilityState")
-    except Exception as error:
-        return f"unavailable:{type(error).__name__}"
-
-    if isinstance(visibility_state, str):
-        return visibility_state
-
-    return repr(visibility_state)
-
-
-async def _initialization_page_debug_state(page: Page) -> dict[str, Any]:
-    selectors = {
-        "browser_window_id": _BROWSER_WINDOW_ID_SELECTOR,
-        "unsupported_browser": _UNSUPPORTED_BROWSER_INDICATOR_SELECTOR,
-        "extension_missing": _EXTENSION_MISSING_INDICATOR_SELECTOR,
-        "extension_unauthenticated": _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR,
-        "initialization_error": _INITIALIZATION_ERROR_INDICATOR_SELECTOR,
-    }
-    try:
-        return cast(
-            dict[str, Any],
-            await page.evaluate(
-                """
-                (selectors) => {
-                  const selectorStates = {};
-                  for (const [name, selector] of Object.entries(selectors)) {
-                    const element = document.querySelector(selector);
-                    selectorStates[name] = {
-                      found: element !== null,
-                      selector,
-                      text: element?.textContent ?? null,
-                    };
-                  }
-
-                  return {
-                    url: window.location.href,
-                    title: document.title,
-                    readyState: document.readyState,
-                    visibilityState: document.visibilityState,
-                    bodyText: document.body?.innerText?.slice(0, 500) ?? null,
-                    selectorStates,
-                  };
-                }
-                """,
-                selectors,
-            ),
-        )
-    except Exception as error:
-        return {
-            "error": repr(error),
-            "url": page.url,
-        }
-
-
 async def _get_cdp_target_infos(browser: Browser) -> list[dict[str, Any]]:
     cdp_session = None
     try:
         cdp_session = await browser.new_browser_cdp_session()
         result = await cdp_session.send("Target.getTargets")
-    except Exception as error:
-        _debug_print("Failed to inspect CDP targets: error=%r", error)
+    except Exception:
         return []
     finally:
         if cdp_session is not None:
@@ -2539,105 +2203,14 @@ async def _get_cdp_target_infos(browser: Browser) -> list[dict[str, Any]]:
     return [target_info for target_info in target_infos if isinstance(target_info, dict)]
 
 
-def _cdp_target_debug_state(
-    target_infos: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": target_info.get("type"),
-            "url": target_info.get("url"),
-            "title": target_info.get("title"),
-        }
-        for target_info in target_infos
-    ]
-
-
-async def _side_panel_page_debug_state_by_prefix(
-    browser: Browser,
-    config: BrowserConfig,
-) -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    side_panel_url_prefix = _side_panel_url_prefix(config)
-    for context_index, context in enumerate(browser.contexts):
-        for page_index, page in enumerate(context.pages):
-            if not page.url.startswith(side_panel_url_prefix):
-                continue
-
-            pages.append(
-                {
-                    "context": context_index,
-                    "page": page_index,
-                    "url": page.url,
-                    "visibility": await _page_visibility_state(page),
-                }
-            )
-
-    return pages
-
-
-async def _log_any_side_panel_state(
-    browser: Browser,
-    config: BrowserConfig,
-    *,
-    stage: str,
-) -> None:
-    side_panel_url_prefix = _side_panel_url_prefix(config)
-    extension_url_prefix = f"chrome-extension://{config.extension_id}/"
-    target_infos = await _get_cdp_target_infos(browser)
-    side_panel_targets = [
-        target_info
-        for target_info in target_infos
-        if isinstance(target_info.get("url"), str)
-        and target_info["url"].startswith(side_panel_url_prefix)
-    ]
-    extension_targets = [
-        target_info
-        for target_info in target_infos
-        if isinstance(target_info.get("url"), str)
-        and target_info["url"].startswith(extension_url_prefix)
-    ]
-
-    _debug_print(
-        "Narada side panel pre-id state: stage=%s urlPrefix=%s "
-        "playwrightPages=%s cdpTargets=%s extensionTargets=%s",
-        stage,
-        side_panel_url_prefix,
-        await _side_panel_page_debug_state_by_prefix(browser, config),
-        _cdp_target_debug_state(side_panel_targets),
-        _cdp_target_debug_state(extension_targets),
-    )
-
-
-async def _log_side_panel_state(
-    browser: Browser,
-    side_panel_url: str,
-    *,
-    stage: str,
+async def _find_side_panel_page_or_target(
+    browser: Browser, side_panel_url: str
 ) -> tuple[Page | None, bool]:
     side_panel_page = _find_page_by_url(browser, side_panel_url)
-    side_panel_visibility = (
-        await _page_visibility_state(side_panel_page)
-        if side_panel_page is not None
-        else None
-    )
-    target_infos = await _get_cdp_target_infos(browser)
-    has_side_panel_target = any(
-        target_info.get("url") == side_panel_url for target_info in target_infos
-    )
+    if side_panel_page is not None:
+        return side_panel_page, True
 
-    _debug_print(
-        "Narada side panel state: stage=%s url=%s playwrightPageFound=%s "
-        "playwrightPageVisibility=%s cdpTargetFound=%s browserPages=%s cdpTargets=%s",
-        stage,
-        side_panel_url,
-        side_panel_page is not None,
-        side_panel_visibility,
-        has_side_panel_target,
-        _browser_page_debug_state(browser),
-        _cdp_target_debug_state(target_infos),
-    )
-
-    return side_panel_page, has_side_panel_target
+    return None, await _has_cdp_target_url(browser, side_panel_url)
 
 
 async def _has_cdp_target_url(browser: Browser, url: str) -> bool:
