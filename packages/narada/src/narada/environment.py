@@ -1216,8 +1216,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         )
         side_panel_page = launch_browser_result.side_panel_page
 
-        if side_panel_page is not None:
-            await self._fix_download_behavior(side_panel_page)
+        await self._fix_download_behavior(
+            launch_browser_result.browser_context,
+            side_panel_page,
+        )
 
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
@@ -1272,8 +1274,8 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         if side_panel_page is None:
             if not has_side_panel_target:
                 raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
-        else:
-            await self._fix_download_behavior(side_panel_page)
+
+        await self._fix_download_behavior(context, side_panel_page)
 
         if self._config.interactive:
             self._print_success_message(browser_window_id)
@@ -1604,13 +1606,63 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
         return cdp_session
 
-    async def _fix_download_behavior(self, side_panel_page: Page) -> None:
+    async def _fix_download_behavior(
+        self,
+        browser_context: BrowserContext,
+        side_panel_page: Page | None,
+    ) -> None:
         """Reverts the download behavior to the default behavior for the extension, otherwise our
         extension cannot download files.
         """
+        if await self._try_fix_download_behavior_with_browser_cdp(browser_context):
+            return
+
+        if side_panel_page is None:
+            raise NaradaInitializationError(
+                "Failed to set download behavior because the Narada side panel is not "
+                "available as a Playwright page and the browser-level CDP session is "
+                "unavailable."
+            )
+
+        await self._fix_download_behavior_with_side_panel_page(side_panel_page)
+
+    async def _try_fix_download_behavior_with_browser_cdp(
+        self,
+        browser_context: BrowserContext,
+    ) -> bool:
+        browser = browser_context.browser
+        if browser is None:
+            return False
+
+        cdp_session: CDPSession | None = None
+        try:
+            cdp_session = await browser.new_browser_cdp_session()
+            await cdp_session.send(
+                "Browser.setDownloadBehavior", {"behavior": "default"}
+            )
+            return True
+        except Exception:
+            logger.debug(
+                "Failed to set browser-level download behavior",
+                exc_info=True,
+            )
+            return False
+        finally:
+            if cdp_session is not None:
+                try:
+                    await cdp_session.detach()
+                except Exception:
+                    pass
+
+    async def _fix_download_behavior_with_side_panel_page(
+        self,
+        side_panel_page: Page,
+    ) -> None:
         cdp_session = await side_panel_page.context.new_cdp_session(side_panel_page)
-        await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
-        await cdp_session.detach()
+        try:
+            await cdp_session.send("Page.setDownloadBehavior", {"behavior": "default"})
+        finally:
+            await cdp_session.detach()
 
     def _print_success_message(self, browser_window_id: str) -> None:
         self._browser_initialization.print_success_message(browser_window_id)
