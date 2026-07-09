@@ -1889,6 +1889,9 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                         exc_info=True,
                     )
                 return
+            except asyncio.CancelledError:
+                await self._cleanup_failed_initialization_attempt()
+                raise
             except Exception as error:
                 await self._cleanup_failed_initialization_attempt()
                 if (
@@ -1983,16 +1986,46 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             self._cdp_auth_headers = None
 
     async def _connect_playwright_browser(self) -> Browser:
-        if self._cdp_websocket_url is None or self._cdp_auth_headers is None:
+        if self._cdp_websocket_url is None:
             raise NaradaInitializationError(
                 "Cloud browser CDP connection details are unavailable"
             )
 
+        cdp_auth_headers = await self._generate_cdp_auth_headers()
+
         assert self._playwright is not None
         return await self._playwright.chromium.connect_over_cdp(
             self._cdp_websocket_url,
-            headers=self._cdp_auth_headers,
+            headers=cdp_auth_headers,
         )
+
+    async def _generate_cdp_auth_headers(self) -> dict[str, str]:
+        if self._cdp_websocket_url is None:
+            raise NaradaInitializationError(
+                "Cloud browser CDP connection details are unavailable"
+            )
+
+        endpoint_url = f"{self._base_url}/cloud-browser/generate-cdp-auth-headers"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                endpoint_url,
+                headers=self._auth_headers,
+                json={"cdp_websocket_url": self._cdp_websocket_url},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if not resp.ok:
+                    error_text = await resp.text()
+                    raise NaradaInitializationError(
+                        "Failed to generate cloud browser CDP auth headers: "
+                        f"{resp.status} {error_text}\n"
+                        f"Endpoint URL: {endpoint_url}"
+                    )
+
+                response_data = await resp.json()
+
+        cdp_auth_headers = response_data["cdp_auth_headers"]
+        self._cdp_auth_headers = cdp_auth_headers
+        return cdp_auth_headers
 
     async def _wait_for_cloud_browser_window_id(
         self,

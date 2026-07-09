@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
@@ -308,6 +309,65 @@ async def test_cloud_browser_environment_start_auto_detaches_after_initializatio
 
 
 @pytest.mark.asyncio
+async def test_cloud_browser_environment_start_cleans_up_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    stop_cloud_browser_session = AsyncMock()
+    monkeypatch.setattr(
+        environment_module,
+        "_stop_cloud_browser_session",
+        stop_cloud_browser_session,
+    )
+
+    env = CloudBrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    initialize_calls = 0
+
+    async def initialize_once() -> None:
+        nonlocal initialize_calls
+        initialize_calls += 1
+        env._session_id = "session-123"
+        env._browser_window_id = "browser-window-123"
+        env._cdp_websocket_url = "wss://agentcore.example.test/session-123"
+        env._cdp_auth_headers = {"Authorization": "signed-cdp"}
+        env._playwright_browser = browser
+        env._context = SimpleNamespace()
+        env._playwright_context_manager = playwright_context_manager
+        env._playwright = object()
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(env, "_initialize_once", initialize_once)
+
+    with pytest.raises(asyncio.CancelledError):
+        await env._initialize()
+
+    assert initialize_calls == 1
+    stop_cloud_browser_session.assert_awaited_once_with(
+        base_url=env._base_url,
+        auth_headers={"x-api-key": "test-key"},
+        session_id="session-123",
+        status="failed",
+        timeout=10,
+    )
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env._session_id is None
+    assert env._browser_window_id is None
+    assert env._cdp_websocket_url is None
+    assert env._cdp_auth_headers is None
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
 async def test_cloud_browser_environment_detach_releases_playwright_without_stopping_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -352,13 +412,21 @@ async def test_cloud_browser_environment_detach_releases_playwright_without_stop
 async def test_cloud_browser_environment_reset_agent_state_reconnects_after_detach(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import narada.environment as environment_module
+
     config = BrowserConfig(interactive=False)
     env = CloudBrowserEnvironment(auth_headers={"x-api-key": "test-key"}, config=config)
     env._initialized = True
     env._session_id = "session-123"
     env._browser_window_id = "browser-window-123"
     env._cdp_websocket_url = "wss://agentcore.example.test/session-123"
-    env._cdp_auth_headers = {"Authorization": "signed-cdp"}
+    env._cdp_auth_headers = {"Authorization": "stale-cdp"}
+    fake_session = _FakeClientSession(
+        {"cdp_auth_headers": {"Authorization": "fresh-cdp"}}
+    )
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
 
     page = SimpleNamespace(
         url=create_side_panel_url(config, "browser-window-123"),
@@ -383,8 +451,15 @@ async def test_cloud_browser_environment_reset_agent_state_reconnects_after_deta
 
     connect_over_cdp.assert_awaited_once_with(
         "wss://agentcore.example.test/session-123",
-        headers={"Authorization": "signed-cdp"},
+        headers={"Authorization": "fresh-cdp"},
     )
+    assert len(fake_session.posts) == 1
+    post = fake_session.posts[0]
+    assert post["url"].endswith("/cloud-browser/generate-cdp-auth-headers")
+    assert post["headers"] == {"x-api-key": "test-key"}
+    assert post["json"] == {
+        "cdp_websocket_url": "wss://agentcore.example.test/session-123"
+    }
     page.reload.assert_awaited_once()
     browser.close.assert_awaited_once()
     playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
@@ -394,6 +469,7 @@ async def test_cloud_browser_environment_reset_agent_state_reconnects_after_deta
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
+    assert env._cdp_auth_headers == {"Authorization": "fresh-cdp"}
 
 
 @pytest.mark.asyncio
