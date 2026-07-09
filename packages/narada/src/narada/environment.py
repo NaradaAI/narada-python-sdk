@@ -1189,6 +1189,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
+        # Run reconnect/use/detach one at a time so shared Playwright fields stay valid.
         async with self._get_client_lock():
             await self._ensure_playwright_connected()
             try:
@@ -1210,6 +1211,7 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     @override
     async def detach(self) -> None:
+        # Run detach one at a time with temporary reconnects that mutate Playwright fields.
         async with self._get_client_lock():
             await self._detach_impl()
 
@@ -1899,6 +1901,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
+        # Run reconnect/use/detach one at a time so shared Playwright fields stay valid.
         async with self._get_client_lock():
             await self._ensure_playwright_connected()
             try:
@@ -1912,6 +1915,7 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
 
     @override
     async def detach(self) -> None:
+        # Run detach one at a time with temporary reconnects that mutate Playwright fields.
         async with self._get_client_lock():
             await self._detach_impl()
 
