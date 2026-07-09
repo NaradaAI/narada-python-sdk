@@ -1270,17 +1270,19 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
     async def _initialize(self) -> None:
         await self._start_playwright()
-        if self._attach_to_existing:
-            await self._initialize_in_existing_browser_window()
-        else:
-            await self._open_and_initialize_browser_window()
         try:
-            await self._detach()
-        except Exception:
-            logger.warning(
-                "Failed to detach Playwright resources after browser initialization",
-                exc_info=True,
-            )
+            if self._attach_to_existing:
+                await self._initialize_in_existing_browser_window()
+            else:
+                await self._open_and_initialize_browser_window()
+        finally:
+            try:
+                await self._detach()
+            except Exception:
+                logger.warning(
+                    "Failed to detach Playwright resources after browser initialization",
+                    exc_info=True,
+                )
 
     @override
     async def _close_impl(self, *, timeout: int | None = None) -> None:

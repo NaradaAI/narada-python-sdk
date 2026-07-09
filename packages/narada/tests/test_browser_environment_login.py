@@ -55,6 +55,43 @@ async def test_browser_environment_start_auto_detaches_after_initialization(
 
 
 @pytest.mark.asyncio
+async def test_browser_environment_start_detaches_after_initialization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    initialization_error = RuntimeError("initialization failed")
+
+    async def start_playwright() -> None:
+        env._playwright_context_manager = playwright_context_manager
+        env._playwright = object()
+
+    async def open_browser_window() -> None:
+        env._playwright_browser = browser
+        env._context = SimpleNamespace()
+        raise initialization_error
+
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", start_playwright)
+    monkeypatch.setattr(env, "_open_and_initialize_browser_window", open_browser_window)
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        await env.start()
+
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env._initialized is False
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
 async def test_browser_environment_detach_releases_playwright_without_closing_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
