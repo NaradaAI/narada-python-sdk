@@ -99,6 +99,8 @@ _BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
 _BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
 _SIDE_PANEL_RESET_TIMEOUT_SECONDS = 30
 _CDP_CLEANUP_TIMEOUT_SECONDS = 1
+_WINDOWS_EXTENSION_MISSING_RETRY_COUNT = 3
+_WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS = 3
 
 
 type _BrowserInitializationResultType = Literal[
@@ -1613,6 +1615,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
+        extension_missing_retry_attempts = 0
 
         try:
             while True:
@@ -1625,11 +1628,23 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     if not config.interactive:
                         raise
 
-                    self._console.input(
-                        "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
-                        "installed. Please follow the instructions in the browser window to "
-                        "install it first, then press Enter to continue.[/bold blue]\n",
-                    )
+                    # A user may configure the extension to be installed automatically through the
+                    # Windows Registry. Chrome can take a few seconds to install it, so retry 3 times
+                    if (
+                        sys.platform == "win32"
+                        and extension_missing_retry_attempts
+                        < _WINDOWS_EXTENSION_MISSING_RETRY_COUNT
+                    ):
+                        extension_missing_retry_attempts += 1
+                        await asyncio.sleep(
+                            _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS
+                        )
+                    else:
+                        self._console.input(
+                            "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
+                            "installed. Please follow the instructions in the browser window to "
+                            "install it first, then press Enter to continue.[/bold blue]\n",
+                        )
                     await initialization_page.bring_to_front()
                     await asyncio.sleep(0.1)
                     await initialization_page.reload()
