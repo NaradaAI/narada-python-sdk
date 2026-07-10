@@ -97,6 +97,8 @@ _EXTENSION_UNAUTHENTICATED_INDICATOR_SELECTOR = "#narada-extension-unauthenticat
 _INITIALIZATION_ERROR_INDICATOR_SELECTOR = "#narada-initialization-error"
 _BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
 _BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
+_SIDE_PANEL_RESET_TIMEOUT_SECONDS = 30
+_CDP_CLEANUP_TIMEOUT_SECONDS = 1
 
 
 type _BrowserInitializationResultType = Literal[
@@ -1142,7 +1144,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
     _browser_process_id: int | None
     _config: BrowserConfig
     _context: BrowserContext | None
-    _side_panel_match: _SidePanelMatch | None
 
     def __init__(
         self,
@@ -1159,7 +1160,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._browser_process_id = None
         self._config = config or BrowserConfig()
         self._context = None
-        self._side_panel_match = None
         self._attach_to_existing = attach_to_existing
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
@@ -1188,23 +1188,45 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        assert self._context is not None
-        if self._side_panel_match is None:
-            raise NaradaInitializationError("Narada side panel was not initialized")
+        try:
+            async with asyncio.timeout(_SIDE_PANEL_RESET_TIMEOUT_SECONDS):
+                assert self._context is not None
 
-        # Refresh the extension side panel, which ensures any inflight Narada operations are
-        # canceled.
-        if self._side_panel_match.page is not None:
-            await self._side_panel_match.page.reload()
-            return
+                browser = self._context.browser
+                if browser is None:
+                    raise NaradaInitializationError(
+                        "Failed to reset agent state because the browser CDP session is "
+                        "unavailable."
+                    )
 
-        if self._side_panel_match.target_id is None:
-            raise NaradaInitializationError("Narada side panel CDP target is missing")
+                side_panel_url = create_side_panel_url(
+                    self._config, self.browser_window_id
+                )
+                side_panel_match = await _find_side_panel_match(browser, side_panel_url)
+                if side_panel_match is None:
+                    raise NaradaInitializationError(
+                        "Narada side panel is no longer available"
+                    )
 
-        await self._reload_side_panel_target(
-            self._context,
-            self._side_panel_match.target_id,
-        )
+                # Refresh the extension side panel, which ensures any inflight Narada operations
+                # are canceled.
+                if side_panel_match.page is not None:
+                    await side_panel_match.page.reload()
+                    return
+
+                if side_panel_match.target_id is None:
+                    raise NaradaInitializationError(
+                        "Narada side panel CDP target is missing"
+                    )
+
+                await self._reload_side_panel_target(
+                    self._context,
+                    side_panel_match.target_id,
+                )
+        except TimeoutError as error:
+            raise NaradaTimeoutError(
+                "Timed out resetting the Narada side panel"
+            ) from error
 
     @override
     async def _close_impl(self, *, timeout: int | None = None) -> None:
@@ -1240,7 +1262,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
         self._context = launch_browser_result.browser_context
-        self._side_panel_match = launch_browser_result.side_panel_match
 
     async def _initialize_in_existing_browser_window(self) -> None:
         """Initializes the Narada extension in an existing browser window.
@@ -1297,7 +1318,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         self._browser_process_id = None
         self._browser_window_id = browser_window_id
         self._context = context
-        self._side_panel_match = side_panel_match
 
     async def _launch_browser(
         self, playwright: Playwright, config: BrowserConfig
@@ -1366,8 +1386,8 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         browser_window_id = None
         side_panel_match = None
         max_cdp_connect_attempts = 10
-        browser_window_id_wait_attempts = 0
-        max_browser_window_id_wait_attempts = 2
+        browser_window_id_timeout_count = 0
+        max_browser_window_id_timeouts = 2
 
         # Track whether we've already navigated from about:blank to the initialization URL.
         # This is only relevant when proxy auth is enabled, where we launch with about:blank
@@ -1395,6 +1415,15 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 if side_panel_match is not None:
                     break
 
+                if attempt == max_cdp_connect_attempts - 1:
+                    raise NaradaTimeoutError(
+                        "Timed out waiting for Narada side panel page"
+                    )
+
+                await browser.close()
+                await asyncio.sleep(3)
+                continue
+
             # If proxy auth is needed, set up the handler at browser level then navigate to the
             # initialization page. After navigation succeeds, Chrome has cached the proxy
             # credentials, so we can detach the CDP session.
@@ -1419,7 +1448,6 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 (p for p in context.pages if p.url == tagged_initialization_url), None
             )
             if initialization_page is not None:
-                browser_window_id_wait_attempts += 1
                 try:
                     browser_window_id = (
                         await self._wait_for_browser_window_id_with_lazy_login(
@@ -1429,9 +1457,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                         )
                     )
                 except NaradaTimeoutError:
+                    browser_window_id_timeout_count += 1
                     if (
-                        browser_window_id_wait_attempts
-                        >= max_browser_window_id_wait_attempts
+                        browser_window_id_timeout_count
+                        >= max_browser_window_id_timeouts
                         or attempt == max_cdp_connect_attempts - 1
                     ):
                         raise
@@ -1665,9 +1694,34 @@ class BrowserEnvironment(BaseBrowserEnvironment):
         cdp_session: CDPSession | None = None
         try:
             cdp_session = await browser.new_browser_cdp_session()
-            params = {"behavior": "default"}
+            params: dict[str, Any] = {"behavior": "default"}
             if browser_context_id is not None:
-                params["browserContextId"] = browser_context_id
+                contexts_result = await cdp_session.send(
+                    "Target.getBrowserContexts", {}
+                )
+                default_browser_context_id = contexts_result.get(
+                    "defaultBrowserContextId"
+                )
+                browser_context_ids = contexts_result.get("browserContextIds")
+
+                if isinstance(default_browser_context_id, str):
+                    is_default_browser_context = (
+                        browser_context_id == default_browser_context_id
+                    )
+                elif isinstance(browser_context_ids, list):
+                    non_default_browser_context_ids = {
+                        value for value in browser_context_ids if isinstance(value, str)
+                    }
+                    is_default_browser_context = (
+                        browser_context_id not in non_default_browser_context_ids
+                    )
+                else:
+                    raise NaradaInitializationError(
+                        "CDP did not return browser context metadata"
+                    )
+
+                if not is_default_browser_context:
+                    params["browserContextId"] = browser_context_id
             await cdp_session.send("Browser.setDownloadBehavior", params)
             return True
         except Exception:
@@ -1705,41 +1759,202 @@ class BrowserEnvironment(BaseBrowserEnvironment):
                 "unavailable."
             )
 
+        loop = asyncio.get_running_loop()
         cdp_session: CDPSession | None = None
         target_session_id: str | None = None
-        try:
-            cdp_session = await browser.new_browser_cdp_session()
-            attach_result = await cdp_session.send(
-                "Target.attachToTarget",
-                {"targetId": target_id},
-            )
-            target_session_id = attach_result.get("sessionId")
-            if not isinstance(target_session_id, str):
-                raise NaradaInitializationError(
-                    "Failed to attach to Narada side panel CDP target"
-                )
+        listeners_registered = False
+        next_command_id = 0
+        pending_commands: dict[int, tuple[str, asyncio.Future[dict[str, Any]]]] = {}
+        load_future: asyncio.Future[None] | None = None
+        main_frame_id: str | None = None
+        old_loader_id: str | None = None
+        reload_armed = False
 
-            await cdp_session.send(
-                "Target.sendMessageToTarget",
-                {
-                    "sessionId": target_session_id,
-                    "message": json.dumps({"id": 1, "method": "Page.reload"}),
-                },
+        def on_target_message(params: dict[str, Any]) -> None:
+            if params.get("sessionId") != target_session_id:
+                return
+
+            raw_message = params.get("message")
+            if not isinstance(raw_message, str):
+                return
+
+            try:
+                message = json.loads(raw_message)
+            except (TypeError, ValueError):
+                return
+
+            if not isinstance(message, dict):
+                return
+
+            command_id = message.get("id")
+            if isinstance(command_id, int):
+                pending_command = pending_commands.get(command_id)
+                if pending_command is None:
+                    return
+
+                method, response_future = pending_command
+                if response_future.done():
+                    return
+
+                error = message.get("error")
+                if isinstance(error, dict):
+                    error_code = error.get("code")
+                    error_message = error.get("message")
+                    response_future.set_exception(
+                        NaradaInitializationError(
+                            f"CDP {method} failed ({error_code}): {error_message}"
+                        )
+                    )
+                    return
+
+                result = message.get("result")
+                response_future.set_result(result if isinstance(result, dict) else {})
+                return
+
+            if (
+                reload_armed
+                and load_future is not None
+                and not load_future.done()
+                and message.get("method") == "Page.lifecycleEvent"
+            ):
+                lifecycle_params = message.get("params")
+                if not isinstance(lifecycle_params, dict):
+                    return
+                if (
+                    lifecycle_params.get("name") == "load"
+                    and lifecycle_params.get("frameId") == main_frame_id
+                    and lifecycle_params.get("loaderId") != old_loader_id
+                ):
+                    load_future.set_result(None)
+
+        def on_target_detached(params: dict[str, Any]) -> None:
+            if params.get("sessionId") != target_session_id:
+                return
+
+            error = NaradaInitializationError(
+                "Narada side panel CDP target detached while reloading"
             )
+            active_response_futures = [
+                response_future
+                for _, response_future in pending_commands.values()
+                if not response_future.done()
+            ]
+            if active_response_futures:
+                for response_future in active_response_futures:
+                    response_future.set_exception(error)
+            elif load_future is not None and not load_future.done():
+                load_future.set_exception(error)
+
+        async def send_target_command(
+            method: str,
+            params: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            nonlocal next_command_id
+            assert cdp_session is not None
+            assert target_session_id is not None
+
+            next_command_id += 1
+            command_id = next_command_id
+            response_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+            pending_commands[command_id] = (method, response_future)
+
+            message: dict[str, Any] = {"id": command_id, "method": method}
+            if params is not None:
+                message["params"] = params
+
+            try:
+                await cdp_session.send(
+                    "Target.sendMessageToTarget",
+                    {
+                        "sessionId": target_session_id,
+                        "message": json.dumps(message),
+                    },
+                )
+                return await response_future
+            finally:
+                pending_commands.pop(command_id, None)
+
+        try:
+            try:
+                async with asyncio.timeout(_SIDE_PANEL_RESET_TIMEOUT_SECONDS):
+                    cdp_session = await browser.new_browser_cdp_session()
+                    attach_result = await cdp_session.send(
+                        "Target.attachToTarget",
+                        {"targetId": target_id, "flatten": False},
+                    )
+                    target_session_id = attach_result.get("sessionId")
+                    if not isinstance(target_session_id, str):
+                        raise NaradaInitializationError(
+                            "Failed to attach to Narada side panel CDP target"
+                        )
+
+                    cdp_session.on(
+                        "Target.receivedMessageFromTarget", on_target_message
+                    )
+                    cdp_session.on("Target.detachedFromTarget", on_target_detached)
+                    listeners_registered = True
+
+                    await send_target_command("Page.enable")
+                    frame_tree_result = await send_target_command("Page.getFrameTree")
+                    frame_tree = frame_tree_result.get("frameTree")
+                    frame = (
+                        frame_tree.get("frame")
+                        if isinstance(frame_tree, dict)
+                        else None
+                    )
+                    if not isinstance(frame, dict):
+                        raise NaradaInitializationError(
+                            "Narada side panel CDP target has no main frame"
+                        )
+
+                    main_frame_id = frame.get("id")
+                    old_loader_id = frame.get("loaderId")
+                    if not isinstance(main_frame_id, str) or not isinstance(
+                        old_loader_id, str
+                    ):
+                        raise NaradaInitializationError(
+                            "Narada side panel CDP target has invalid frame metadata"
+                        )
+
+                    await send_target_command(
+                        "Page.setLifecycleEventsEnabled",
+                        {"enabled": True},
+                    )
+                    load_future = loop.create_future()
+                    reload_armed = True
+                    await send_target_command(
+                        "Page.reload",
+                        {"loaderId": old_loader_id},
+                    )
+                    await load_future
+            except TimeoutError as error:
+                raise NaradaTimeoutError(
+                    "Timed out waiting for Narada side panel to reload"
+                ) from error
         finally:
             if cdp_session is not None:
+                if listeners_registered:
+                    cdp_session.remove_listener(
+                        "Target.receivedMessageFromTarget", on_target_message
+                    )
+                    cdp_session.remove_listener(
+                        "Target.detachedFromTarget", on_target_detached
+                    )
+
+                for _, response_future in pending_commands.values():
+                    if not response_future.done():
+                        response_future.cancel()
+                if load_future is not None and not load_future.done():
+                    load_future.cancel()
+
                 if target_session_id is not None:
-                    try:
-                        await cdp_session.send(
+                    await _run_cdp_cleanup(
+                        cdp_session.send(
                             "Target.detachFromTarget",
                             {"sessionId": target_session_id},
                         )
-                    except Exception:
-                        pass
-                try:
-                    await cdp_session.detach()
-                except Exception:
-                    pass
+                    )
+                await _run_cdp_cleanup(cdp_session.detach())
 
     def _print_success_message(self, browser_window_id: str) -> None:
         self._browser_initialization.print_success_message(browser_window_id)
@@ -2307,6 +2522,14 @@ def _find_page_by_url(browser: Browser, url: str) -> Page | None:
     return None
 
 
+async def _run_cdp_cleanup(cleanup: Awaitable[Any]) -> None:
+    try:
+        async with asyncio.timeout(_CDP_CLEANUP_TIMEOUT_SECONDS):
+            await cleanup
+    except Exception:
+        pass
+
+
 async def _get_cdp_target_infos(browser: Browser) -> list[dict[str, Any]]:
     cdp_session = None
     try:
@@ -2316,10 +2539,7 @@ async def _get_cdp_target_infos(browser: Browser) -> list[dict[str, Any]]:
         return []
     finally:
         if cdp_session is not None:
-            try:
-                await cdp_session.detach()
-            except Exception:
-                pass
+            await _run_cdp_cleanup(cdp_session.detach())
 
     target_infos = result.get("targetInfos")
     if not isinstance(target_infos, list):
