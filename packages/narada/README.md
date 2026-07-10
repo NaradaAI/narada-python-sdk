@@ -72,6 +72,7 @@ This would then result in the following trajectory:
   </a>
 </p>
 
+You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
 ## Migration note
 

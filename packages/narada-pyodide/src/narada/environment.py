@@ -292,9 +292,6 @@ class Environment(ABC):
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         pass
 
-    async def _detach(self) -> None:
-        pass
-
     @property
     def _dispatch_browser_window_id(self) -> str | None:
         return None

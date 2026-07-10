@@ -347,6 +347,11 @@ class _CustomTokenResponse(BaseModel):
     token: str
 
 
+class _GenerateCdpAuthHeadersResponse(BaseModel):
+    auth_headers: dict[str, str]
+    cloud_browser_session_id: str
+
+
 @dataclass
 class SessionDownloadItem:
     """A file downloaded during a cloud browser session (file name, size, presigned GET URL)."""
@@ -358,7 +363,6 @@ class SessionDownloadItem:
 
 @dataclass
 class _LaunchBrowserResult:
-    playwright_browser: Browser
     browser_process_id: int
     browser_window_id: str
     browser_context: BrowserContext
@@ -624,17 +628,30 @@ class Environment(ABC):
         if self._initialized:
             return
 
-        if self._init_lock is None:
-            self._init_lock = asyncio.Lock()
-
-        async with self._init_lock:
+        async with self._acquire_initialization_lock():
             if self._initialized:
                 return
 
-            if self._validates_sdk_config:
-                await self._validate_sdk_config()
-            await self._initialize()
-            self._initialized = True
+            try:
+                if self._validates_sdk_config:
+                    await self._validate_sdk_config()
+                await self._initialize()
+                # Commit initialization before the first cleanup await so cancellation
+                # cannot make a successfully created browser look uninitialized.
+                self._initialized = True
+            finally:
+                try:
+                    await self._detach()
+                except Exception:
+                    logger.warning(
+                        "Failed to detach environment resources after initialization",
+                        exc_info=True,
+                    )
+
+    def _acquire_initialization_lock(self) -> asyncio.Lock:
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        return self._init_lock
 
     @property
     def _validates_sdk_config(self) -> bool:
@@ -644,7 +661,8 @@ class Environment(ABC):
         pass
 
     async def close(self, *, timeout: int | None = None) -> None:
-        await self._close_impl(timeout=timeout)
+        async with self._acquire_initialization_lock():
+            await self._close_impl(timeout=timeout)
 
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         pass
@@ -1145,30 +1163,14 @@ class BaseBrowserEnvironment(Environment):
 
 
 class _PlaywrightLifecycleMixin:
-    _config: BrowserConfig
     _context: BrowserContext | None
     _playwright_browser: Browser | None
     _playwright_context_manager: PlaywrightContextManager | None
     _playwright_lifecycle_lock: asyncio.Lock | None
     _playwright: Playwright | None
-    _playwright_client_not_connected_message = "Browser client is not connected"
-
-    async def reset_agent_state(self) -> None:
-        await self._ensure_initialized()
-        # Run reconnect/use/detach one at a time so shared Playwright fields stay valid.
-        async with self._acquire_playwright_lifecycle_lock():
-            await self._ensure_playwright_connected()
-            try:
-                side_panel_page = self._get_side_panel_page()
-
-                # Refresh the extension side panel, which ensures any inflight Narada operations are
-                # canceled.
-                await side_panel_page.reload()
-            finally:
-                await self._stop_playwright()
 
     async def _detach(self) -> None:
-        # Run detach one at a time with temporary reconnects that mutate Playwright fields.
+        # Serialize detach with resets that temporarily reconnect Playwright.
         async with self._acquire_playwright_lifecycle_lock():
             await self._stop_playwright()
 
@@ -1207,33 +1209,11 @@ class _PlaywrightLifecycleMixin:
 
         await self._stop_playwright()
         await self._start_playwright()
-
-        try:
-            self._playwright_browser = await self._connect_playwright_browser()
-            self._context = self._playwright_browser.contexts[0]
-        except Exception:
-            await self._stop_playwright()
-            raise
+        self._playwright_browser = await self._connect_playwright_browser()
+        self._context = self._playwright_browser.contexts[0]
 
     async def _connect_playwright_browser(self) -> Browser:
         raise NotImplementedError
-
-    def _get_side_panel_page(self) -> Page:
-        if self._context is None:
-            raise NaradaInitializationError(
-                self._playwright_client_not_connected_message
-            )
-
-        side_panel_url = create_side_panel_url(self._config, self.browser_window_id)
-        side_panel_page = next(
-            (p for p in self._context.pages if p.url == side_panel_url), None
-        )
-        if side_panel_page is None:
-            raise NaradaInitializationError(
-                f"Could not find Narada side panel page for browser window "
-                f"{self.browser_window_id!r}"
-            )
-        return side_panel_page
 
 
 class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
@@ -1279,19 +1259,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
     async def _initialize(self) -> None:
         await self._start_playwright()
-        try:
-            if self._attach_to_existing:
-                await self._initialize_in_existing_browser_window()
-            else:
-                await self._open_and_initialize_browser_window()
-        finally:
-            try:
-                await self._detach()
-            except Exception:
-                logger.warning(
-                    "Failed to detach Playwright resources after browser initialization",
-                    exc_info=True,
-                )
+        if self._attach_to_existing:
+            await self._initialize_in_existing_browser_window()
+        else:
+            await self._open_and_initialize_browser_window()
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
@@ -1364,10 +1335,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             launch_browser_result.side_panel_match,
         )
 
-        self._playwright_browser = launch_browser_result.playwright_browser
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
         self._context = launch_browser_result.browser_context
+        self._playwright_browser = cast(Browser, self._context.browser)
 
     async def _initialize_in_existing_browser_window(self) -> None:
         """Initializes the Narada extension in an existing browser window.
@@ -1530,6 +1501,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 await browser.close()
                 await asyncio.sleep(3)
                 continue
+
             # If proxy auth is needed, set up the handler at browser level then navigate to the
             # initialization page. After navigation succeeds, Chrome has cached the proxy
             # credentials, so we can detach the CDP session.
@@ -1609,7 +1581,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             self._print_success_message(browser_window_id)
 
         return _LaunchBrowserResult(
-            playwright_browser=browser,
             browser_process_id=browser_process.pid,
             browser_window_id=browser_window_id,
             browser_context=context,
@@ -2133,8 +2104,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
     the same transport semantics as other browser environments for agent operations.
     """
 
-    _playwright_client_not_connected_message = "Cloud browser client is not connected"
-
     def __init__(
         self,
         *,
@@ -2156,7 +2125,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._playwright_browser: Browser | None = None
         self._playwright_lifecycle_lock: asyncio.Lock | None = None
         self._cdp_websocket_url: str | None = None
-        self._cdp_auth_headers: dict[str, str] | None = None
         self._playwright_context_manager: PlaywrightContextManager | None = None
         self._playwright: Playwright | None = None
         self._browser_initialization = _BrowserInitializationHelper(
@@ -2177,6 +2145,28 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         # Cloud browser sessions are backend-owned, so there is no local browser process.
         return None
 
+    async def reset_agent_state(self) -> None:
+        await self._ensure_initialized()
+        async with self._acquire_playwright_lifecycle_lock():
+            try:
+                await self._ensure_playwright_connected()
+                assert self._playwright_browser is not None
+                side_panel_url = create_side_panel_url(
+                    self._config, self.browser_window_id
+                )
+                side_panel_page = _find_page_by_url(
+                    self._playwright_browser, side_panel_url
+                )
+                if side_panel_page is None:
+                    raise NaradaInitializationError(
+                        "Narada side panel is no longer available"
+                    )
+
+                # Reloading cancels any in-flight Narada operations.
+                await side_panel_page.reload()
+            finally:
+                await self._stop_playwright()
+
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
         Retry up to 3 times on error.
@@ -2190,13 +2180,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         for attempt in range(max_attempts):
             try:
                 await self._initialize_once()
-                try:
-                    await self._detach()
-                except Exception:
-                    logger.warning(
-                        "Failed to detach Playwright resources after cloud browser initialization",
-                        exc_info=True,
-                    )
                 return
             except asyncio.CancelledError:
                 await self._cleanup_failed_initialization_attempt()
@@ -2249,7 +2232,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         cdp_auth_headers = response_data["cdp_auth_headers"]
         self._session_id = session_id
         self._cdp_websocket_url = cdp_websocket_url
-        self._cdp_auth_headers = cdp_auth_headers
 
         # Connect to browser via CDP with authentication headers and log the user in.
         await self._initialize_cloud_browser_window(
@@ -2292,7 +2274,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             self._browser_window_id = None
             self._context = None
             self._cdp_websocket_url = None
-            self._cdp_auth_headers = None
 
     async def _connect_playwright_browser(self) -> Browser:
         if self._cdp_websocket_url is None:
@@ -2309,7 +2290,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         )
 
     async def _generate_cdp_auth_headers(self) -> dict[str, str]:
-        if self._cdp_websocket_url is None:
+        if self._cdp_websocket_url is None or self._session_id is None:
             raise NaradaInitializationError(
                 "Cloud browser CDP connection details are unavailable"
             )
@@ -2330,11 +2311,16 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                         f"Endpoint URL: {endpoint_url}"
                     )
 
-                response_data = await resp.json()
+                response = _GenerateCdpAuthHeadersResponse.model_validate(
+                    await resp.json()
+                )
 
-        cdp_auth_headers = response_data["cdp_auth_headers"]
-        self._cdp_auth_headers = cdp_auth_headers
-        return cdp_auth_headers
+        if response.cloud_browser_session_id != self._session_id:
+            raise NaradaInitializationError(
+                "Generated CDP auth headers for unexpected cloud browser session "
+                f"{response.cloud_browser_session_id!r}; expected {self._session_id!r}"
+            )
+        return response.auth_headers
 
     async def _wait_for_cloud_browser_window_id(
         self,

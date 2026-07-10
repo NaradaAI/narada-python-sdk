@@ -1,45 +1,44 @@
 import argparse
 import asyncio
-import json
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from narada import Agent, BrowserEnvironment, RemoteBrowserEnvironment
 
-STATE_PATH = Path(tempfile.gettempdir()) / "narada_split_script_browser_handoff.json"
+STATE_PATH = Path(tempfile.gettempdir()) / "narada_split_script_browser_handoff.txt"
 DEFAULT_PROMPT = (
     'Search for "LLM Compiler" on Google and open the first arXiv paper on the '
     "results page, then tell me who the authors are."
 )
 
 
-def load_state() -> dict[str, Any]:
+def load_browser_window_id() -> str:
     if not STATE_PATH.exists():
         raise SystemExit(
             f"No saved browser state found at {STATE_PATH}. Run this example with "
             "`start` first."
         )
 
-    state = json.loads(STATE_PATH.read_text())
-    browser_window_id = state.get("browser_window_id")
-    if not isinstance(browser_window_id, str) or not browser_window_id:
+    browser_window_id = STATE_PATH.read_text().strip()
+    if not browser_window_id:
         raise SystemExit(
-            f"Saved browser state at {STATE_PATH} is missing `browser_window_id`."
+            f"Saved browser state at {STATE_PATH} is empty. Run `start` again."
         )
 
-    return state
+    return browser_window_id
 
 
 async def start_browser() -> None:
+    if STATE_PATH.exists():
+        raise SystemExit(
+            f"Saved browser state already exists at {STATE_PATH}. Run `close` before "
+            "starting another browser."
+        )
+
     env = BrowserEnvironment()
     await env.start()
 
-    state = {
-        "browser_window_id": env.browser_window_id,
-        "browser_process_id": env.browser_process_id,
-    }
-    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
+    STATE_PATH.write_text(env.browser_window_id + "\n")
 
     print(f"Started browser window: {env.browser_window_id}")
     if env.browser_process_id is not None:
@@ -48,8 +47,8 @@ async def start_browser() -> None:
 
 
 async def run_task(prompt: str) -> None:
-    state = load_state()
-    env = RemoteBrowserEnvironment(browser_window_id=state["browser_window_id"])
+    browser_window_id = load_browser_window_id()
+    env = RemoteBrowserEnvironment(browser_window_id=browser_window_id)
     agent = Agent(environment=env)
 
     response = await agent.run(prompt=prompt)
@@ -57,12 +56,12 @@ async def run_task(prompt: str) -> None:
 
 
 async def close_browser() -> None:
-    state = load_state()
-    env = RemoteBrowserEnvironment(browser_window_id=state["browser_window_id"])
+    browser_window_id = load_browser_window_id()
+    env = RemoteBrowserEnvironment(browser_window_id=browser_window_id)
 
     await env.close()
     STATE_PATH.unlink(missing_ok=True)
-    print(f"Closed browser window: {state['browser_window_id']}")
+    print(f"Closed browser window: {browser_window_id}")
     print(f"Removed handoff state: {STATE_PATH}")
 
 
@@ -75,7 +74,7 @@ async def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("start", help="Start a browser and save its handoff IDs.")
+    subparsers.add_parser("start", help="Start a browser and save its handoff ID.")
 
     run_parser = subparsers.add_parser(
         "run", help="Run a task in the previously started browser window."

@@ -96,6 +96,137 @@ async def test_browser_environment_start_detaches_after_initialization_failure(
 
 
 @pytest.mark.asyncio
+async def test_browser_environment_start_cleans_up_when_playwright_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    startup_error = RuntimeError("Playwright startup failed")
+    playwright_context_manager = SimpleNamespace(
+        __aenter__=AsyncMock(side_effect=startup_error),
+        __aexit__=AsyncMock(),
+    )
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(
+        environment_module,
+        "async_playwright",
+        lambda: playwright_context_manager,
+    )
+
+    with pytest.raises(RuntimeError, match="Playwright startup failed"):
+        await env.start()
+
+    playwright_context_manager.__aenter__.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env._initialized is False
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_waits_for_start_to_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    detach_started = asyncio.Event()
+    finish_detach = asyncio.Event()
+    detach_calls = 0
+
+    async def open_browser_window() -> None:
+        env._browser_process_id = 456
+        env._browser_window_id = "browser-window-123"
+
+    async def detach() -> None:
+        nonlocal detach_calls
+        detach_calls += 1
+        if detach_calls == 1:
+            detach_started.set()
+            await finish_detach.wait()
+
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", AsyncMock())
+    monkeypatch.setattr(env, "_open_and_initialize_browser_window", open_browser_window)
+    monkeypatch.setattr(env, "_detach", detach)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    start_task = asyncio.create_task(env.start())
+    await detach_started.wait()
+    close_task = asyncio.create_task(env.close())
+    await asyncio.sleep(0)
+
+    assert not close_task.done()
+    run_extension_action.assert_not_awaited()
+
+    finish_detach.set()
+    await start_task
+    await close_task
+
+    request = run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert env._initialized is True
+    assert detach_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_cancelled_post_start_cleanup_does_not_reinitialize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    detach_started = asyncio.Event()
+    detach_calls = 0
+
+    async def open_browser_window() -> None:
+        env._browser_process_id = 456
+        env._browser_window_id = "browser-window-123"
+
+    async def detach() -> None:
+        nonlocal detach_calls
+        detach_calls += 1
+        if detach_calls == 1:
+            detach_started.set()
+            await asyncio.Future()
+
+    open_browser_window_mock = AsyncMock(side_effect=open_browser_window)
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", AsyncMock())
+    monkeypatch.setattr(
+        env, "_open_and_initialize_browser_window", open_browser_window_mock
+    )
+    monkeypatch.setattr(env, "_detach", detach)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    start_task = asyncio.create_task(env.start())
+    await detach_started.wait()
+    start_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+
+    assert env._initialized is True
+    await env.start()
+    open_browser_window_mock.assert_awaited_once()
+
+    await env.close()
+    request = run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert detach_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_browser_environment_detach_releases_playwright_without_closing_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -541,8 +672,8 @@ async def test_open_initialization_uses_target_only_match(
 ) -> None:
     import narada.environment as environment_module
 
-    context = object()
     playwright_browser = object()
+    context = SimpleNamespace(browser=playwright_browser)
     side_panel_match = environment_module._SidePanelMatch(
         page=None,
         target_id="target-123",
@@ -554,7 +685,6 @@ async def test_open_initialization_uses_target_only_match(
     env._playwright = object()  # type: ignore[assignment]
     launch_browser = AsyncMock(
         return_value=environment_module._LaunchBrowserResult(
-            playwright_browser=playwright_browser,
             browser_process_id=123,
             browser_window_id="browser-window-123",
             browser_context=context,
