@@ -7,7 +7,6 @@ from typing import Any
 
 from narada import Agent, BrowserEnvironment, RemoteBrowserEnvironment
 
-
 STATE_PATH = Path(tempfile.gettempdir()) / "narada_split_script_browser_handoff.json"
 DEFAULT_PROMPT = (
     'Search for "LLM Compiler" on Google and open the first arXiv paper on the '

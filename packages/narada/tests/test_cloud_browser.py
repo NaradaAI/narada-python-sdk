@@ -503,7 +503,9 @@ async def test_cloud_browser_environment_close_stops_session_before_detaching(
     env._initialized = True
     env._session_id = "session-123"
     env._browser_window_id = "browser-window-123"
-    env._playwright_browser = SimpleNamespace(close=AsyncMock(side_effect=close_browser))
+    env._playwright_browser = SimpleNamespace(
+        close=AsyncMock(side_effect=close_browser)
+    )
     env._context = SimpleNamespace()
     env._playwright_context_manager = SimpleNamespace(
         __aexit__=AsyncMock(side_effect=stop_playwright)
