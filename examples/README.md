@@ -60,6 +60,7 @@ uv run python examples/01_getting_started/01_run_your_first_task.py
 | [`02_run_in_a_cloud_browser.py`](05_browser_setups/02_run_in_a_cloud_browser.py) | Run tasks in a Narada-hosted cloud browser session, including session lifecycle and downloaded files. |
 | [`03_control_a_browser_on_another_machine.py`](05_browser_setups/03_control_a_browser_on_another_machine.py) | Drive a browser window running on a different machine by its window ID. |
 | [`04_route_traffic_through_a_proxy.py`](05_browser_setups/04_route_traffic_through_a_proxy.py) | Route all browser traffic through an HTTP/SOCKS proxy. |
+| [`05_split_script_browser_handoff.py`](05_browser_setups/05_split_script_browser_handoff.py) | Start a browser in one process, then reuse and close it from later processes. |
 
 ## 06 — Page actions
 

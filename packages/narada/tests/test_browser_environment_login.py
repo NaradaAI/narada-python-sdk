@@ -1,12 +1,15 @@
 import asyncio
 import json
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from narada import BrowserEnvironment
 from narada.config import BrowserConfig
+from narada.environment import create_side_panel_url
+from narada_core.actions.models import CloseWindowRequest
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -14,6 +17,337 @@ from narada_core.errors import (
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
 )
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_start_auto_detaches_after_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    context = SimpleNamespace()
+
+    async def start_playwright() -> None:
+        env._playwright_context_manager = playwright_context_manager
+        env._playwright = object()
+
+    async def open_browser_window() -> None:
+        env._playwright_browser = browser
+        env._context = context
+        env._browser_process_id = 456
+        env._browser_window_id = "browser-window-123"
+
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", start_playwright)
+    monkeypatch.setattr(env, "_open_and_initialize_browser_window", open_browser_window)
+
+    await env.start()
+
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env.browser_window_id == "browser-window-123"
+    assert env.browser_process_id == 456
+    assert env._initialized is True
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_start_detaches_after_initialization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    initialization_error = RuntimeError("initialization failed")
+
+    async def start_playwright() -> None:
+        env._playwright_context_manager = playwright_context_manager
+        env._playwright = object()
+
+    async def open_browser_window() -> None:
+        env._playwright_browser = browser
+        env._context = SimpleNamespace()
+        raise initialization_error
+
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", start_playwright)
+    monkeypatch.setattr(env, "_open_and_initialize_browser_window", open_browser_window)
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        await env.start()
+
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env._initialized is False
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_start_cleans_up_when_playwright_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    startup_error = RuntimeError("Playwright startup failed")
+    playwright_context_manager = SimpleNamespace(
+        __aenter__=AsyncMock(side_effect=startup_error),
+        __aexit__=AsyncMock(),
+    )
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(
+        environment_module,
+        "async_playwright",
+        lambda: playwright_context_manager,
+    )
+
+    with pytest.raises(RuntimeError, match="Playwright startup failed"):
+        await env.start()
+
+    playwright_context_manager.__aenter__.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env._initialized is False
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_waits_for_start_to_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    detach_started = asyncio.Event()
+    finish_detach = asyncio.Event()
+    detach_calls = 0
+
+    async def open_browser_window() -> None:
+        env._browser_process_id = 456
+        env._browser_window_id = "browser-window-123"
+
+    async def detach() -> None:
+        nonlocal detach_calls
+        detach_calls += 1
+        if detach_calls == 1:
+            detach_started.set()
+            await finish_detach.wait()
+
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", AsyncMock())
+    monkeypatch.setattr(env, "_open_and_initialize_browser_window", open_browser_window)
+    monkeypatch.setattr(env, "_detach", detach)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    start_task = asyncio.create_task(env.start())
+    await detach_started.wait()
+    close_task = asyncio.create_task(env.close())
+    await asyncio.sleep(0)
+
+    assert not close_task.done()
+    run_extension_action.assert_not_awaited()
+
+    finish_detach.set()
+    await start_task
+    await close_task
+
+    request = run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert env._initialized is True
+    assert detach_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_cancelled_post_start_cleanup_does_not_reinitialize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    detach_started = asyncio.Event()
+    detach_calls = 0
+
+    async def open_browser_window() -> None:
+        env._browser_process_id = 456
+        env._browser_window_id = "browser-window-123"
+
+    async def detach() -> None:
+        nonlocal detach_calls
+        detach_calls += 1
+        if detach_calls == 1:
+            detach_started.set()
+            await asyncio.Future()
+
+    open_browser_window_mock = AsyncMock(side_effect=open_browser_window)
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_validate_sdk_config", AsyncMock())
+    monkeypatch.setattr(env, "_start_playwright", AsyncMock())
+    monkeypatch.setattr(
+        env, "_open_and_initialize_browser_window", open_browser_window_mock
+    )
+    monkeypatch.setattr(env, "_detach", detach)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    start_task = asyncio.create_task(env.start())
+    await detach_started.wait()
+    start_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+
+    assert env._initialized is True
+    await env.start()
+    open_browser_window_mock.assert_awaited_once()
+
+    await env.close()
+    request = run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert detach_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_detach_releases_playwright_without_closing_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    env._browser_process_id = 456
+    browser = AsyncMock()
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    env._playwright_browser = browser
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = playwright_context_manager
+    env._playwright = object()
+    run_extension_action = AsyncMock()
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+
+    await env._detach()
+    await env._detach()
+
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    run_extension_action.assert_not_awaited()
+    assert env.browser_window_id == "browser-window-123"
+    assert env.browser_process_id == 456
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_reset_agent_state_reconnects_after_detach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = BrowserConfig(interactive=False)
+    env = BrowserEnvironment(auth_headers={"x-api-key": "test-key"}, config=config)
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    env._browser_process_id = 456
+
+    page = SimpleNamespace(
+        url=create_side_panel_url(config, "browser-window-123"),
+        reload=AsyncMock(),
+    )
+    context = SimpleNamespace(pages=[page])
+    browser = SimpleNamespace(
+        contexts=[context],
+        close=AsyncMock(),
+    )
+    context.browser = browser
+    connect_over_cdp = AsyncMock(return_value=browser)
+    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+
+    async def start_playwright() -> None:
+        env._playwright_context_manager = playwright_context_manager
+        env._playwright = SimpleNamespace(
+            chromium=SimpleNamespace(connect_over_cdp=connect_over_cdp)
+        )
+
+    monkeypatch.setattr(env, "_start_playwright", start_playwright)
+
+    await env.reset_agent_state()
+
+    connect_over_cdp.assert_awaited_once_with(config.cdp_url)
+    page.reload.assert_awaited_once()
+    browser.close.assert_awaited_once()
+    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert env.browser_window_id == "browser-window-123"
+    assert env.browser_process_id == 456
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_closes_window_before_detaching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    async def run_extension_action(*args: object, **kwargs: object) -> None:
+        events.append("close-window")
+
+    async def close_browser() -> None:
+        events.append("close-browser")
+
+    async def stop_playwright(*args: object) -> None:
+        events.append("stop-playwright")
+
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    env._playwright_browser = SimpleNamespace(
+        close=AsyncMock(side_effect=close_browser)
+    )
+    env._context = SimpleNamespace()
+    env._playwright_context_manager = SimpleNamespace(
+        __aexit__=AsyncMock(side_effect=stop_playwright)
+    )
+    env._playwright = object()
+    run_extension_action_mock = AsyncMock(side_effect=run_extension_action)
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action_mock)
+
+    await env.close(timeout=7)
+
+    run_extension_action_mock.assert_awaited_once()
+    request = run_extension_action_mock.await_args.args[0]
+    assert isinstance(request, CloseWindowRequest)
+    assert run_extension_action_mock.await_args.kwargs == {"timeout": 7}
+    assert events == ["close-window", "close-browser", "stop-playwright"]
+    assert env._playwright_browser is None
+    assert env._context is None
+    assert env._playwright is None
+    assert env._playwright_context_manager is None
 
 
 @pytest.mark.asyncio
@@ -338,7 +672,8 @@ async def test_open_initialization_uses_target_only_match(
 ) -> None:
     import narada.environment as environment_module
 
-    context = object()
+    playwright_browser = object()
+    context = SimpleNamespace(browser=playwright_browser)
     side_panel_match = environment_module._SidePanelMatch(
         page=None,
         target_id="target-123",
@@ -363,13 +698,16 @@ async def test_open_initialization_uses_target_only_match(
     await env._open_and_initialize_browser_window()
 
     assert env._context is context
+    assert env._playwright_browser is playwright_browser
     assert env._browser_process_id == 123
     assert env._browser_window_id == "browser-window-123"
     fix_download_behavior.assert_awaited_once_with(context, side_panel_match)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
-async def test_reset_agent_state_rediscovers_side_panel_page() -> None:
+async def test_reset_agent_state_rediscovers_side_panel_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     side_panel_url = (
         "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
         "sidepanel.html?browserWindowId=browser-window-123"
@@ -401,10 +739,18 @@ async def test_reset_agent_state_rediscovers_side_panel_page() -> None:
     env._initialized = True
     env._browser_window_id = "browser-window-123"
     env._context = context  # type: ignore[assignment]
+    ensure_playwright_connected = AsyncMock()
+    stop_playwright = AsyncMock()
+    monkeypatch.setattr(
+        env, "_ensure_playwright_connected", ensure_playwright_connected
+    )
+    monkeypatch.setattr(env, "_stop_playwright", stop_playwright)
 
     await env.reset_agent_state()
 
     replacement_page.reload.assert_awaited_once()
+    ensure_playwright_connected.assert_awaited_once()
+    stop_playwright.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -436,7 +782,14 @@ async def test_reset_agent_state_rediscovers_side_panel_target(
     )
     env._initialized = True
     env._browser_window_id = "browser-window-123"
-    env._context = Context()  # type: ignore[assignment]
+    context = Context()
+    env._context = context  # type: ignore[assignment]
+    ensure_playwright_connected = AsyncMock()
+    stop_playwright = AsyncMock()
+    monkeypatch.setattr(
+        env, "_ensure_playwright_connected", ensure_playwright_connected
+    )
+    monkeypatch.setattr(env, "_stop_playwright", stop_playwright)
     reload_side_panel_target = AsyncMock()
     monkeypatch.setattr(
         env,
@@ -447,14 +800,16 @@ async def test_reset_agent_state_rediscovers_side_panel_target(
     await env.reset_agent_state()
 
     find_side_panel_match.assert_awaited_once_with(
-        env._context.browser,
+        context.browser,
         "chrome-extension://bhioaidlggjdkheaajakomifblpjmokn/"
         "sidepanel.html?browserWindowId=browser-window-123",
     )
     reload_side_panel_target.assert_awaited_once_with(
-        env._context,
+        context,
         "replacement-target-123",
     )
+    ensure_playwright_connected.assert_awaited_once()
+    stop_playwright.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -481,9 +836,18 @@ async def test_reset_agent_state_rejects_missing_current_side_panel(
     env._initialized = True
     env._browser_window_id = "browser-window-123"
     env._context = Context()  # type: ignore[assignment]
+    ensure_playwright_connected = AsyncMock()
+    stop_playwright = AsyncMock()
+    monkeypatch.setattr(
+        env, "_ensure_playwright_connected", ensure_playwright_connected
+    )
+    monkeypatch.setattr(env, "_stop_playwright", stop_playwright)
 
     with pytest.raises(NaradaInitializationError, match="no longer available"):
         await env.reset_agent_state()
+
+    ensure_playwright_connected.assert_awaited_once()
+    stop_playwright.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -527,11 +891,50 @@ async def test_reset_agent_state_bounds_discovery_and_cleanup(
     env._initialized = True
     env._browser_window_id = "browser-window-123"
     env._context = context  # type: ignore[assignment]
+    ensure_playwright_connected = AsyncMock()
+    stop_playwright = AsyncMock()
+    monkeypatch.setattr(
+        env, "_ensure_playwright_connected", ensure_playwright_connected
+    )
+    monkeypatch.setattr(env, "_stop_playwright", stop_playwright)
 
     with pytest.raises(NaradaTimeoutError, match="Timed out resetting"):
         await asyncio.wait_for(env.reset_agent_state(), timeout=0.5)
 
     assert context.browser.cdp_session.detach_started.is_set()
+    ensure_playwright_connected.assert_awaited_once()
+    stop_playwright.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reset_agent_state_bounds_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    never = asyncio.Event()
+
+    async def wait_forever() -> None:
+        await never.wait()
+
+    monkeypatch.setattr(environment_module, "_SIDE_PANEL_RESET_TIMEOUT_SECONDS", 0.01)
+    env = BrowserEnvironment(
+        api_key="test-key", config=BrowserConfig(interactive=False)
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    ensure_playwright_connected = AsyncMock(side_effect=wait_forever)
+    stop_playwright = AsyncMock()
+    monkeypatch.setattr(
+        env, "_ensure_playwright_connected", ensure_playwright_connected
+    )
+    monkeypatch.setattr(env, "_stop_playwright", stop_playwright)
+
+    with pytest.raises(NaradaTimeoutError, match="Timed out resetting"):
+        await asyncio.wait_for(env.reset_agent_state(), timeout=0.5)
+
+    ensure_playwright_connected.assert_awaited_once()
+    stop_playwright.assert_awaited_once()
 
 
 class _TargetCdpSession:
