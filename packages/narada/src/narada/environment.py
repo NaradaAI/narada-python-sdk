@@ -10,6 +10,12 @@ import random
 import subprocess
 import sys
 import time
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
 from abc import ABC
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -101,6 +107,9 @@ _SIDE_PANEL_RESET_TIMEOUT_SECONDS = 30
 _CDP_CLEANUP_TIMEOUT_SECONDS = 1
 _WINDOWS_EXTENSION_MISSING_RETRY_COUNT = 3
 _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS = 3
+_WINDOWS_EXTENSION_FORCE_INSTALL_LIST_REGISTRY_PATH = (
+    r"Software\Policies\Google\Chrome\ExtensionInstallForcelist"
+)
 
 
 type _BrowserInitializationResultType = Literal[
@@ -115,6 +124,34 @@ type _BrowserInitializationResultType = Literal[
 class _BrowserInitializationResult(TypedDict, total=False):
     type: _BrowserInitializationResultType
     browserWindowId: str
+
+
+def is_win_extension_autoload_used(extension_id: str) -> bool:
+    if sys.platform != "win32" or winreg is None:
+        return False
+
+    expected_extension_id = extension_id.strip().casefold()
+    if not expected_extension_id:
+        return False
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            _WINDOWS_EXTENSION_FORCE_INSTALL_LIST_REGISTRY_PATH,
+        ) as registry_key:
+            value_count = winreg.QueryInfoKey(registry_key)[1]
+            for value_index in range(value_count):
+                _, value, value_type = winreg.EnumValue(registry_key, value_index)
+                if value_type != winreg.REG_SZ or not isinstance(value, str):
+                    continue
+
+                configured_extension_id = value.partition(";")[0].strip().casefold()
+                if configured_extension_id == expected_extension_id:
+                    return True
+    except (IndexError, OSError, TypeError, ValueError):
+        return False
+
+    return False
 
 
 def _build_browser_window_id_observer_script() -> str:
@@ -1625,21 +1662,16 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         timeout=timeout,
                     )
                 except NaradaExtensionMissingError:
-                    # A user may configure the extension to be installed automatically through the
-                    # Windows Registry. Chrome can take a few seconds to install it, so retry 3 times.
-                    # TODO: During these retries, the initialization page shows the “extension not installed” dialog,
-                    # which is misleading: users cannot manually download the registry-managed extension through its button.
-                    # Investigate whether we can detect registry-managed installation and show a more accurate state while waiting.
+                    # Chrome can take a few seconds to install a registry-managed extension.
                     if (
-                        sys.platform == "win32"
-                        and extension_missing_retry_attempts
+                        extension_missing_retry_attempts
                         < _WINDOWS_EXTENSION_MISSING_RETRY_COUNT
+                        and is_win_extension_autoload_used(config.extension_id)
                     ):
                         extension_missing_retry_attempts += 1
                         await asyncio.sleep(
                             _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS
                         )
-                        continue
                     else:
                         if not config.interactive:
                             raise
