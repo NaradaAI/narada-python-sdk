@@ -1625,11 +1625,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         timeout=timeout,
                     )
                 except NaradaExtensionMissingError:
-                    if not config.interactive:
-                        raise
-
                     # A user may configure the extension to be installed automatically through the
-                    # Windows Registry. Chrome can take a few seconds to install it, so retry 3 times
+                    # Windows Registry. Chrome can take a few seconds to install it, so retry 3 times.
+                    # TODO: During these retries, the initialization page shows the “extension not installed” dialog,
+                    # which is misleading: users cannot manually download the registry-managed extension through its button.
+                    # Investigate whether we can detect registry-managed installation and show a more accurate state while waiting.
                     if (
                         sys.platform == "win32"
                         and extension_missing_retry_attempts
@@ -1639,12 +1639,17 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         await asyncio.sleep(
                             _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS
                         )
+                        continue
                     else:
                         self._console.input(
                             "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
                             "installed. Please follow the instructions in the browser window to "
                             "install it first, then press Enter to continue.[/bold blue]\n",
                         )
+
+                    if not config.interactive:
+                        raise
+
                     await initialization_page.bring_to_front()
                     await asyncio.sleep(0.1)
                     await initialization_page.reload()
