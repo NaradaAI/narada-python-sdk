@@ -1641,14 +1641,13 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         )
                         continue
                     else:
+                        if not config.interactive:
+                            raise
                         self._console.input(
                             "\n[bold]>[/bold] [bold blue]The Narada Enterprise extension is not "
                             "installed. Please follow the instructions in the browser window to "
                             "install it first, then press Enter to continue.[/bold blue]\n",
                         )
-
-                    if not config.interactive:
-                        raise
 
                     await initialization_page.bring_to_front()
                     await asyncio.sleep(0.1)
