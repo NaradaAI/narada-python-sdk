@@ -127,7 +127,7 @@ class _BrowserInitializationResult(TypedDict, total=False):
     browserWindowId: str
 
 
-class _BrowserAutoloadRestartRequired(NaradaInitializationError):
+class _BrowserAutoloadRestartRequired(Exception):
     """Signal that Chrome must restart to activate an extension force-installed by Windows policy."""
 
     pass
@@ -1844,6 +1844,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     )
 
         except PlaywrightError as error:
+            self._console.print(
+                "\n[bold red]> Playwright error:[/bold red]",
+                error,
+            )
             if restart_on_autoload_failure:
                 raise _BrowserAutoloadRestartRequired(
                     "Narada initialization page closed during extension autoload"

@@ -831,11 +831,16 @@ async def test_browser_environment_handles_closed_initialization_page(
             restart_on_autoload_failure=restart_on_autoload_failure,
         )
 
+    assert console_print.call_args_list[0].args == (
+        "\n[bold red]> Playwright error:[/bold red]",
+        playwright_error,
+    )
     if restart_on_autoload_failure:
         assert exc_info.value.__cause__ is playwright_error
-        console_print.assert_not_called()
+        assert console_print.call_count == 1
     else:
         assert exc_info.value.code == 1  # type: ignore[union-attr]
+        assert console_print.call_count == 2
         assert "automation page was closed" in console_print.call_args.args[0]
     autoload_used.assert_called_once_with(env._config.extension_id)
 
