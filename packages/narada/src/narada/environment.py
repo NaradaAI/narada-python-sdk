@@ -128,6 +128,7 @@ class _BrowserInitializationResult(TypedDict, total=False):
 
 
 class _BrowserAutoloadRestartRequired(NaradaInitializationError):
+    """Signal that Chrome must restart to activate an extension force-installed by Windows policy."""
     pass
 
 
@@ -1565,8 +1566,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         proxy_requires_auth: bool,
         restart_on_autoload_failure: bool,
     ) -> _LaunchBrowserResult:
-        logging.debug("Browser process started with PID: %s", browser_process_id)
-
         # We need to wait a bit for the initial page to open before connecting to the browser over
         # CDP, otherwise Playwright can see an empty context with no pages.
         await asyncio.sleep(2)
@@ -1712,6 +1711,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         config: BrowserConfig,
         browser_process: subprocess.Popen[bytes],
     ) -> None:
+        """Close the current Chrome process before restarting it for auto-loaded extension activation."""
         try:
             browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
             cdp_session = await browser.new_browser_cdp_session()
