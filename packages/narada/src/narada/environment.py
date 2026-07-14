@@ -105,6 +105,7 @@ _BROWSER_WINDOW_ID_OBSERVER_KEY = "narada.sdk.browserWindowIdObserver"
 _BROWSER_WINDOW_ID_OBSERVER_LEGACY_GLOBAL = "__naradaBrowserWindowIdObserver"
 _SIDE_PANEL_RESET_TIMEOUT_SECONDS = 30
 _CDP_CLEANUP_TIMEOUT_SECONDS = 1
+_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS = 5
 _WINDOWS_EXTENSION_MISSING_RETRY_COUNT = 3
 _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS = 3
 _WINDOWS_EXTENSION_FORCE_INSTALL_LIST_REGISTRY_PATH = (
@@ -124,6 +125,10 @@ type _BrowserInitializationResultType = Literal[
 class _BrowserInitializationResult(TypedDict, total=False):
     type: _BrowserInitializationResultType
     browserWindowId: str
+
+
+class _BrowserAutoloadRestartRequired(NaradaInitializationError):
+    pass
 
 
 def is_win_extension_autoload_used(extension_id: str) -> bool:
@@ -406,6 +411,12 @@ class _LaunchBrowserResult:
     browser_window_id: str
     browser_context: BrowserContext
     side_panel_match: _SidePanelMatch
+
+
+@dataclass
+class _BrowserLaunchAttemptState:
+    process: Any
+    browser: Browser | None = None
 
 
 @dataclass
@@ -1439,6 +1450,45 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
     async def _launch_browser(
         self, playwright: Playwright, config: BrowserConfig
     ) -> _LaunchBrowserResult:
+        extension_autoload_used = is_win_extension_autoload_used(config.extension_id)
+
+        try:
+            return await self._launch_browser_once(
+                playwright,
+                config,
+                extension_autoload_used=extension_autoload_used,
+                restart_on_autoload_failure=extension_autoload_used,
+            )
+        except _BrowserAutoloadRestartRequired:
+            if not extension_autoload_used:
+                raise
+
+            message = (
+                "The Narada extension was installed automatically. Restarting Chrome "
+                "to finish setup..."
+            )
+            if config.interactive:
+                self._console.print(
+                    f"\n[bold]>[/bold] [bold blue]{message}[/bold blue]\n"
+                )
+            else:
+                logger.info(message)
+
+            return await self._launch_browser_once(
+                playwright,
+                config,
+                extension_autoload_used=True,
+                restart_on_autoload_failure=False,
+            )
+
+    async def _launch_browser_once(
+        self,
+        playwright: Playwright,
+        config: BrowserConfig,
+        *,
+        extension_autoload_used: bool,
+        restart_on_autoload_failure: bool,
+    ) -> _LaunchBrowserResult:
         # A unique tag is appended to the initialization URL so that we can find the new page that
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
@@ -1494,7 +1544,41 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 start_new_session=True,
             )
 
-        logging.debug("Browser process started with PID: %s", browser_process.pid)
+        launch_state = _BrowserLaunchAttemptState(process=browser_process)
+        try:
+            return await self._initialize_launched_browser(
+                playwright,
+                config,
+                browser_process_id=browser_process.pid,
+                tagged_initialization_url=tagged_initialization_url,
+                proxy_requires_auth=proxy_requires_auth,
+                extension_autoload_used=extension_autoload_used,
+                restart_on_autoload_failure=restart_on_autoload_failure,
+                launch_state=launch_state,
+            )
+        except BaseException:
+            try:
+                await self._close_failed_browser_process(launch_state)
+            except BaseException:
+                logger.warning(
+                    "Failed to close browser process after initialization failure",
+                    exc_info=True,
+                )
+            raise
+
+    async def _initialize_launched_browser(
+        self,
+        playwright: Playwright,
+        config: BrowserConfig,
+        *,
+        browser_process_id: int,
+        tagged_initialization_url: str,
+        proxy_requires_auth: bool,
+        extension_autoload_used: bool,
+        restart_on_autoload_failure: bool,
+        launch_state: _BrowserLaunchAttemptState,
+    ) -> _LaunchBrowserResult:
+        logging.debug("Browser process started with PID: %s", browser_process_id)
 
         # We need to wait a bit for the initial page to open before connecting to the browser over
         # CDP, otherwise Playwright can see an empty context with no pages.
@@ -1516,6 +1600,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+                launch_state.browser = browser
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
@@ -1533,6 +1618,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     break
 
                 if attempt == max_cdp_connect_attempts - 1:
+                    if restart_on_autoload_failure:
+                        raise _BrowserAutoloadRestartRequired(
+                            "Narada side panel was unavailable after extension autoload"
+                        )
                     raise NaradaTimeoutError(
                         "Timed out waiting for Narada side panel page"
                     )
@@ -1571,6 +1660,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             initialization_page,
                             config,
                             tagged_initialization_url,
+                            extension_autoload_used=extension_autoload_used,
+                            restart_on_autoload_failure=restart_on_autoload_failure,
                         )
                     )
                 except NaradaTimeoutError:
@@ -1603,6 +1694,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
             if attempt == max_cdp_connect_attempts - 1:
                 if browser_window_id is not None:
+                    if restart_on_autoload_failure:
+                        raise _BrowserAutoloadRestartRequired(
+                            "Narada side panel was unavailable after extension autoload"
+                        )
                     raise NaradaTimeoutError(
                         "Timed out waiting for Narada side panel page"
                     )
@@ -1620,11 +1715,74 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             self._print_success_message(browser_window_id)
 
         return _LaunchBrowserResult(
-            browser_process_id=browser_process.pid,
+            browser_process_id=browser_process_id,
             browser_window_id=browser_window_id,
             browser_context=context,
             side_panel_match=side_panel_match,
         )
+
+    async def _close_failed_browser_process(
+        self,
+        launch_state: _BrowserLaunchAttemptState,
+    ) -> None:
+        cdp_session = None
+        if launch_state.browser is not None:
+            try:
+                cdp_session = await launch_state.browser.new_browser_cdp_session()
+                await asyncio.wait_for(
+                    cdp_session.send("Browser.close"),
+                    timeout=_CDP_CLEANUP_TIMEOUT_SECONDS,
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to close browser through CDP after initialization failure",
+                    exc_info=True,
+                )
+            finally:
+                if cdp_session is not None:
+                    await _run_cdp_cleanup(cdp_session.detach())
+
+        if await self._wait_for_browser_process_exit(launch_state.process):
+            return
+
+        for action_name in ("terminate", "kill"):
+            try:
+                getattr(launch_state.process, action_name)()
+            except ProcessLookupError:
+                return
+            except Exception:
+                logger.warning(
+                    "Failed to %s browser process after initialization failure",
+                    action_name,
+                    exc_info=True,
+                )
+                continue
+
+            if await self._wait_for_browser_process_exit(launch_state.process):
+                return
+
+        logger.warning(
+            "Browser process %s did not exit after initialization failure",
+            getattr(launch_state.process, "pid", "unknown"),
+        )
+
+    @staticmethod
+    async def _wait_for_browser_process_exit(browser_process: Any) -> bool:
+        try:
+            if isinstance(browser_process, asyncio.subprocess.Process):
+                await asyncio.wait_for(
+                    browser_process.wait(),
+                    timeout=_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS,
+                )
+            else:
+                await asyncio.to_thread(
+                    browser_process.wait,
+                    timeout=_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS,
+                )
+        except (subprocess.TimeoutExpired, TimeoutError):
+            return False
+
+        return True
 
     async def _fetch_browser_login_token(self) -> str:
         async with aiohttp.ClientSession() as session:
@@ -1649,10 +1807,16 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         initialization_url: str,
         *,
         timeout: int = 30_000,
+        extension_autoload_used: bool | None = None,
+        restart_on_autoload_failure: bool = False,
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
         extension_missing_retry_attempts = 0
+        if extension_autoload_used is None:
+            extension_autoload_used = is_win_extension_autoload_used(
+                config.extension_id
+            )
 
         try:
             while True:
@@ -1661,18 +1825,22 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         initialization_page,
                         timeout=timeout,
                     )
-                except NaradaExtensionMissingError:
+                except NaradaExtensionMissingError as error:
                     # Chrome can take a few seconds to install a registry-managed extension.
                     if (
                         extension_missing_retry_attempts
                         < _WINDOWS_EXTENSION_MISSING_RETRY_COUNT
-                        and is_win_extension_autoload_used(config.extension_id)
+                        and extension_autoload_used
                     ):
                         extension_missing_retry_attempts += 1
                         await asyncio.sleep(
                             _WINDOWS_EXTENSION_MISSING_RETRY_DELAY_SECONDS
                         )
                     else:
+                        if restart_on_autoload_failure:
+                            raise _BrowserAutoloadRestartRequired(
+                                "Narada extension remained unavailable after autoload"
+                            ) from error
                         if not config.interactive:
                             raise
                         self._console.input(
@@ -1707,7 +1875,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         wait_until="domcontentloaded",
                     )
 
-        except PlaywrightError:
+        except PlaywrightError as error:
+            if restart_on_autoload_failure:
+                raise _BrowserAutoloadRestartRequired(
+                    "Narada initialization page closed during extension autoload"
+                ) from error
             self._console.print(
                 "\n[bold]>[/bold] [bold red]It seems the Narada automation page was closed. Please "
                 "retry the action and keep the Narada web page open.[/bold red]",
