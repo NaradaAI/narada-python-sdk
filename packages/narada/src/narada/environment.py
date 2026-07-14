@@ -129,6 +129,7 @@ class _BrowserInitializationResult(TypedDict, total=False):
 
 class _BrowserAutoloadRestartRequired(NaradaInitializationError):
     """Signal that Chrome must restart to activate an extension force-installed by Windows policy."""
+
     pass
 
 
