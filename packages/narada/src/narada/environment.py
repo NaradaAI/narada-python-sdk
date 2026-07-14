@@ -12,7 +12,7 @@ import sys
 import time
 
 try:
-    import winreg
+    import winreg  # Used only for Windows
 except ImportError:
     winreg = None
 
@@ -411,12 +411,6 @@ class _LaunchBrowserResult:
     browser_window_id: str
     browser_context: BrowserContext
     side_panel_match: _SidePanelMatch
-
-
-@dataclass
-class _BrowserLaunchAttemptState:
-    process: Any
-    browser: Browser | None = None
 
 
 @dataclass
@@ -1456,7 +1450,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             return await self._launch_browser_once(
                 playwright,
                 config,
-                extension_autoload_used=extension_autoload_used,
                 restart_on_autoload_failure=extension_autoload_used,
             )
         except _BrowserAutoloadRestartRequired:
@@ -1477,7 +1470,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             return await self._launch_browser_once(
                 playwright,
                 config,
-                extension_autoload_used=True,
                 restart_on_autoload_failure=False,
             )
 
@@ -1486,7 +1478,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         playwright: Playwright,
         config: BrowserConfig,
         *,
-        extension_autoload_used: bool,
         restart_on_autoload_failure: bool,
     ) -> _LaunchBrowserResult:
         # A unique tag is appended to the initialization URL so that we can find the new page that
@@ -1544,7 +1535,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 start_new_session=True,
             )
 
-        launch_state = _BrowserLaunchAttemptState(process=browser_process)
         try:
             return await self._initialize_launched_browser(
                 playwright,
@@ -1552,18 +1542,17 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 browser_process_id=browser_process.pid,
                 tagged_initialization_url=tagged_initialization_url,
                 proxy_requires_auth=proxy_requires_auth,
-                extension_autoload_used=extension_autoload_used,
                 restart_on_autoload_failure=restart_on_autoload_failure,
-                launch_state=launch_state,
             )
-        except BaseException:
-            try:
-                await self._close_failed_browser_process(launch_state)
-            except BaseException:
-                logger.warning(
-                    "Failed to close browser process after initialization failure",
-                    exc_info=True,
-                )
+        except _BrowserAutoloadRestartRequired:
+            if not restart_on_autoload_failure:
+                raise
+
+            await self._close_browser_for_autoload_restart(
+                playwright,
+                config,
+                cast(subprocess.Popen[bytes], browser_process),
+            )
             raise
 
     async def _initialize_launched_browser(
@@ -1574,9 +1563,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         browser_process_id: int,
         tagged_initialization_url: str,
         proxy_requires_auth: bool,
-        extension_autoload_used: bool,
         restart_on_autoload_failure: bool,
-        launch_state: _BrowserLaunchAttemptState,
     ) -> _LaunchBrowserResult:
         logging.debug("Browser process started with PID: %s", browser_process_id)
 
@@ -1600,7 +1587,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         for attempt in range(max_cdp_connect_attempts):
             try:
                 browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
-                launch_state.browser = browser
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
@@ -1660,7 +1646,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             initialization_page,
                             config,
                             tagged_initialization_url,
-                            extension_autoload_used=extension_autoload_used,
                             restart_on_autoload_failure=restart_on_autoload_failure,
                         )
                     )
@@ -1721,68 +1706,54 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             side_panel_match=side_panel_match,
         )
 
-    async def _close_failed_browser_process(
+    async def _close_browser_for_autoload_restart(
         self,
-        launch_state: _BrowserLaunchAttemptState,
+        playwright: Playwright,
+        config: BrowserConfig,
+        browser_process: subprocess.Popen[bytes],
     ) -> None:
-        cdp_session = None
-        if launch_state.browser is not None:
-            try:
-                cdp_session = await launch_state.browser.new_browser_cdp_session()
-                await asyncio.wait_for(
-                    cdp_session.send("Browser.close"),
-                    timeout=_CDP_CLEANUP_TIMEOUT_SECONDS,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to close browser through CDP after initialization failure",
-                    exc_info=True,
-                )
-            finally:
-                if cdp_session is not None:
-                    await _run_cdp_cleanup(cdp_session.detach())
-
-        if await self._wait_for_browser_process_exit(launch_state.process):
-            return
-
-        for action_name in ("terminate", "kill"):
-            try:
-                getattr(launch_state.process, action_name)()
-            except ProcessLookupError:
-                return
-            except Exception:
-                logger.warning(
-                    "Failed to %s browser process after initialization failure",
-                    action_name,
-                    exc_info=True,
-                )
-                continue
-
-            if await self._wait_for_browser_process_exit(launch_state.process):
-                return
-
-        logger.warning(
-            "Browser process %s did not exit after initialization failure",
-            getattr(launch_state.process, "pid", "unknown"),
-        )
-
-    @staticmethod
-    async def _wait_for_browser_process_exit(browser_process: Any) -> bool:
         try:
-            if isinstance(browser_process, asyncio.subprocess.Process):
-                await asyncio.wait_for(
-                    browser_process.wait(),
-                    timeout=_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS,
-                )
-            else:
+            browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+            cdp_session = await browser.new_browser_cdp_session()
+            await asyncio.wait_for(
+                cdp_session.send("Browser.close"),
+                timeout=_CDP_CLEANUP_TIMEOUT_SECONDS,
+            )
+            try:
                 await asyncio.to_thread(
                     browser_process.wait,
                     timeout=_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS,
                 )
-        except (subprocess.TimeoutExpired, TimeoutError):
-            return False
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        except Exception:
+            logger.debug(
+                "Failed to close browser through CDP before autoload restart",
+                exc_info=True,
+            )
 
-        return True
+        if browser_process.poll() is not None:
+            return
+
+        try:
+            browser_process.terminate()
+        except ProcessLookupError:
+            return
+        except Exception as error:
+            raise NaradaInitializationError(
+                "Could not terminate Chrome before restarting it"
+            ) from error
+
+        try:
+            await asyncio.to_thread(
+                browser_process.wait,
+                timeout=_BROWSER_PROCESS_CLOSE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise NaradaInitializationError(
+                "Could not restart Chrome because the first browser process did not exit"
+            ) from error
 
     async def _fetch_browser_login_token(self) -> str:
         async with aiohttp.ClientSession() as session:
@@ -1807,16 +1778,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         initialization_url: str,
         *,
         timeout: int = 30_000,
-        extension_autoload_used: bool | None = None,
         restart_on_autoload_failure: bool = False,
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
         extension_missing_retry_attempts = 0
-        if extension_autoload_used is None:
-            extension_autoload_used = is_win_extension_autoload_used(
-                config.extension_id
-            )
+        extension_autoload_used = is_win_extension_autoload_used(config.extension_id)
 
         try:
             while True:
