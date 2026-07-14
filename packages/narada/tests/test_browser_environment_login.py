@@ -1,9 +1,10 @@
 import asyncio
 import json
+import subprocess
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from narada import BrowserEnvironment
@@ -425,6 +426,111 @@ async def test_browser_environment_fetches_login_token_after_unauthenticated_sta
     )
 
 
+@pytest.mark.parametrize(
+    "registry_value",
+    [
+        "  BHIOAIDLGGJDKHEAAJAKOMIFBLPJMOKN  ",
+        (
+            "bhioaidlggjdkheaajakomifblpjmokn;"
+            "https://clients2.google.com/service/update2/crx"
+        ),
+    ],
+)
+def test_is_win_extension_autoload_used_matches_force_install_value(
+    monkeypatch: pytest.MonkeyPatch,
+    registry_value: str,
+) -> None:
+    import narada.environment as environment_module
+
+    registry_key = object()
+    registry_key_context = MagicMock()
+    registry_key_context.__enter__.return_value = registry_key
+    fake_winreg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        REG_SZ=1,
+        OpenKey=MagicMock(return_value=registry_key_context),
+        QueryInfoKey=MagicMock(return_value=(0, 1, 0)),
+        EnumValue=MagicMock(return_value=("1", registry_value, 1)),
+    )
+    monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    monkeypatch.setattr(environment_module, "winreg", fake_winreg)
+
+    assert environment_module.is_win_extension_autoload_used(
+        "bhioaidlggjdkheaajakomifblpjmokn"
+    )
+    fake_winreg.OpenKey.assert_called_once_with(
+        fake_winreg.HKEY_LOCAL_MACHINE,
+        r"Software\Policies\Google\Chrome\ExtensionInstallForcelist",
+    )
+    fake_winreg.QueryInfoKey.assert_called_once_with(registry_key)
+    fake_winreg.EnumValue.assert_called_once_with(registry_key, 0)
+
+
+def test_is_win_extension_autoload_used_ignores_unrelated_and_malformed_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    registry_key = object()
+    registry_key_context = MagicMock()
+    registry_key_context.__enter__.return_value = registry_key
+    fake_winreg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        REG_SZ=1,
+        OpenKey=MagicMock(return_value=registry_key_context),
+        QueryInfoKey=MagicMock(return_value=(0, 3, 0)),
+        EnumValue=MagicMock(
+            side_effect=[
+                ("1", "unrelatedextensionid", 1),
+                ("2", 123, 1),
+                ("3", "bhioaidlggjdkheaajakomifblpjmokn", 2),
+            ]
+        ),
+    )
+    monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    monkeypatch.setattr(environment_module, "winreg", fake_winreg)
+
+    assert not environment_module.is_win_extension_autoload_used(
+        "bhioaidlggjdkheaajakomifblpjmokn"
+    )
+    assert fake_winreg.EnumValue.call_count == 3
+
+
+@pytest.mark.parametrize("registry_error", [FileNotFoundError(), PermissionError()])
+def test_is_win_extension_autoload_used_returns_false_for_unreadable_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    registry_error: OSError,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_winreg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        REG_SZ=1,
+        OpenKey=MagicMock(side_effect=registry_error),
+    )
+    monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    monkeypatch.setattr(environment_module, "winreg", fake_winreg)
+
+    assert not environment_module.is_win_extension_autoload_used(
+        "bhioaidlggjdkheaajakomifblpjmokn"
+    )
+
+
+def test_is_win_extension_autoload_used_returns_false_off_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_winreg = SimpleNamespace(OpenKey=MagicMock())
+    monkeypatch.setattr(environment_module.sys, "platform", "linux")
+    monkeypatch.setattr(environment_module, "winreg", fake_winreg)
+
+    assert not environment_module.is_win_extension_autoload_used(
+        "bhioaidlggjdkheaajakomifblpjmokn"
+    )
+    fake_winreg.OpenKey.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_browser_environment_retries_missing_extension_on_windows(
     monkeypatch: pytest.MonkeyPatch,
@@ -445,6 +551,12 @@ async def test_browser_environment_retries_missing_extension_on_windows(
         wait_for_browser_window_id,
     )
     monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    is_extension_autoloaded = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        is_extension_autoloaded,
+    )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
@@ -468,6 +580,7 @@ async def test_browser_environment_retries_missing_extension_on_windows(
     assert page.bring_to_front.await_count == 3
     assert page.reload.await_count == 3
     assert input_calls == []
+    is_extension_autoloaded.assert_called_once_with(env._config.extension_id)
 
 
 @pytest.mark.asyncio
@@ -491,6 +604,12 @@ async def test_browser_environment_prompts_after_windows_extension_retries(
         wait_for_browser_window_id,
     )
     monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    is_extension_autoloaded = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        is_extension_autoloaded,
+    )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
@@ -521,10 +640,11 @@ async def test_browser_environment_prompts_after_windows_extension_retries(
     ]
     assert page.bring_to_front.await_count == 5
     assert page.reload.await_count == 5
+    is_extension_autoloaded.assert_called_once_with(env._config.extension_id)
 
 
 @pytest.mark.asyncio
-async def test_browser_environment_prompts_immediately_for_missing_extension_off_windows(
+async def test_browser_environment_prompts_immediately_when_extension_is_not_autoloaded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import narada.environment as environment_module
@@ -540,7 +660,13 @@ async def test_browser_environment_prompts_immediately_for_missing_extension_off
         "wait_for_browser_window_id_silently",
         wait_for_browser_window_id,
     )
-    monkeypatch.setattr(environment_module.sys, "platform", "linux")
+    monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    is_extension_autoloaded = MagicMock(return_value=False)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        is_extension_autoloaded,
+    )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
@@ -563,6 +689,7 @@ async def test_browser_environment_prompts_immediately_for_missing_extension_off
     sleep.assert_awaited_once_with(0.1)
     page.bring_to_front.assert_awaited_once()
     page.reload.assert_awaited_once()
+    is_extension_autoloaded.assert_called_once_with(env._config.extension_id)
 
 
 @pytest.mark.asyncio
@@ -580,6 +707,12 @@ async def test_browser_environment_does_not_retry_missing_extension_when_noninte
         wait_for_browser_window_id,
     )
     monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    is_extension_autoloaded = MagicMock(return_value=False)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        is_extension_autoloaded,
+    )
     sleep = AsyncMock()
     monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
 
@@ -603,6 +736,113 @@ async def test_browser_environment_does_not_retry_missing_extension_when_noninte
     page.bring_to_front.assert_not_awaited()
     page.reload.assert_not_awaited()
     assert input_calls == []
+    is_extension_autoloaded.assert_called_once_with(env._config.extension_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart_on_autoload_failure", [False, True])
+async def test_browser_environment_exhausts_autoload_retries_when_noninteractive(
+    monkeypatch: pytest.MonkeyPatch,
+    restart_on_autoload_failure: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    wait_for_browser_window_id = AsyncMock(
+        side_effect=NaradaExtensionMissingError("Narada extension missing")
+    )
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        wait_for_browser_window_id,
+    )
+    is_extension_autoloaded = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        is_extension_autoloaded,
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(environment_module.asyncio, "sleep", sleep)
+
+    page = AsyncMock()
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+
+    expected_error = (
+        environment_module._BrowserAutoloadRestartRequired
+        if restart_on_autoload_failure
+        else NaradaExtensionMissingError
+    )
+    with pytest.raises(expected_error):
+        await env._wait_for_browser_window_id_with_lazy_login(
+            page,
+            env._config,
+            "https://app.narada.ai/initialize?t=window-tag",
+            restart_on_autoload_failure=restart_on_autoload_failure,
+        )
+
+    assert wait_for_browser_window_id.await_count == 4
+    assert [call.args[0] for call in sleep.await_args_list] == [3, 0.1] * 3
+    assert page.bring_to_front.await_count == 3
+    assert page.reload.await_count == 3
+    is_extension_autoloaded.assert_called_once_with(env._config.extension_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart_on_autoload_failure", [False, True])
+async def test_browser_environment_handles_closed_initialization_page(
+    monkeypatch: pytest.MonkeyPatch,
+    restart_on_autoload_failure: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    playwright_error = environment_module.PlaywrightError("page closed")
+    monkeypatch.setattr(
+        environment_module._BrowserInitializationHelper,
+        "wait_for_browser_window_id_silently",
+        AsyncMock(side_effect=playwright_error),
+    )
+    autoload_used = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        autoload_used,
+    )
+
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    console_print = MagicMock()
+    monkeypatch.setattr(env._console, "print", console_print)
+
+    expected_error = (
+        environment_module._BrowserAutoloadRestartRequired
+        if restart_on_autoload_failure
+        else SystemExit
+    )
+    with pytest.raises(expected_error) as exc_info:
+        await env._wait_for_browser_window_id_with_lazy_login(
+            AsyncMock(),
+            env._config,
+            "https://app.narada.ai/initialize?t=window-tag",
+            restart_on_autoload_failure=restart_on_autoload_failure,
+        )
+
+    assert console_print.call_args_list[0].args == (
+        "\n[bold red]> Playwright error:[/bold red]",
+        playwright_error,
+    )
+    if restart_on_autoload_failure:
+        assert exc_info.value.__cause__ is playwright_error
+        assert console_print.call_count == 1
+    else:
+        assert exc_info.value.code == 1  # type: ignore[union-attr]
+        assert console_print.call_count == 2
+        assert "automation page was closed" in console_print.call_args.args[0]
+    autoload_used.assert_called_once_with(env._config.extension_id)
 
 
 @pytest.mark.asyncio
@@ -882,6 +1122,190 @@ async def test_open_initialization_uses_target_only_match(
     assert env._browser_process_id == 123
     assert env._browser_window_id == "browser-window-123"
     fix_download_behavior.assert_awaited_once_with(context, side_panel_match)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interactive", [False, True])
+async def test_launch_browser_restarts_once_after_autoload_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    interactive: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    config = BrowserConfig(interactive=interactive)
+    env = BrowserEnvironment(api_key="test-key", config=config)
+    monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    autoload_used = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        autoload_used,
+    )
+
+    first_process = SimpleNamespace(pid=101)
+    second_process = SimpleNamespace(pid=202)
+    popen = MagicMock(side_effect=[first_process, second_process])
+    monkeypatch.setattr(environment_module.subprocess, "Popen", popen)
+
+    second_result = MagicMock(browser_process_id=202)
+    events: list[str] = []
+
+    async def initialize_launched_browser(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        browser_process_id = kwargs["browser_process_id"]
+        events.append(f"initialize-{browser_process_id}")
+        if browser_process_id == first_process.pid:
+            raise environment_module._BrowserAutoloadRestartRequired(
+                "restart first browser"
+            )
+        return second_result
+
+    async def close_browser_for_autoload_restart(
+        _playwright: object,
+        browser_config: BrowserConfig,
+        browser_process: object,
+    ) -> None:
+        assert browser_config is config
+        events.append(f"close-{browser_process.pid}")  # type: ignore[attr-defined]
+
+    initialize = AsyncMock(side_effect=initialize_launched_browser)
+    close_browser = AsyncMock(side_effect=close_browser_for_autoload_restart)
+    monkeypatch.setattr(env, "_initialize_launched_browser", initialize)
+    monkeypatch.setattr(env, "_close_browser_for_autoload_restart", close_browser)
+    logger_info = MagicMock()
+    monkeypatch.setattr(environment_module.logger, "info", logger_info)
+    console_print = MagicMock()
+    monkeypatch.setattr(env._console, "print", console_print)
+
+    result = await env._launch_browser(object(), config)  # type: ignore[arg-type]
+
+    assert result is second_result
+    assert result.browser_process_id == 202
+    assert events == ["initialize-101", "close-101", "initialize-202"]
+    assert popen.call_count == 2
+    autoload_used.assert_called_once_with(config.extension_id)
+    if interactive:
+        assert "Restarting Chrome" in console_print.call_args.args[0]
+        logger_info.assert_not_called()
+    else:
+        console_print.assert_not_called()
+        logger_info.assert_called_once()
+    first_url = initialize.await_args_list[0].kwargs["tagged_initialization_url"]
+    second_url = initialize.await_args_list[1].kwargs["tagged_initialization_url"]
+    assert first_url.startswith(f"{config.initialization_url}?t=")
+    assert second_url.startswith(f"{config.initialization_url}?t=")
+    assert first_url != second_url
+    assert initialize.await_args_list[0].kwargs["restart_on_autoload_failure"] is True
+    assert initialize.await_args_list[1].kwargs["restart_on_autoload_failure"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("autoload_used", [False, True])
+async def test_launch_browser_never_attempts_a_third_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    autoload_used: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    config = BrowserConfig(interactive=False)
+    env = BrowserEnvironment(api_key="test-key", config=config)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        MagicMock(return_value=autoload_used),
+    )
+    restart_error = environment_module._BrowserAutoloadRestartRequired("restart")
+    final_error = NaradaTimeoutError("Timed out waiting for Narada side panel page")
+    launch_once = AsyncMock(
+        side_effect=[restart_error, final_error] if autoload_used else restart_error
+    )
+    monkeypatch.setattr(env, "_launch_browser_once", launch_once)
+
+    expected_error = final_error if autoload_used else restart_error
+    with pytest.raises(type(expected_error)) as exc_info:
+        await env._launch_browser(object(), config)  # type: ignore[arg-type]
+
+    assert exc_info.value is expected_error
+    assert launch_once.await_count == (2 if autoload_used else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initialization_error",
+    [
+        NaradaExtensionUnauthenticatedError("authentication failed"),
+        NaradaUnsupportedBrowserError("unsupported browser"),
+        NaradaTimeoutError("generic initialization timeout"),
+        ValueError("invalid proxy configuration"),
+    ],
+)
+async def test_launch_browser_does_not_restart_unrelated_initialization_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    initialization_error: Exception,
+) -> None:
+    import narada.environment as environment_module
+
+    config = BrowserConfig(interactive=False)
+    env = BrowserEnvironment(api_key="test-key", config=config)
+    monkeypatch.setattr(
+        environment_module,
+        "is_win_extension_autoload_used",
+        MagicMock(return_value=True),
+    )
+    launch_once = AsyncMock(side_effect=initialization_error)
+    monkeypatch.setattr(env, "_launch_browser_once", launch_once)
+
+    with pytest.raises(type(initialization_error)) as exc_info:
+        await env._launch_browser(object(), config)  # type: ignore[arg-type]
+
+    assert exc_info.value is initialization_error
+    launch_once.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cdp_error", "wait_side_effect", "expected_terminate"),
+    [
+        (False, [None], False),
+        (False, [subprocess.TimeoutExpired("chrome", 5), None], True),
+        (True, [None], True),
+    ],
+)
+async def test_close_browser_for_autoload_restart_uses_terminate_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    cdp_error: bool,
+    wait_side_effect: list[object],
+    expected_terminate: bool,
+) -> None:
+    config = BrowserConfig(interactive=False)
+    env = BrowserEnvironment(
+        api_key="test-key",
+        config=config,
+    )
+    cdp_session = AsyncMock()
+    if cdp_error:
+        cdp_session.send.side_effect = RuntimeError("CDP close failed")
+    browser = AsyncMock()
+    browser.new_browser_cdp_session.return_value = cdp_session
+    playwright = SimpleNamespace(
+        chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser))
+    )
+    process = MagicMock(pid=123)
+    process.poll.return_value = None
+    process.wait.side_effect = wait_side_effect
+
+    await env._close_browser_for_autoload_restart(  # type: ignore[arg-type]
+        playwright,
+        config,
+        process,
+    )
+
+    playwright.chromium.connect_over_cdp.assert_awaited_once_with(config.cdp_url)
+    cdp_session.send.assert_awaited_once_with("Browser.close")
+    assert process.terminate.called is expected_terminate
+    assert process.wait.call_count == len(wait_side_effect)
 
 
 @pytest.mark.asyncio
@@ -1978,3 +2402,23 @@ async def test_launch_browser_does_not_reread_known_browser_window_id(
 
     wait_for_browser_window_id.assert_awaited_once()
     assert playwright.chromium.connect_count == (3 if side_panel_appears else 10)
+
+    if not side_panel_appears:
+        wait_for_browser_window_id.reset_mock()
+        find_side_panel_match.reset_mock(side_effect=True)
+        find_side_panel_match.side_effect = [None] * 10
+        playwright.chromium.connect_count = 0
+
+        with pytest.raises(environment_module._BrowserAutoloadRestartRequired):
+            await env._initialize_launched_browser(  # type: ignore[arg-type]
+                playwright,
+                env._config,
+                browser_process_id=123,
+                tagged_initialization_url=state["initialization_url"],
+                proxy_requires_auth=False,
+                restart_on_autoload_failure=True,
+            )
+
+        wait_for_browser_window_id.assert_awaited_once()
+        assert find_side_panel_match.await_count == 10
+        assert playwright.chromium.connect_count == 10
