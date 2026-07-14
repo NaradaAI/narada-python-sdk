@@ -5,7 +5,7 @@ from pathlib import Path
 
 def _default_executable_path() -> str:
     if sys.platform == "win32":
-        return "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+        return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     elif sys.platform == "darwin":
         return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     else:
