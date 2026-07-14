@@ -2882,6 +2882,7 @@ async def _find_side_panel_match(
 ) -> _SidePanelMatch | None:
     side_panel_page = _find_page_by_url(browser, side_panel_url)
     if side_panel_page is not None:
+        print("Narada side panel found via Playwright.")  # TODO: remove
         return _SidePanelMatch(
             page=side_panel_page,
             target_id=None,
@@ -2897,6 +2898,7 @@ async def _find_side_panel_match(
             continue
 
         browser_context_id = target_info.get("browserContextId")
+        print("Narada side panel found via raw CDP.")  # TODO: remove
         return _SidePanelMatch(
             page=None,
             target_id=target_id,
