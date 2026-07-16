@@ -509,15 +509,15 @@ class PressKeyRequest(BaseModel):
     events: list[PressKeyEventItem]
 
 
-ActiveInputAction = Annotated[
+HitlInputAction = Annotated[
     PromptForUserInputRequest | UserApprovalRequest,
     Field(discriminator="name"),
 ]
 
 
-class ActiveInputRequest(BaseModel):
+class HitlInputMetadata(BaseModel):
     input_id: str = Field(alias="inputId")
-    action: ActiveInputAction
+    action: HitlInputAction
 
 
 type ExtensionActionRequest = (
