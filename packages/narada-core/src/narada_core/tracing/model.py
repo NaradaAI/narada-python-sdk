@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     NonNegativeInt,
     TypeAdapter,
@@ -27,8 +28,28 @@ def _normalize_agent_type(agent_type: object) -> str:
 
 
 class OperatorActionTraceItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     url: str
     action: str
+    credits: float | None = None
+    start_ts: NonNegativeInt | None = Field(default=None, alias="startTs")
+    end_ts: NonNegativeInt | None = Field(default=None, alias="endTs")
+    duration_ms: NonNegativeInt | None = Field(default=None, alias="durationMs")
+    children: list[OperatorActionTraceItem] | None = None
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> Self:
+        if self.start_ts is None or self.end_ts is None:
+            return self
+        if self.end_ts < self.start_ts:
+            raise ValueError("endTs must be greater than or equal to startTs")
+        if (
+            self.duration_ms is not None
+            and self.duration_ms != self.end_ts - self.start_ts
+        ):
+            raise ValueError("durationMs must equal endTs minus startTs")
+        return self
 
 
 class GoToUrlTrace(BaseModel):
