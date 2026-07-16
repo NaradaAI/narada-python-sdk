@@ -44,7 +44,10 @@ class OperatorActionTraceItem(BaseModel):
             return self
         if self.end_ts < self.start_ts:
             raise ValueError("endTs must be greater than or equal to startTs")
-        if self.duration_ms is not None and self.duration_ms != self.end_ts - self.start_ts:
+        if (
+            self.duration_ms is not None
+            and self.duration_ms != self.end_ts - self.start_ts
+        ):
             raise ValueError("durationMs must equal endTs minus startTs")
         return self
 

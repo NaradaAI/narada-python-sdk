@@ -5,7 +5,9 @@ from narada_core.tracing.model import parse_action_trace
 from pydantic import ValidationError
 
 
-def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases() -> None:
+def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases() -> (
+    None
+):
     trace = parse_action_trace(
         [
             {
@@ -43,7 +45,9 @@ def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases(
         {"startTs": 1_000, "endTs": 1_240, "durationMs": 0},
     ],
 )
-def test_operator_action_trace_rejects_inconsistent_timing(timing: dict[str, int]) -> None:
+def test_operator_action_trace_rejects_inconsistent_timing(
+    timing: dict[str, int],
+) -> None:
     with pytest.raises(ValidationError):
         parse_action_trace(
             [
