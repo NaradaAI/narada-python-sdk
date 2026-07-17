@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from narada import (
     Agent,
+    AgentKind,
     CloudBrowserEnvironment,
     LambdaEnvironment,
     RemoteBrowserEnvironment,
@@ -833,6 +834,70 @@ async def test_agent_run_exposes_workflow_trace_alias(
 
     assert response.workflow_trace == workflow_trace
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
+
+
+@pytest.mark.parametrize(
+    ("kind", "execution_trace_context"),
+    [
+        (
+            AgentKind.OPERATOR,
+            {
+                "type": "executionTraceContext",
+                "schemaVersion": 1,
+                "traceId": "trace-operator",
+                "segmentId": "segment-operator",
+                "status": "completed",
+            },
+        ),
+        (
+            "/owner@example.com/project/nested.py",
+            {
+                "type": "executionTraceContext",
+                "schemaVersion": 1,
+                "traceId": "trace-parent",
+                "segmentId": "segment-executable",
+                "parentSegmentId": "segment-parent",
+                "status": "completed",
+            },
+        ),
+    ],
+    ids=["operator", "parented-project-executable"],
+)
+@pytest.mark.asyncio
+async def test_agent_run_preserves_execution_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: AgentKind | str,
+    execution_trace_context: dict[str, object],
+) -> None:
+    env = RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        auth_headers={"x-api-key": "test-key"},
+    )
+    monkeypatch.setattr(
+        env,
+        "_dispatch_request",
+        AsyncMock(
+            return_value={
+                "requestId": "request-123",
+                "status": "success",
+                "response": {
+                    "text": "done",
+                    "output": {"type": "text", "content": "done"},
+                    "executionTraceContext": execution_trace_context,
+                },
+                "completedAt": "2026-01-01T00:00:01Z",
+                "usage": {"actions": 0, "credits": 0},
+                "activeInputRequest": None,
+            }
+        ),
+    )
+
+    response = await Agent(environment=env, kind=kind).run("return a trace")
+
+    assert response.execution_trace_context == execution_trace_context
+    assert response.model_dump(by_alias=True)["executionTraceContext"] == (
+        execution_trace_context
+    )
 
 
 @pytest.mark.asyncio

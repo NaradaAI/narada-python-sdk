@@ -218,6 +218,7 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def _dispatch_request(
