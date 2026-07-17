@@ -527,6 +527,83 @@ async def test_agent_run_exposes_workflow_trace_alias(
     ]
 
 
+@pytest.mark.parametrize(
+    ("kind", "parent_request_id", "execution_trace_context"),
+    [
+        (
+            "/Operator",
+            None,
+            {
+                "type": "executionTraceContext",
+                "schemaVersion": 1,
+                "traceId": "trace-operator",
+                "segmentId": "segment-operator",
+                "status": "completed",
+            },
+        ),
+        (
+            "/owner@example.com/project/nested.py",
+            "parent-request-123",
+            {
+                "type": "executionTraceContext",
+                "schemaVersion": 1,
+                "traceId": "trace-parent",
+                "segmentId": "segment-executable",
+                "parentSegmentId": "segment-parent",
+                "status": "completed",
+            },
+        ),
+    ],
+    ids=["operator", "parented-project-executable"],
+)
+@pytest.mark.asyncio
+async def test_agent_run_preserves_execution_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    parent_request_id: str | None,
+    execution_trace_context: dict[str, object],
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "executionTraceContext": execution_trace_context,
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    monkeypatch.setattr(
+        builtins, "_narada_request_id", parent_request_id, raising=False
+    )
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    response = await narada_pkg.Agent(environment=env, kind=kind).run("return a trace")
+
+    assert response.execution_trace_context == execution_trace_context
+    assert response.model_dump(by_alias=True)["executionTraceContext"] == (
+        execution_trace_context
+    )
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    if parent_request_id is None:
+        assert "parentRequestId" not in payload
+    else:
+        assert payload["parentRequestId"] == parent_request_id
+
+
 @pytest.mark.asyncio
 async def test_agent_run_emits_combined_critic_workflow_trace(
     monkeypatch: pytest.MonkeyPatch,
