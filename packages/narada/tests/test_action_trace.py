@@ -104,3 +104,44 @@ def test_operator_action_trace_requires_timing_on_nested_items() -> None:
                 }
             ]
         )
+
+
+def test_operator_action_trace_accepts_timed_multiple_actions_and_done_event() -> None:
+    trace = parse_action_trace(
+        [
+            {
+                "url": "https://example.com/form",
+                "action": "Multi-action",
+                "startTs": 1_000,
+                "endTs": 1_240,
+                "durationMs": 240,
+                "children": [
+                    {
+                        "url": "https://example.com/form",
+                        "action": "Clicked Save",
+                        "startTs": 1_010,
+                        "endTs": 1_100,
+                        "durationMs": 90,
+                    },
+                    {
+                        "url": "https://example.com/form",
+                        "action": "Typed a name",
+                        "startTs": 1_100,
+                        "endTs": 1_220,
+                        "durationMs": 120,
+                    },
+                ],
+            },
+            {
+                "url": "https://example.com/form",
+                "action": "Done: saved",
+                "startTs": 1_250,
+                "endTs": 1_250,
+                "durationMs": 0,
+            },
+        ]
+    )
+
+    assert trace[0].children is not None
+    assert trace[0].children[1].duration_ms == 120
+    assert trace[1].duration_ms == 0
