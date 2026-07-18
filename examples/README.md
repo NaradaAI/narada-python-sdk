@@ -61,7 +61,6 @@ uv run python examples/01_getting_started/01_run_your_first_task.py
 | [`03_control_a_browser_on_another_machine.py`](05_browser_setups/03_control_a_browser_on_another_machine.py) | Drive a browser window running on a different machine by its window ID. |
 | [`04_route_traffic_through_a_proxy.py`](05_browser_setups/04_route_traffic_through_a_proxy.py) | Route all browser traffic through an HTTP/SOCKS proxy. |
 | [`05_split_script_browser_handoff.py`](05_browser_setups/05_split_script_browser_handoff.py) | Start a browser in one process, then reuse and close it from later processes. |
-| [`06_verify_operator_action_timing.py`](05_browser_setups/06_verify_operator_action_timing.py) | Verify production Operator action-trace timing with a disposable cloud browser. |
 
 ## 06 — Page actions
 
