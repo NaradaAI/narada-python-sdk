@@ -60,11 +60,47 @@ def test_operator_action_trace_rejects_inconsistent_timing(
         )
 
 
-def test_operator_action_trace_accepts_legacy_untimed_rows() -> None:
-    trace = parse_action_trace(
-        [{"url": "https://example.com/form", "action": "Clicked Save"}]
-    )
+@pytest.mark.parametrize(
+    "timing",
+    [
+        {},
+        {"endTs": 1_240, "durationMs": 240},
+        {"startTs": 1_000, "durationMs": 240},
+        {"startTs": 1_000, "endTs": 1_240},
+        {"startTs": None, "endTs": 1_240, "durationMs": 240},
+    ],
+)
+def test_operator_action_trace_requires_complete_timing(
+    timing: dict[str, int | None],
+) -> None:
+    with pytest.raises(ValidationError):
+        parse_action_trace(
+            [
+                {
+                    "url": "https://example.com/form",
+                    "action": "Clicked Save",
+                    **timing,
+                }
+            ]
+        )
 
-    assert trace[0].start_ts is None
-    assert trace[0].end_ts is None
-    assert trace[0].duration_ms is None
+
+def test_operator_action_trace_requires_timing_on_nested_items() -> None:
+    with pytest.raises(ValidationError):
+        parse_action_trace(
+            [
+                {
+                    "url": "https://example.com/form",
+                    "action": "Clicked Save",
+                    "startTs": 1_000,
+                    "endTs": 1_240,
+                    "durationMs": 240,
+                    "children": [
+                        {
+                            "url": "https://example.com/form",
+                            "action": "Validated Save",
+                        }
+                    ],
+                }
+            ]
+        )
