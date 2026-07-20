@@ -20,9 +20,9 @@ def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases(
                     {
                         "url": "https://example.com/form",
                         "action": "Validated Save",
-                        "startTs": 1_050,
+                        "startTs": 1_000,
                         "endTs": 1_150,
-                        "durationMs": 100,
+                        "durationMs": 150,
                     }
                 ],
             }
@@ -34,7 +34,7 @@ def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases(
     assert item.end_ts == 1_240
     assert item.duration_ms == 240
     assert item.children is not None
-    assert item.children[0].duration_ms == 100
+    assert item.children[0].duration_ms == 150
     assert item.model_dump(by_alias=True, exclude_none=True)["startTs"] == 1_000
 
 
@@ -119,16 +119,16 @@ def test_operator_action_trace_accepts_timed_multiple_actions_and_done_event() -
                     {
                         "url": "https://example.com/form",
                         "action": "Clicked Save",
-                        "startTs": 1_010,
+                        "startTs": 1_000,
                         "endTs": 1_100,
-                        "durationMs": 90,
+                        "durationMs": 100,
                     },
                     {
                         "url": "https://example.com/form",
                         "action": "Typed a name",
-                        "startTs": 1_100,
+                        "startTs": 1_000,
                         "endTs": 1_220,
-                        "durationMs": 120,
+                        "durationMs": 220,
                     },
                 ],
             },
@@ -143,5 +143,5 @@ def test_operator_action_trace_accepts_timed_multiple_actions_and_done_event() -
     )
 
     assert trace[0].children is not None
-    assert trace[0].children[1].duration_ms == 120
+    assert trace[0].children[1].duration_ms == 220
     assert trace[1].duration_ms == 0
