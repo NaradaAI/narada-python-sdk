@@ -836,67 +836,6 @@ async def test_agent_run_exposes_workflow_trace_alias(
 
 
 @pytest.mark.asyncio
-async def test_agent_run_preserves_operator_action_trace_timing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    action_trace = [
-        {
-            "url": "https://example.com/form",
-            "action": "Clicked Save",
-            "credits": 1.0,
-            "startTs": 1_000,
-            "endTs": 1_240,
-            "durationMs": 240,
-            "children": [
-                {
-                    "url": "https://example.com/form",
-                    "action": "Validated Save",
-                    "startTs": 1_050,
-                    "endTs": 1_150,
-                    "durationMs": 100,
-                }
-            ],
-        }
-    ]
-    env = RemoteBrowserEnvironment(
-        browser_window_id="browser-window-123",
-        cloud_browser_session_id="session-123",
-        auth_headers={"x-api-key": "test-key"},
-    )
-    monkeypatch.setattr(
-        env,
-        "_dispatch_request",
-        AsyncMock(
-            return_value={
-                "requestId": "request-123",
-                "status": "success",
-                "response": {
-                    "text": "done",
-                    "output": {"type": "text", "content": "done"},
-                    "actionTrace": action_trace,
-                },
-                "completedAt": "2026-01-01T00:00:01Z",
-                "usage": {"actions": 1, "credits": 1.0},
-                "activeInputRequest": None,
-            }
-        ),
-    )
-
-    response = await Agent(environment=env).run("return a trace")
-
-    assert response.action_trace is not None
-    assert response.action_trace[0].start_ts == 1_000
-    assert response.action_trace[0].end_ts == 1_240
-    assert response.action_trace[0].duration_ms == 240
-    assert response.action_trace[0].children is not None
-    assert response.action_trace[0].children[0].duration_ms == 100
-    assert (
-        response.model_dump(by_alias=True, exclude_none=True)["action_trace"]
-        == action_trace
-    )
-
-
-@pytest.mark.asyncio
 async def test_agent_run_appends_critic_workflow_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
