@@ -20,9 +20,9 @@ def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases(
                     {
                         "url": "https://example.com/form",
                         "action": "Validated Save",
-                        "startTs": 1_000,
+                        "startTs": 1_050,
                         "endTs": 1_150,
-                        "durationMs": 150,
+                        "durationMs": 100,
                     }
                 ],
             }
@@ -34,7 +34,7 @@ def test_operator_action_trace_uses_pythonic_timing_attributes_and_wire_aliases(
     assert item.end_ts == 1_240
     assert item.duration_ms == 240
     assert item.children is not None
-    assert item.children[0].duration_ms == 150
+    assert item.children[0].duration_ms == 100
     assert item.model_dump(by_alias=True, exclude_none=True)["startTs"] == 1_000
 
 
