@@ -98,6 +98,7 @@ class OperatorActionTraceItem(TypedDict):
     action: str
     startTs: str
     endTs: str
+    durationMs: int
 
 
 class GoToUrlTrace(TypedDict):

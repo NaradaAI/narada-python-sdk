@@ -32,6 +32,7 @@ class OperatorActionTraceItem(BaseModel):
     action: str
     start_ts: str = Field(alias="startTs")
     end_ts: str = Field(alias="endTs")
+    duration_ms: NonNegativeInt = Field(alias="durationMs")
 
     @model_validator(mode="after")
     def _check_timestamp_range(self) -> OperatorActionTraceItem:
@@ -41,6 +42,14 @@ class OperatorActionTraceItem(BaseModel):
             raise ValueError(
                 f"OperatorActionTraceItem: endTs ({self.end_ts}) must be >= "
                 f"startTs ({self.start_ts})"
+            )
+        expected_duration_ms = round(
+            (end_timestamp - start_timestamp).total_seconds() * 1000
+        )
+        if self.duration_ms != expected_duration_ms:
+            raise ValueError(
+                f"OperatorActionTraceItem: durationMs ({self.duration_ms}) must equal "
+                f"endTs - startTs ({expected_duration_ms})"
             )
         return self
 
