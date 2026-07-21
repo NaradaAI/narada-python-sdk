@@ -14,17 +14,22 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
+import socket
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import NoReturn
 
 from narada import Agent, BrowserConfig, BrowserEnvironment
 from narada_core.tracing.model import OperatorActionTraceItem
+from pydantic import ValidationError
 
 PRODUCTION_API_BASE_URL = "https://api.narada.ai/fast/v2"
 DEFAULT_LOCAL_API_BASE_URL = "http://127.0.0.1:8000/fast/v2"
 DEFAULT_LOCAL_FRONTEND_URL = "http://localhost:3000"
 DEFAULT_DEV_EXTENSION_ID = "ijdopnjleolkjakldkjplfhniiohnccf"
+DEFAULT_CDP_PORT = 9222
 DEFAULT_PROMPT = (
     "Go to https://example.com, read the page heading, and tell me the heading."
 )
@@ -81,6 +86,30 @@ def _format_timestamp(timestamp_ms: int) -> str:
     return timestamp.isoformat(timespec="milliseconds")
 
 
+def _is_cdp_browser_running() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", DEFAULT_CDP_PORT), timeout=0.25):
+            return True
+    except OSError:
+        return False
+
+
+def _raise_clear_timestamp_error(error: ValidationError) -> NoReturn:
+    missing_timestamps = any(
+        item["type"] == "missing"
+        and item["loc"]
+        and item["loc"][-1] in {"startTs", "endTs"}
+        for item in error.errors()
+    )
+    if missing_timestamps:
+        raise RuntimeError(
+            "The local caddie process returned an action trace without timestamps. "
+            "Restart the backend after switching to "
+            "sp/operator-action-trace-timestamps, then run this script again."
+        ) from error
+    raise error
+
+
 def _validate_trace(
     trace: Sequence[object] | None,
 ) -> list[OperatorActionTraceItem]:
@@ -121,17 +150,25 @@ def _validate_trace(
 async def _run(args: argparse.Namespace) -> None:
     os.environ["NARADA_API_BASE_URL"] = args.base_url.rstrip("/")
 
+    attach_to_existing = _is_cdp_browser_running()
+    if attach_to_existing:
+        print(f"Reusing the local Chrome process on CDP port {DEFAULT_CDP_PORT}.")
+
     environment = BrowserEnvironment(
         config=BrowserConfig(
             initialization_url=f"{args.frontend_url.rstrip('/')}/initialize",
             extension_id=args.extension_id,
         ),
+        attach_to_existing=attach_to_existing,
     )
     agent = Agent(environment=environment)
     run_started_ms = int(time.time() * 1000)
 
     try:
-        response = await agent.run(prompt=args.prompt, timeout=args.timeout)
+        try:
+            response = await agent.run(prompt=args.prompt, timeout=args.timeout)
+        except ValidationError as error:
+            _raise_clear_timestamp_error(error)
         run_finished_ms = int(time.time() * 1000)
         actions = _validate_trace(response.action_trace)
 
@@ -158,7 +195,13 @@ async def _run(args: argparse.Namespace) -> None:
             f"client elapsed={run_finished_ms - run_started_ms} ms."
         )
     finally:
+        owned_browser_pid = environment.browser_process_id
         await environment.close(timeout=30)
+        if owned_browser_pid is not None:
+            try:
+                os.kill(owned_browser_pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
 
 def main() -> None:
