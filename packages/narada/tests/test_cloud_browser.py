@@ -844,7 +844,7 @@ async def test_agent_run_appends_critic_workflow_trace(
         "workflowName": "Main Workflow",
         "runtime": "gui",
         "status": "success",
-        "startTs": 100,
+        "startTs": "2026-01-01T00:00:00.000Z",
         "children": [],
     }
     critic_workflow_trace = {
@@ -852,7 +852,7 @@ async def test_agent_run_appends_critic_workflow_trace(
         "workflowName": "Critic Workflow",
         "runtime": "gui",
         "status": "success",
-        "startTs": 200,
+        "startTs": "2026-01-01T00:00:01.000Z",
         "children": [],
     }
     env = CloudBrowserEnvironment(

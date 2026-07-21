@@ -96,8 +96,8 @@ _MaybeStructuredOutput = TypeVar("_MaybeStructuredOutput", bound=BaseModel | Non
 class OperatorActionTraceItem(TypedDict):
     url: str
     action: str
-    startTs: int
-    endTs: int
+    startTs: str
+    endTs: str
 
 
 class GoToUrlTrace(TypedDict):

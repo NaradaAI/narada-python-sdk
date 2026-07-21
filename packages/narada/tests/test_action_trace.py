@@ -11,28 +11,40 @@ def test_parse_operator_action_trace_exposes_timestamps() -> None:
             {
                 "url": "https://example.com",
                 "action": "Clicked Submit",
-                "startTs": 1_000,
-                "endTs": 2_500,
+                "startTs": "2026-07-20T17:00:00.000Z",
+                "endTs": "2026-07-20T17:00:01.500Z",
             }
         ]
     )
 
     item = trace[0]
     assert isinstance(item, OperatorActionTraceItem)
-    assert item.start_ts == 1_000
-    assert item.end_ts == 2_500
+    assert item.start_ts == "2026-07-20T17:00:00.000Z"
+    assert item.end_ts == "2026-07-20T17:00:01.500Z"
 
 
 @pytest.mark.parametrize(
     "timestamps",
     [
-        {"startTs": 1_000},
-        {"endTs": 2_000},
-        {"startTs": 2_000, "endTs": 1_000},
+        {"startTs": "2026-07-20T17:00:00.000Z"},
+        {"endTs": "2026-07-20T17:00:01.000Z"},
+        {
+            "startTs": "2026-07-20T17:00:02.000Z",
+            "endTs": "2026-07-20T17:00:01.000Z",
+        },
+        {
+            "startTs": "not-a-timestamp",
+            "endTs": "2026-07-20T17:00:01.000Z",
+        },
+        {
+            "startTs": "2026-07-20T17:00:00",
+            "endTs": "2026-07-20T17:00:01",
+        },
+        {"startTs": 1_000, "endTs": 2_000},
     ],
 )
 def test_operator_action_trace_rejects_invalid_timestamp_ranges(
-    timestamps: dict[str, int],
+    timestamps: dict[str, str | int],
 ) -> None:
     with pytest.raises(ValidationError):
         OperatorActionTraceItem(
@@ -40,3 +52,14 @@ def test_operator_action_trace_rejects_invalid_timestamp_ranges(
             action="Clicked Submit",
             **timestamps,
         )
+
+
+def test_operator_action_trace_accepts_explicit_utc_offset() -> None:
+    item = OperatorActionTraceItem(
+        url="https://example.com",
+        action="Clicked Submit",
+        startTs="2026-07-20T17:00:00.000+00:00",
+        endTs="2026-07-20T17:00:01.000+00:00",
+    )
+
+    assert item.start_ts.endswith("+00:00")
