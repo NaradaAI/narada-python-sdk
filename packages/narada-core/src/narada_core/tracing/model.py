@@ -30,9 +30,24 @@ def _normalize_agent_type(agent_type: object) -> str:
 class OperatorActionTraceItem(BaseModel):
     url: str
     action: str
-    start_ts: str = Field(alias="startTs")
-    end_ts: str = Field(alias="endTs")
-    duration_ms: NonNegativeInt = Field(alias="durationMs")
+    start_ts: str = Field(
+        alias="startTs",
+        description=(
+            "UTC boundary inherited from the prior Operator turn completion, or "
+            "from the first generate request receipt for the first turn."
+        ),
+    )
+    end_ts: str = Field(
+        alias="endTs",
+        description=(
+            "UTC completion boundary: backend coroutine return or receipt of the "
+            "next frontend acknowledgement."
+        ),
+    )
+    duration_ms: NonNegativeInt = Field(
+        alias="durationMs",
+        description="Elapsed milliseconds between startTs and endTs.",
+    )
 
     @model_validator(mode="after")
     def _check_timestamp_range(self) -> OperatorActionTraceItem:
