@@ -866,6 +866,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        test: bool = False,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -892,6 +893,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        test: bool = False,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -918,6 +920,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        test: bool = False,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -944,6 +947,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        test: bool = False,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -970,6 +974,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        test: bool = False,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -988,9 +993,12 @@ class Environment(ABC):
             )
         deadline = time.monotonic() + timeout
 
-        agent_prefix = (
-            agent.prompt_prefix() if isinstance(agent, AgentKind) else f"{agent} "
-        )
+        if isinstance(agent, AgentKind):
+            agent_prefix = (
+                "" if prompt.lstrip().startswith("/") else agent.prompt_prefix()
+            )
+        else:
+            agent_prefix = f"{agent} "
         body: dict[str, Any] = {
             "prompt": agent_prefix + prompt,
             "timeZone": time_zone,
@@ -1046,6 +1054,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if test:
+            body["test"] = True
 
         try:
             seen_input_ids: set[str] = set()

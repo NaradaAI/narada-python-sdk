@@ -477,6 +477,43 @@ async def test_agent_run_forwards_clear_chat(
 
 
 @pytest.mark.asyncio
+async def test_agent_run_forwards_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "activeInputRequest": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).run(
+        "/agentMaker repair workflow", test=True
+    )
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["prompt"] == "/agentMaker repair workflow"
+    assert payload["test"] is True
+
+
+@pytest.mark.asyncio
 async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
