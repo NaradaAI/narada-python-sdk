@@ -536,7 +536,7 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
         "workflowName": "Main Workflow",
         "runtime": "gui",
         "status": "success",
-        "startTs": "2026-01-01T00:00:00.000Z",
+        "startTs": 100,
         "children": [],
     }
     critic_workflow_trace = {
@@ -544,7 +544,7 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
         "workflowName": "Critic Workflow",
         "runtime": "gui",
         "status": "success",
-        "startTs": "2026-01-01T00:00:01.000Z",
+        "startTs": 200,
         "children": [],
     }
     pyfetch = AsyncMock(
