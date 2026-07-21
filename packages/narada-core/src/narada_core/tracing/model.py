@@ -4,7 +4,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     NonNegativeInt,
     TypeAdapter,
@@ -28,22 +27,14 @@ def _normalize_agent_type(agent_type: object) -> str:
 
 
 class OperatorActionTraceItem(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     url: str
     action: str
-    start_ts: NonNegativeInt | None = Field(default=None, alias="startTs")
-    end_ts: NonNegativeInt | None = Field(default=None, alias="endTs")
+    start_ts: NonNegativeInt = Field(alias="startTs")
+    end_ts: NonNegativeInt = Field(alias="endTs")
 
     @model_validator(mode="after")
-    def _check_timestamp_pair(self) -> OperatorActionTraceItem:
-        if (self.start_ts is None) != (self.end_ts is None):
-            raise ValueError("Operator action timestamps must be provided together")
-        if (
-            self.start_ts is not None
-            and self.end_ts is not None
-            and self.end_ts < self.start_ts
-        ):
+    def _check_timestamp_range(self) -> OperatorActionTraceItem:
+        if self.end_ts < self.start_ts:
             raise ValueError(
                 f"OperatorActionTraceItem: endTs ({self.end_ts}) must be >= "
                 f"startTs ({self.start_ts})"

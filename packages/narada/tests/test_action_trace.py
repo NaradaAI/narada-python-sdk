@@ -23,17 +23,6 @@ def test_parse_operator_action_trace_exposes_timestamps() -> None:
     assert item.end_ts == 2_500
 
 
-def test_parse_operator_action_trace_accepts_legacy_items_without_timestamps() -> None:
-    trace = parse_action_trace(
-        [{"url": "https://example.com", "action": "Clicked Submit"}]
-    )
-
-    item = trace[0]
-    assert isinstance(item, OperatorActionTraceItem)
-    assert item.start_ts is None
-    assert item.end_ts is None
-
-
 @pytest.mark.parametrize(
     "timestamps",
     [
