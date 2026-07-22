@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -29,6 +30,38 @@ def _normalize_agent_type(agent_type: object) -> str:
 class OperatorActionTraceItem(BaseModel):
     url: str
     action: str
+    start_ts: str = Field(alias="startTs")
+    end_ts: str = Field(alias="endTs")
+    duration_ms: NonNegativeInt = Field(alias="durationMs")
+
+    @model_validator(mode="after")
+    def _check_timestamp_range(self) -> OperatorActionTraceItem:
+        start_timestamp = _parse_utc_iso_timestamp(self.start_ts, field_name="startTs")
+        end_timestamp = _parse_utc_iso_timestamp(self.end_ts, field_name="endTs")
+        if end_timestamp < start_timestamp:
+            raise ValueError(
+                f"OperatorActionTraceItem: endTs ({self.end_ts}) must be >= "
+                f"startTs ({self.start_ts})"
+            )
+        expected_duration_ms = round(
+            (end_timestamp - start_timestamp).total_seconds() * 1000
+        )
+        if self.duration_ms != expected_duration_ms:
+            raise ValueError(
+                f"OperatorActionTraceItem: durationMs ({self.duration_ms}) must equal "
+                f"endTs - startTs ({expected_duration_ms})"
+            )
+        return self
+
+
+def _parse_utc_iso_timestamp(value: str, *, field_name: str) -> datetime:
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{field_name} must be an ISO 8601 timestamp") from error
+    if timestamp.utcoffset() != timedelta(0):
+        raise ValueError(f"{field_name} must be a UTC ISO 8601 timestamp")
+    return timestamp
 
 
 class GoToUrlTrace(BaseModel):
