@@ -287,6 +287,9 @@ async def test_remote_browser_environment_close_stops_cloud_session(
 async def test_remote_browser_environment_dispatch_omits_parent_run_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv(
+        "NARADA_REMOTE_DISPATCH_TARGET_CLIENT_INSTANCE_ID", "local-client-instance"
+    )
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "req-123"}),
@@ -316,6 +319,7 @@ async def test_remote_browser_environment_dispatch_omits_parent_run_ids(
     assert payload["cloudBrowserSessionId"] == "session-123"
     assert payload["prompt"] == "/Operator hello from cloud browser"
     assert "parentRunIds" not in payload
+    assert "targetClientInstanceId" not in payload
 
 
 @pytest.mark.asyncio
@@ -1189,6 +1193,9 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
     monkeypatch.setenv("NARADA_API_KEY", "test-api-key")
     monkeypatch.setenv("NARADA_BROWSER_WINDOW_ID", "browser-window-123")
     monkeypatch.setenv(
+        "NARADA_REMOTE_DISPATCH_TARGET_CLIENT_INSTANCE_ID", "client-instance-123"
+    )
+    monkeypatch.setenv(
         "NARADA_EXECUTION_TRACE_CONTEXT",
         json.dumps(
             {
@@ -1239,6 +1246,8 @@ async def test_local_browser_environment_dispatch_uses_latest_parent_run_ids(
     second_post = json.loads(pyfetch.await_args_list[3].kwargs["body"])
     assert first_post["parentRunIds"] == ["run-a"]
     assert second_post["parentRunIds"] == ["run-b", "run-c"]
+    assert first_post["targetClientInstanceId"] == "client-instance-123"
+    assert second_post["targetClientInstanceId"] == "client-instance-123"
     assert first_post["executionTraceContext"] == {
         "type": "executionTraceInheritanceContext",
         "schemaVersion": 1,
