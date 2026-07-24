@@ -24,10 +24,7 @@ class AgentKind(Enum):
 
 
 class ReasoningEffort(StrEnum):
-    """Controls how much reasoning the Core Agent uses before responding.
-
-    Only `AgentKind.CORE_AGENT` supports this option; other agents raise `ValueError`.
-    """
+    """Controls how much reasoning a built-in Narada agent uses before responding."""
 
     NONE = "none"
     LOW = "low"
