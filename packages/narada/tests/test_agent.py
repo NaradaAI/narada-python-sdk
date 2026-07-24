@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from narada import Agent, Environment
+from narada import Agent, AgentKind, Environment, ReasoningEffort
 
 
 class _FakeResponse:
@@ -100,6 +100,46 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator first",
         "/Operator second",
     ]
+    assert all("reasoningMode" not in body for body in fake_session.dispatched_bodies)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "reasoning", "expected_prompt"),
+    [
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
+    ],
+)
+async def test_agent_run_forwards_reasoning_for_every_agent_kind(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: AgentKind | str,
+    reasoning: ReasoningEffort,
+    expected_prompt: str,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(environment=_CountingEnvironment(), kind=kind).run(
+        "analyze",
+        reasoning=reasoning,
+    )
+
+    assert fake_session.dispatched_bodies[0]["prompt"] == expected_prompt
+    assert fake_session.dispatched_bodies[0]["reasoningMode"] == reasoning.value
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
+    agent = Agent(environment=_CountingEnvironment(), kind="/owner/custom-agent")
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await agent.run("analyze", reasoning=ReasoningEffort.HIGH)
 
 
 @pytest.mark.asyncio

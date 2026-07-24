@@ -412,67 +412,13 @@ class Environment(ABC):
             "mimeType": mime_type,
         }
 
-    # `reasoning` is only valid with the Core Agent; these two overloads make
-    # that constraint type-checkable. Generic-agent calls fall through to the
-    # general overloads below, which do not accept a `reasoning` argument.
-    @overload
-    async def _dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Literal[AgentKind.CORE_AGENT],
-        reasoning: ReasoningEffort | None = None,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: None = None,
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        attachment: File | IO[Any] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        callback_headers: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        timeout: int = 1000,
-    ) -> Response[None]: ...
-
-    @overload
-    async def _dispatch_request(
-        self,
-        *,
-        prompt: str,
-        agent: Literal[AgentKind.CORE_AGENT],
-        reasoning: ReasoningEffort | None = None,
-        clear_chat: bool | None = None,
-        generate_gif: bool | None = None,
-        output_schema: type[_StructuredOutput],
-        previous_request_id: str | None = None,
-        chat_history: list[RemoteDispatchChatHistoryItem] | None = None,
-        additional_context: dict[str, str] | None = None,
-        attachment: File | IO[Any] | None = None,
-        time_zone: str = "America/Los_Angeles",
-        user_resource_credentials: UserResourceCredentials | None = None,
-        mcp_servers: list[McpServer] | None = None,
-        secret_variables: dict[str, str] | None = None,
-        input_variables: Mapping[str, Any] | None = None,
-        callback_url: str | None = None,
-        callback_secret: str | None = None,
-        callback_headers: dict[str, Any] | None = None,
-        on_input_required: InputRequiredCallback | None = None,
-        timeout: int = 1000,
-    ) -> Response[_StructuredOutput]: ...
-
     @overload
     async def _dispatch_request(
         self,
         *,
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -499,6 +445,7 @@ class Environment(ABC):
         *,
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
+        reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -548,16 +495,8 @@ class Environment(ABC):
 
         The higher-level `Agent.run` method should be preferred for most use cases.
         """
-        # The overloads enforce this at type-check time when callers use
-        # ``AgentKind.CORE_AGENT``; the runtime check covers string-form agents
-        # (``agent="..."``) and callers without a type checker.
         await self._ensure_initialized()
 
-        if reasoning is not None and agent is not AgentKind.CORE_AGENT:
-            raise ValueError(
-                "`reasoning` is only supported with `agent=AgentKind.CORE_AGENT` "
-                f"(got agent={agent!r})"
-            )
         # Trace instrumentation: the entire method body is wrapped so that any
         # exit (successful return, timeout, or non-timeout failure) produces a
         # ``subAgentCall`` trace event with matching status. See `_trace.py`.

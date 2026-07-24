@@ -83,8 +83,6 @@ class Agent(Generic[_StructuredOutput]):
         self.environment = environment
         self.kind = kind
 
-    # `reasoning` is only valid with the Core Agent; these two overloads make
-    # that constraint type-checkable when callers construct a core-agent instance.
     @overload
     async def run(
         self,
@@ -162,6 +160,12 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
+        if reasoning is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`reasoning` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own reasoning per workflow step"
+            )
+
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
             clear_chat=clear_chat,
@@ -254,70 +258,29 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
-        # Branch on `reasoning` so each call site binds a single, typed overload
-        # of `_dispatch_request`. The validation also lives in `_dispatch_request`
-        # itself (defense in depth + reachable when callers go straight to the
-        # low-level API), so the redundancy here is intentional.
-        if reasoning is None:
-            remote_dispatch_response = await self.environment._dispatch_request(
-                prompt=prompt,
-                agent=dispatch_agent,
-                clear_chat=clear_chat,
-                generate_gif=generate_gif,
-                output_schema=output_schema,
-                previous_request_id=previous_request_id,
-                chat_history=chat_history,
-                additional_context=additional_context,
-                attachment=attachment,
-                time_zone=time_zone,
-                user_resource_credentials=user_resource_credentials,
-                mcp_servers=mcp_servers,
-                secret_variables=secret_variables,
-                input_variables=input_variables,
-                callback_url=callback_url,
-                callback_secret=callback_secret,
-                callback_headers=callback_headers,
-                on_input_required=on_input_required,
-                critic_context=critic_context,
-                timeout=timeout,
-            )
-        else:
-            if dispatch_agent is not AgentKind.CORE_AGENT:
-                raise ValueError(
-                    "`reasoning` is only supported with `kind=AgentKind.CORE_AGENT` "
-                    f"(got kind={dispatch_agent!r})"
-                )
-            # The CORE_AGENT-specific overloads of `_dispatch_request` split on
-            # a narrower `output_schema` discriminator (None vs `type[T]`),
-            # which the impl's `type[BaseModel] | None` union doesn't cleanly
-            # narrow into without further branching. The public `run()`
-            # overloads above already give callers correct return-type
-            # narrowing, so the internal forward call bypasses overload
-            # disambiguation on this single dimension.
-            remote_dispatch_response = await self.environment._dispatch_request(  # pyright: ignore[reportCallIssue]
-                prompt=prompt,
-                agent=dispatch_agent,
-                reasoning=reasoning,
-                clear_chat=clear_chat,
-                generate_gif=generate_gif,
-                output_schema=output_schema,  # pyright: ignore[reportArgumentType]
-                previous_request_id=previous_request_id,
-                chat_history=chat_history,
-                additional_context=additional_context,
-                attachment=attachment,
-                time_zone=time_zone,
-                user_resource_credentials=user_resource_credentials,
-                mcp_servers=mcp_servers,
-                secret_variables=secret_variables,
-                input_variables=input_variables,
-                callback_url=callback_url,
-                callback_secret=callback_secret,
-                callback_headers=callback_headers,
-                on_input_required=on_input_required,
-                critic_context=critic_context,
-                timeout=timeout,
-            )
-        return remote_dispatch_response
+        return await self.environment._dispatch_request(
+            prompt=prompt,
+            agent=dispatch_agent,
+            reasoning=reasoning,
+            clear_chat=clear_chat,
+            generate_gif=generate_gif,
+            output_schema=output_schema,
+            previous_request_id=previous_request_id,
+            chat_history=chat_history,
+            additional_context=additional_context,
+            attachment=attachment,
+            time_zone=time_zone,
+            user_resource_credentials=user_resource_credentials,
+            mcp_servers=mcp_servers,
+            secret_variables=secret_variables,
+            input_variables=input_variables,
+            callback_url=callback_url,
+            callback_secret=callback_secret,
+            callback_headers=callback_headers,
+            on_input_required=on_input_required,
+            critic_context=critic_context,
+            timeout=timeout,
+        )
 
     def _browser_environment(self) -> BaseBrowserEnvironment:
         if not isinstance(self.environment, BaseBrowserEnvironment):
