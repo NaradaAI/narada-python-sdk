@@ -72,16 +72,7 @@ class WorkflowSpanData(SpanData):
     input_summary: str | None = None
     output_summary: str | None = None
     output_names: list[str] | None = None
-    outcome: Literal["completed", "end_tree"] | None = None
-
-
-class RemoteWorkflowRunLink(_OmitNoneModel):
-    workflow_id: str
-    workflow_name: str
-    invocation_index: NonNegativeInt | None = None
-    request_id: str | None = None
-    status: Literal["success", "error", "aborted", "skipped"]
-    error_summary: str | None = None
+    termination_mode: Literal["completed", "end_tree"] | None = None
 
 
 class GuiStepSpanDataBase(SpanData):
@@ -170,7 +161,7 @@ class WriteLocalFilesystemStepData(GuiStepSpanDataBase):
 
 class EndStepData(GuiStepSpanDataBase):
     type: Literal["gui_step.end"] = "gui_step.end"
-    outcome: Literal["end", "end_tree"]
+    termination_mode: Literal["end", "end_tree"]
     result_status: Literal["success", "error"] | None = None
     message: str | None = None
 
@@ -333,14 +324,12 @@ class RunCustomAgentStepData(GuiStepSpanDataBase):
     type: Literal["gui_step.run_custom_agent"] = "gui_step.run_custom_agent"
     workflow_id: str
     workflow_name: str
-    remote_run: RemoteWorkflowRunLink | None = None
 
 
 class RunCustomAgentsInParallelStepData(GuiStepSpanDataBase):
     type: Literal["gui_step.run_custom_agents_in_parallel"] = (
         "gui_step.run_custom_agents_in_parallel"
     )
-    runs: list[RemoteWorkflowRunLink]
 
 
 class RunCustomAgentForEachStepData(GuiStepSpanDataBase):
@@ -350,7 +339,6 @@ class RunCustomAgentForEachStepData(GuiStepSpanDataBase):
     workflow_id: str
     workflow_name: str
     total_items: NonNegativeInt
-    runs: list[RemoteWorkflowRunLink]
 
 
 class OutputStepData(GuiStepSpanDataBase):
@@ -428,6 +416,7 @@ class ControlFlowSpanDataBase(SpanData):
 
 class IterationSpanData(ControlFlowSpanDataBase):
     type: Literal["control_flow.iteration"] = "control_flow.iteration"
+    iteration_index: NonNegativeInt
 
 
 class TrySpanData(ControlFlowSpanDataBase):
@@ -626,7 +615,6 @@ __all__ = [
     "ReadExcelSheetStepData",
     "ReadGoogleSheetStepData",
     "ReadLocalFilesystemStepData",
-    "RemoteWorkflowRunLink",
     "RunBashScriptStepData",
     "RunCustomAgentForEachStepData",
     "RunCustomAgentStepData",

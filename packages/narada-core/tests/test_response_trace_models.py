@@ -100,7 +100,7 @@ def test_span_serializes_with_openai_envelope_and_omits_narada_nulls() -> None:
             workflow_id="workflow_123",
             workflow_run_id=None,
             status="success",
-            outcome="completed",
+            termination_mode="completed",
         ),
     )
 
@@ -116,7 +116,7 @@ def test_span_serializes_with_openai_envelope_and_omits_narada_nulls() -> None:
             "name": "Process renewals",
             "workflow_id": "workflow_123",
             "status": "success",
-            "outcome": "completed",
+            "termination_mode": "completed",
         },
         "error": None,
     }
@@ -154,11 +154,16 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
         }
     )
     control_flow = TypeAdapter(ControlFlowSpanData).validate_python(
-        {"type": "control_flow.iteration", "status": "success"}
+        {
+            "type": "control_flow.iteration",
+            "status": "success",
+            "iteration_index": 2,
+        }
     )
 
     assert isinstance(gui_span.span_data, HttpRequestStepData)
     assert isinstance(control_flow, IterationSpanData)
+    assert control_flow.iteration_index == 2
 
 
 def test_taxonomy_discriminators_are_complete() -> None:
@@ -254,3 +259,9 @@ def test_negative_numeric_values_are_rejected() -> None:
             status="success",
             status_code=-1,
         )
+
+    with pytest.raises(ValidationError):
+        IterationSpanData(status="success", iteration_index=-1)
+
+    with pytest.raises(ValidationError):
+        IterationSpanData(status="success")
