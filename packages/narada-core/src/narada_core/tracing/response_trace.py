@@ -438,7 +438,6 @@ type ControlFlowSpanData = Annotated[
 
 
 class UsageData(_OmitNoneModel):
-    actions: NonNegativeInt
     credits: NonNegativeFloat
     input_tokens: NonNegativeInt | None = None
     output_tokens: NonNegativeInt | None = None
@@ -448,9 +447,11 @@ class UsageData(_OmitNoneModel):
 class BaseAgentSpanData(SpanData):
     type: str
     name: str
-    handoffs: list[str] | None = None
-    tools: list[str] | None = None
     output_type: str | None = None
+    additional_tools: list[str] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list)
+    vector_stores: list[str] = Field(default_factory=list)
+    output_variables: list[dict[str, Any]] = Field(default_factory=list)
     reasoning_effort: Literal[
         "agent_default",
         "none",
@@ -474,7 +475,7 @@ class BaseAgentSpanData(SpanData):
         serialized = handler(self)
         if not isinstance(serialized, dict):
             return serialized
-        nullable_openai_fields = {"handoffs", "tools", "output_type"}
+        nullable_openai_fields = {"output_type"}
         return {
             key: value
             for key, value in serialized.items()

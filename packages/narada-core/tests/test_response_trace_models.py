@@ -11,6 +11,7 @@ from narada_core.tracing.response_trace import (
     Span,
     Trace,
     TraceRecord,
+    UsageData,
     WorkflowSpanData,
 )
 from pydantic import TypeAdapter, ValidationError
@@ -122,7 +123,7 @@ def test_span_serializes_with_openai_envelope_and_omits_narada_nulls() -> None:
     }
 
 
-def test_agent_span_keeps_openai_nullable_fields() -> None:
+def test_agent_span_keeps_nullable_output_type_and_empty_run_configuration() -> None:
     span = Span(
         id="span_agent",
         trace_id="trace_123",
@@ -132,12 +133,21 @@ def test_agent_span_keeps_openai_nullable_fields() -> None:
     assert span.model_dump(mode="json")["span_data"] == {
         "type": "agent.operator",
         "name": "Operator",
-        "handoffs": None,
-        "tools": None,
         "output_type": None,
+        "additional_tools": [],
+        "attachments": [],
+        "vector_stores": [],
+        "output_variables": [],
         "reasoning_effort": "agent_default",
         "status": "success",
     }
+
+
+def test_usage_data_does_not_include_aggregate_action_count() -> None:
+    usage = UsageData(credits=1)
+
+    assert usage.model_dump(mode="json") == {"credits": 1.0}
+    assert "actions" not in UsageData.model_json_schema()["properties"]
 
 
 def test_agent_span_accepts_explicit_reasoning_effort() -> None:
@@ -155,6 +165,26 @@ def test_agent_span_accepts_explicit_reasoning_effort() -> None:
             reasoning_effort="unsupported",  # type: ignore[arg-type]
             status="success",
         )
+
+
+def test_agent_span_serializes_run_configuration() -> None:
+    agent = OperatorAgentSpanData(
+        name="Operator",
+        additional_tools=["search_email"],
+        attachments=["contract.pdf"],
+        vector_stores=["customer_documents"],
+        output_variables=[{"name": "renewal_date", "type": "string"}],
+        status="success",
+    )
+
+    serialized = agent.model_dump(mode="json")
+
+    assert serialized["additional_tools"] == ["search_email"]
+    assert serialized["attachments"] == ["contract.pdf"]
+    assert serialized["vector_stores"] == ["customer_documents"]
+    assert serialized["output_variables"] == [
+        {"name": "renewal_date", "type": "string"}
+    ]
 
 
 def test_span_data_unions_parse_concrete_subtypes() -> None:
