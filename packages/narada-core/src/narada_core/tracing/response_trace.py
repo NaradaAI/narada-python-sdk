@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     NonNegativeFloat,
     NonNegativeInt,
@@ -12,9 +13,6 @@ from pydantic import (
     model_validator,
 )
 
-type JsonValue = (
-    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
-)
 type WorkflowSpanStatus = Literal[
     "pending",
     "input-required",
@@ -30,37 +28,48 @@ type AgentSpanStatus = Literal[
     "input-required",
     "timeout",
 ]
+type AgentType = Literal[
+    "operator", "core", "productivity", "custom", "critic", "other"
+]
 
 
 class Trace(BaseModel):
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
+
     object: Literal["trace"] = Field(
         default="trace",
         description="Discriminator identifying this record as a trace.",
     )
-    id: str = Field(description="Unique identifier for the trace.")
+    trace_id: str = Field(
+        alias="id",
+        description="Unique identifier for the trace.",
+    )
+    name: str = Field(
+        alias="workflow_name",
+        description="Human-readable name of the logical workflow.",
+    )
     group_id: str | None = Field(
         default=None,
         description="Optional identifier used to correlate related traces.",
     )
     metadata: dict[str, Any] | None = Field(
         default=None,
-        description=(
-            "Optional trace-level metadata. Narada-owned metadata uses "
-            "schema_version to identify the response trace schema."
-        ),
+        description="Optional user-provided metadata associated with the trace.",
     )
 
 
 class SpanError(BaseModel):
     message: str = Field(description="Human-readable description of the span error.")
-    data: dict[str, JsonValue] | None = Field(
-        default=None,
-        description="Optional structured details associated with the error.",
+    data: dict[str, Any] | None = Field(
+        description="Structured details associated with the error, or null.",
     )
 
 
 class SpanData(BaseModel):
     type: str = Field(description="Discriminator for the span-specific payload.")
+
+
+TSpanData = TypeVar("TSpanData", bound=SpanData)
 
 
 class WorkflowSpanData(SpanData):
@@ -106,7 +115,7 @@ class BaseGuiStepSpanData(SpanData):
         default=None,
         description="User-facing description produced while the step executed.",
     )
-    page_url_before: str | None = Field(
+    page_url: str | None = Field(
         default=None,
         description="Browser page URL captured immediately before the step started.",
     )
@@ -522,23 +531,6 @@ class RunCustomAgentStepData(BaseGuiStepSpanData):
     )
 
 
-class RunCustomAgentsInParallelStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.run_custom_agents_in_parallel"] = Field(
-        default="gui_step.run_custom_agents_in_parallel",
-        description="Identifies a GUI parallel custom-agent step.",
-    )
-
-
-class RunCustomAgentForEachStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.run_custom_agent_for_each"] = Field(
-        default="gui_step.run_custom_agent_for_each",
-        description="Identifies a GUI custom-agent-for-each step.",
-    )
-    total_items: NonNegativeInt = Field(
-        description="Number of input items encountered during execution."
-    )
-
-
 class OutputStepData(BaseGuiStepSpanData):
     type: Literal["gui_step.output"] = Field(
         default="gui_step.output",
@@ -607,8 +599,6 @@ type GuiStepSpanData = Annotated[
     | WriteExcelSheetStepData
     | WriteGoogleSheetStepData
     | RunCustomAgentStepData
-    | RunCustomAgentsInParallelStepData
-    | RunCustomAgentForEachStepData
     | OutputStepData
     | CriticAgentStepData,
     Field(discriminator="type"),
@@ -668,9 +658,15 @@ class UsageData(BaseModel):
     )
 
 
-class BaseAgentSpanData(SpanData):
-    type: str = Field(description="Discriminator for the executed agent type.")
+class AgentSpanData(SpanData):
+    type: Literal["agent"] = Field(
+        default="agent",
+        description="Identifies an agent span, matching OpenAI's agent span type.",
+    )
     name: str = Field(description="Display name of the agent that executed.")
+    agent_type: AgentType = Field(
+        description="Narada agent type selected for this execution."
+    )
     output_variables: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured output variables produced by the agent run.",
@@ -686,62 +682,6 @@ class BaseAgentSpanData(SpanData):
         default=None,
         description="Aggregate billable usage recorded for the agent run.",
     )
-
-
-class OperatorAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.operator"] = Field(
-        default="agent.operator",
-        description="Identifies an Operator agent run.",
-    )
-
-
-class CoreAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.core"] = Field(
-        default="agent.core",
-        description="Identifies a Core agent run.",
-    )
-
-
-class ProductivityAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.productivity"] = Field(
-        default="agent.productivity",
-        description="Identifies a Productivity agent run.",
-    )
-
-
-class CustomAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.custom"] = Field(
-        default="agent.custom",
-        description="Identifies a custom agent run.",
-    )
-
-
-class CriticAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.critic"] = Field(
-        default="agent.critic",
-        description="Identifies a critic agent run.",
-    )
-
-
-class OtherAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.other"] = Field(
-        default="agent.other",
-        description="Identifies an agent run outside Narada's known agent types.",
-    )
-    agent_kind: str = Field(
-        description="Runtime agent-kind value when no specific subtype is available."
-    )
-
-
-type AgentSpanData = Annotated[
-    OperatorAgentSpanData
-    | CoreAgentSpanData
-    | ProductivityAgentSpanData
-    | CustomAgentSpanData
-    | CriticAgentSpanData
-    | OtherAgentSpanData,
-    Field(discriminator="type"),
-]
 
 
 class AgentActionSpanData(SpanData):
@@ -773,26 +713,31 @@ type SpanDataUnion = Annotated[
 ]
 
 
-class Span(BaseModel):
+class Span(BaseModel, Generic[TSpanData]):
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
+
     object: Literal["trace.span"] = Field(
         default="trace.span",
         description="Discriminator identifying this record as a span.",
     )
-    id: str = Field(description="Unique identifier for the span.")
+    span_id: str = Field(
+        alias="id",
+        description="Unique identifier for the span.",
+    )
     trace_id: str = Field(description="Identifier of the trace containing this span.")
     parent_id: str | None = Field(
         default=None,
         description="Identifier of the parent span, or null for a root span.",
     )
-    started_at: datetime | None = Field(
+    started_at: str | None = Field(
         default=None,
         description="UTC ISO 8601 timestamp at which the span started.",
     )
-    ended_at: datetime | None = Field(
+    ended_at: str | None = Field(
         default=None,
         description="UTC ISO 8601 timestamp at which the span ended.",
     )
-    span_data: SpanDataUnion = Field(
+    span_data: TSpanData = Field(
         description="Typed payload describing the operation represented by the span."
     )
     error: SpanError | None = Field(
@@ -802,8 +747,14 @@ class Span(BaseModel):
 
     @field_validator("started_at", "ended_at")
     @classmethod
-    def _require_utc_timestamp(cls, value: datetime | None) -> datetime | None:
-        if value is not None and value.utcoffset() != timedelta(0):
+    def _require_utc_timestamp(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as error:
+            raise ValueError("trace timestamps must be ISO 8601 strings") from error
+        if parsed.utcoffset() != timedelta(0):
             raise ValueError("trace timestamps must be timezone-aware UTC datetimes")
         return value
 
@@ -812,13 +763,11 @@ class Span(BaseModel):
         if (
             self.started_at is not None
             and self.ended_at is not None
-            and self.ended_at < self.started_at
+            and datetime.fromisoformat(self.ended_at)
+            < datetime.fromisoformat(self.started_at)
         ):
             raise ValueError("ended_at must be greater than or equal to started_at")
         return self
-
-
-type TraceItem = Annotated[Trace | Span, Field(discriminator="object")]
 
 
 __all__ = [
@@ -827,8 +776,8 @@ __all__ = [
     "AgenticSelectorStepData",
     "AgentSpanData",
     "AgentSpanStatus",
+    "AgentType",
     "AgentStepData",
-    "BaseAgentSpanData",
     "BaseControlFlowSpanData",
     "BaseGuiStepSpanData",
     "BreakStepData",
@@ -836,10 +785,7 @@ __all__ = [
     "CloseTabStepData",
     "ContinueStepData",
     "ControlFlowSpanData",
-    "CoreAgentSpanData",
-    "CriticAgentSpanData",
     "CriticAgentStepData",
-    "CustomAgentSpanData",
     "DataTableExportAsCsvStepData",
     "DataTableInsertRowStepData",
     "DataTableUpdateCellValueStepData",
@@ -859,18 +805,14 @@ __all__ = [
     "HttpRequestStepData",
     "IfStepData",
     "IterationSpanData",
-    "JsonValue",
     "LogVariablesToFileStepData",
     "NavigateStepData",
     "ObjectExportAsJsonStepData",
     "ObjectSetPropertiesStepData",
     "OpenDesktopApplicationStepData",
-    "OperatorAgentSpanData",
-    "OtherAgentSpanData",
     "OutputStepData",
     "PressKeysStepData",
     "PrintStepData",
-    "ProductivityAgentSpanData",
     "ProjectExecutableStepData",
     "PromptForUserInputStepData",
     "ReadCsvStepData",
@@ -878,9 +820,7 @@ __all__ = [
     "ReadGoogleSheetStepData",
     "ReadLocalFilesystemStepData",
     "RunBashScriptStepData",
-    "RunCustomAgentForEachStepData",
     "RunCustomAgentStepData",
-    "RunCustomAgentsInParallelStepData",
     "SavePdfFileStepData",
     "SetVariableStepData",
     "SlackActionStepData",
@@ -891,7 +831,6 @@ __all__ = [
     "StartStepData",
     "ThrowStepData",
     "Trace",
-    "TraceItem",
     "TryCatchStepData",
     "TrySpanData",
     "UsageData",

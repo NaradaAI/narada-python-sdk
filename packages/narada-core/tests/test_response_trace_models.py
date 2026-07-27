@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from narada_core.tracing import response_trace
@@ -8,10 +8,10 @@ from narada_core.tracing.response_trace import (
     GuiStepSpanData,
     HttpRequestStepData,
     IterationSpanData,
-    OperatorAgentSpanData,
     Span,
+    SpanDataUnion,
+    SpanError,
     Trace,
-    TraceItem,
     TryCatchStepData,
     UsageData,
     WorkflowSpanData,
@@ -57,8 +57,6 @@ GUI_STEP_TYPES = {
     "gui_step.read_local_filesystem",
     "gui_step.run_bash_script",
     "gui_step.run_custom_agent",
-    "gui_step.run_custom_agent_for_each",
-    "gui_step.run_custom_agents_in_parallel",
     "gui_step.save_pdf_file",
     "gui_step.set_variable",
     "gui_step.slack_action",
@@ -81,22 +79,26 @@ def _discriminator_values(annotation: object) -> set[str]:
 
 
 def test_trace_serializes_with_openai_envelope() -> None:
-    trace = Trace(id="trace_123")
+    trace = Trace(trace_id="trace_123", name="Process renewals")
 
     assert trace.model_dump(mode="json") == {
         "object": "trace",
         "id": "trace_123",
+        "workflow_name": "Process renewals",
         "group_id": None,
         "metadata": None,
     }
+    assert trace.trace_id == "trace_123"
+    assert trace.name == "Process renewals"
+    assert trace.model_dump(mode="json", by_alias=False)["trace_id"] == "trace_123"
 
 
 def test_span_serializes_with_openai_envelope() -> None:
     span = Span(
-        id="span_workflow",
+        span_id="span_workflow",
         trace_id="trace_123",
-        started_at=datetime(2026, 7, 24, 18, 0, tzinfo=UTC),
-        ended_at=datetime(2026, 7, 24, 18, 0, 5, tzinfo=UTC),
+        started_at="2026-07-24T18:00:00+00:00",
+        ended_at="2026-07-24T18:00:05+00:00",
         span_data=WorkflowSpanData(
             workflow_name="Process renewals",
             workflow_id="workflow_123",
@@ -109,8 +111,8 @@ def test_span_serializes_with_openai_envelope() -> None:
         "id": "span_workflow",
         "trace_id": "trace_123",
         "parent_id": None,
-        "started_at": "2026-07-24T18:00:00Z",
-        "ended_at": "2026-07-24T18:00:05Z",
+        "started_at": "2026-07-24T18:00:00+00:00",
+        "ended_at": "2026-07-24T18:00:05+00:00",
         "span_data": {
             "type": "workflow",
             "workflow_name": "Process renewals",
@@ -121,18 +123,32 @@ def test_span_serializes_with_openai_envelope() -> None:
         },
         "error": None,
     }
+    assert span.span_id == "span_workflow"
+    assert span.model_dump(mode="json", by_alias=False)["span_id"] == "span_workflow"
+
+
+def test_span_error_preserves_openai_nullable_data_field() -> None:
+    assert SpanError(message="Step failed", data=None).model_dump(mode="json") == {
+        "message": "Step failed",
+        "data": None,
+    }
 
 
 def test_agent_span_contains_only_execution_results() -> None:
     span = Span(
-        id="span_agent",
+        span_id="span_agent",
         trace_id="trace_123",
-        span_data=OperatorAgentSpanData(name="Operator", status="success"),
+        span_data=AgentSpanData(
+            name="Operator",
+            agent_type="operator",
+            status="success",
+        ),
     )
 
     assert span.model_dump(mode="json")["span_data"] == {
-        "type": "agent.operator",
+        "type": "agent",
         "name": "Operator",
+        "agent_type": "operator",
         "output_variables": {},
         "status": "success",
         "request_id": None,
@@ -148,8 +164,9 @@ def test_usage_data_contains_billable_action_and_credit_totals() -> None:
 
 
 def test_agent_span_serializes_runtime_output_variables() -> None:
-    agent = OperatorAgentSpanData(
+    agent = AgentSpanData(
         name="Operator",
+        agent_type="operator",
         output_variables={"renewal_date": "2027-01-01"},
         status="success",
     )
@@ -169,7 +186,7 @@ def test_agent_span_serializes_runtime_output_variables() -> None:
 
 
 def test_span_data_unions_parse_concrete_subtypes() -> None:
-    gui_span = Span.model_validate(
+    gui_span = Span[SpanDataUnion].model_validate(
         {
             "id": "span_http",
             "trace_id": "trace_123",
@@ -201,37 +218,40 @@ def test_taxonomy_discriminators_are_complete() -> None:
         "control_flow.catch",
         "control_flow.finally",
     }
-    assert _discriminator_values(AgentSpanData) == {
-        "agent.operator",
-        "agent.core",
-        "agent.productivity",
-        "agent.custom",
-        "agent.critic",
-        "agent.other",
-    }
+    assert AgentSpanData.model_json_schema()["properties"]["type"]["const"] == "agent"
 
 
-def test_trace_item_discriminator_parses_trace_and_span() -> None:
-    adapter = TypeAdapter(TraceItem)
+def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
+    adapter = TypeAdapter(list[Trace | Span[Any]])
 
-    trace = adapter.validate_python({"object": "trace", "id": "trace_123"})
-    span = adapter.validate_python(
-        {
-            "object": "trace.span",
-            "id": "span_123",
-            "trace_id": "trace_123",
-            "span_data": {
-                "type": "workflow",
+    trace, span = adapter.validate_python(
+        [
+            {
+                "object": "trace",
+                "id": "trace_123",
                 "workflow_name": "Demo",
-                "workflow_id": "workflow_123",
-                "status": "success",
+                "group_id": None,
+                "metadata": None,
             },
-        }
+            {
+                "object": "trace.span",
+                "id": "span_123",
+                "trace_id": "trace_123",
+                "span_data": {
+                    "type": "workflow",
+                    "workflow_name": "Demo",
+                    "workflow_id": "workflow_123",
+                    "status": "success",
+                },
+            },
+        ]
     )
 
     assert isinstance(trace, Trace)
     assert isinstance(span, Span)
-    assert span.span_data.request_id is None
+    assert trace.trace_id == "trace_123"
+    assert span.span_id == "span_123"
+    assert span.span_data["type"] == "workflow"
 
 
 def test_span_types_use_their_source_statuses() -> None:
@@ -240,7 +260,11 @@ def test_span_types_use_their_source_statuses() -> None:
         workflow_id="workflow_123",
         status="input-required",
     )
-    agent = OperatorAgentSpanData(name="Operator", status="timeout")
+    agent = AgentSpanData(
+        name="Operator",
+        agent_type="operator",
+        status="timeout",
+    )
     iteration = IterationSpanData(iteration_index=0)
 
     assert workflow.status == "input-required"
@@ -283,33 +307,26 @@ def test_every_public_model_field_has_a_description() -> None:
     "started_at, ended_at",
     [
         (
-            datetime(2026, 7, 24, 18, 0),
-            datetime(2026, 7, 24, 18, 0, 1, tzinfo=UTC),
+            "2026-07-24T18:00:00",
+            "2026-07-24T18:00:01+00:00",
         ),
         (
-            datetime(
-                2026,
-                7,
-                24,
-                18,
-                0,
-                tzinfo=timezone(timedelta(hours=1)),
-            ),
-            datetime(2026, 7, 24, 18, 0, 1, tzinfo=UTC),
+            "2026-07-24T18:00:00+01:00",
+            "2026-07-24T18:00:01+00:00",
         ),
         (
-            datetime(2026, 7, 24, 18, 0, 1, tzinfo=UTC),
-            datetime(2026, 7, 24, 18, 0, tzinfo=UTC),
+            "2026-07-24T18:00:01+00:00",
+            "2026-07-24T18:00:00+00:00",
         ),
     ],
 )
 def test_span_rejects_non_utc_or_reversed_timestamps(
-    started_at: datetime,
-    ended_at: datetime,
+    started_at: str,
+    ended_at: str,
 ) -> None:
     with pytest.raises(ValidationError):
         Span(
-            id="span_123",
+            span_id="span_123",
             trace_id="trace_123",
             started_at=started_at,
             ended_at=ended_at,

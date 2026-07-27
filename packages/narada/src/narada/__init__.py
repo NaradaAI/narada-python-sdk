@@ -44,7 +44,6 @@ from narada.tracing import (
     SpanDataUnion,
     SpanError,
     Trace,
-    TraceItem,
     WorkflowSpanData,
     WorkflowSpanStatus,
 )
@@ -91,7 +90,6 @@ __all__ = [
     "SpanDataUnion",
     "SpanError",
     "Trace",
-    "TraceItem",
     "UserAbortedError",
     "WorkflowSpanData",
     "WorkflowSpanStatus",
