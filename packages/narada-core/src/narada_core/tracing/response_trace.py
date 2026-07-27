@@ -8,347 +8,553 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     NonNegativeInt,
-    SerializerFunctionWrapHandler,
     field_validator,
-    model_serializer,
     model_validator,
 )
 
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
-type SpanStatus = Literal[
-    "running",
+type WorkflowSpanStatus = Literal[
+    "pending",
+    "input-required",
+    "success",
+    "error",
+    "expired",
+]
+type GuiStepSpanStatus = Literal["success", "error", "aborted", "end_tree"]
+type AgentSpanStatus = Literal[
     "success",
     "error",
     "aborted",
-    "input_required",
-    "skipped",
+    "input-required",
     "timeout",
-    "unknown",
 ]
 
 
-class _OmitNoneModel(BaseModel):
-    @model_serializer(mode="wrap")
-    def _serialize_without_none(
-        self,
-        handler: SerializerFunctionWrapHandler,
-    ) -> Any:
-        serialized = handler(self)
-        if not isinstance(serialized, dict):
-            return serialized
-        return {key: value for key, value in serialized.items() if value is not None}
-
-
-class TraceMetadata(BaseModel):
-    schema_version: Literal["1"] = "1"
-
-
 class Trace(BaseModel):
-    object: Literal["trace"] = "trace"
-    id: str
-    workflow_name: str
-    group_id: str | None = None
-    metadata: TraceMetadata = Field(default_factory=TraceMetadata)
+    object: Literal["trace"] = Field(
+        default="trace",
+        description="Discriminator identifying this record as a trace.",
+    )
+    id: str = Field(description="Unique identifier for the trace.")
+    group_id: str | None = Field(
+        default=None,
+        description="Optional identifier used to correlate related traces.",
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional trace-level metadata. Narada-owned metadata uses "
+            "schema_version to identify the response trace schema."
+        ),
+    )
 
 
-class SpanError(_OmitNoneModel):
-    message: str
-    data: dict[str, JsonValue] | None = None
+class SpanError(BaseModel):
+    message: str = Field(description="Human-readable description of the span error.")
+    data: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="Optional structured details associated with the error.",
+    )
 
 
-class SpanData(_OmitNoneModel):
-    type: str
+class SpanData(BaseModel):
+    type: str = Field(description="Discriminator for the span-specific payload.")
 
 
 class WorkflowSpanData(SpanData):
-    type: Literal["workflow"] = "workflow"
-    name: str
-    workflow_id: str
-    workflow_run_id: str | None = None
-    status: SpanStatus
-    request_id: str | None = None
-    input_summary: str | None = None
-    output_summary: str | None = None
-    output_names: list[str] | None = None
-    termination_mode: Literal["completed", "end_tree"] | None = None
-
-
-class GuiStepSpanDataBase(SpanData):
-    type: str
-    name: str | None = None
-    step_id: str
-    status: SpanStatus
-    description: str | None = None
-    page_url: str | None = None
-
-
-class AgentStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.agent"] = "gui_step.agent"
-    selected_agent_type: str
-
-
-class AgenticMouseActionStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.agentic_mouse_action"] = "gui_step.agentic_mouse_action"
-    strategy: Literal["direct", "operator_fallback"]
-    verification_status: bool | None = None
-    verification_status_variable_name: str | None = None
-
-
-class AgenticSelectorStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.agentic_selector"] = "gui_step.agentic_selector"
-    strategy: Literal["selector", "operator_fallback"]
-
-
-class RunBashScriptStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.run_bash_script"] = "gui_step.run_bash_script"
-
-
-class BreakStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.break"] = "gui_step.break"
-
-
-class CloseTabStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.close_tab"] = "gui_step.close_tab"
-
-
-class ContinueStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.continue"] = "gui_step.continue"
-
-
-class DataTableExportAsCsvStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.data_table_export_as_csv"] = (
-        "gui_step.data_table_export_as_csv"
+    type: Literal["workflow"] = Field(
+        default="workflow",
+        description="Identifies a workflow execution span.",
+    )
+    workflow_name: str = Field(
+        description="Display name of the workflow that executed."
+    )
+    workflow_id: str = Field(
+        description="Stable identifier of the workflow definition that executed."
+    )
+    status: WorkflowSpanStatus = Field(
+        description="Execution status stored for the remote workflow dispatch."
+    )
+    request_id: str | None = Field(
+        default=None,
+        description=(
+            "Remote-dispatch request identifier for this workflow run. It is also "
+            "the identifier used to look up the run."
+        ),
+    )
+    output_variables: dict[str, Any] | None = Field(
+        default=None,
+        description="Runtime output variables produced by the workflow, when available.",
     )
 
 
-class DataTableInsertRowStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.data_table_insert_row"] = "gui_step.data_table_insert_row"
-
-
-class DataTableUpdateCellValueStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.data_table_update_cell_value"] = (
-        "gui_step.data_table_update_cell_value"
+class BaseGuiStepSpanData(SpanData):
+    type: str = Field(description="Discriminator for the executed GUI step type.")
+    name: str | None = Field(
+        default=None,
+        description="Optional user-facing label for the executed step.",
+    )
+    step_id: str = Field(
+        description="Identifier of the step in the workflow definition."
+    )
+    status: GuiStepSpanStatus = Field(
+        description="Terminal execution status reported for the GUI step."
+    )
+    description: str | None = Field(
+        default=None,
+        description="User-facing description produced while the step executed.",
+    )
+    page_url_before: str | None = Field(
+        default=None,
+        description="Browser page URL captured immediately before the step started.",
     )
 
 
-class DesktopAgenticSelectorStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.desktop_agentic_selector"] = (
-        "gui_step.desktop_agentic_selector"
+class AgentStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.agent"] = Field(
+        default="gui_step.agent",
+        description="Identifies a GUI agent step.",
     )
 
 
-class ExecuteJavaScriptOnPageStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.execute_javascript_on_page"] = (
-        "gui_step.execute_javascript_on_page"
+class AgenticMouseActionStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.agentic_mouse_action"] = Field(
+        default="gui_step.agentic_mouse_action",
+        description="Identifies a GUI agentic mouse action step.",
+    )
+    strategy: Literal["direct", "operator_fallback"] = Field(
+        description="Execution path that ultimately performed the mouse action."
+    )
+    verification_status: bool | None = Field(
+        default=None,
+        description=(
+            "Whether post-action verification succeeded. This is absent when "
+            "verification did not run."
+        ),
     )
 
 
-class OpenDesktopApplicationStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.open_desktop_application"] = (
-        "gui_step.open_desktop_application"
+class AgenticSelectorStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.agentic_selector"] = Field(
+        default="gui_step.agentic_selector",
+        description="Identifies a GUI agentic selector step.",
+    )
+    strategy: Literal["selector", "operator_fallback"] = Field(
+        description="Execution path that ultimately selected the element."
     )
 
 
-class ReadLocalFilesystemStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.read_local_filesystem"] = "gui_step.read_local_filesystem"
-
-
-class WriteLocalFilesystemStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.write_local_filesystem"] = "gui_step.write_local_filesystem"
-
-
-class EndStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.end"] = "gui_step.end"
-    termination_mode: Literal["end", "end_tree"]
-    result_status: Literal["success", "error"] | None = None
-    message: str | None = None
-
-
-class ForStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.for"] = "gui_step.for"
-    loop_type: Literal[
-        "n_times",
-        "for_each_table_row",
-        "for_each_array_item",
-    ]
-    total_iterations: NonNegativeInt
-
-
-class SavePdfFileStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.save_pdf_file"] = "gui_step.save_pdf_file"
-
-
-class GetFullHtmlStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.get_full_html"] = "gui_step.get_full_html"
-
-
-class GetScreenshotStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.get_screenshot"] = "gui_step.get_screenshot"
-
-
-class GetSimplifiedHtmlStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.get_simplified_html"] = "gui_step.get_simplified_html"
-
-
-class GetUrlStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.get_url"] = "gui_step.get_url"
-    observed_url: str | None = None
-
-
-class NavigateStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.navigate"] = "gui_step.navigate"
-    destination_url: str | None = None
-    final_url: str | None = None
-
-
-class HttpRequestStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.http_request"] = "gui_step.http_request"
-    method: str | None = None
-    destination_host: str | None = None
-    status_code: NonNegativeInt | None = None
-
-
-class IfStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.if"] = "gui_step.if"
-    condition_summary: str | None = None
-    selected_branch_role: Literal["then", "else_if", "else"] | None = None
-    selected_branch_index: NonNegativeInt | None = None
-
-
-class LogVariablesToFileStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.log_variables_to_file"] = "gui_step.log_variables_to_file"
-
-
-class ObjectExportAsJsonStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.object_export_as_json"] = "gui_step.object_export_as_json"
-
-
-class ObjectSetPropertiesStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.object_set_properties"] = "gui_step.object_set_properties"
-
-
-class PressKeysStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.press_keys"] = "gui_step.press_keys"
-
-
-class PrintStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.print"] = "gui_step.print"
-    message: str | None = None
-
-
-class ProjectExecutableStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.project_executable"] = "gui_step.project_executable"
-    project_relative_path: str | None = None
-
-
-class ExecutePythonStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.execute_python"] = "gui_step.execute_python"
-
-
-class ReadCsvStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.read_csv"] = "gui_step.read_csv"
-
-
-class ReadExcelSheetStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.read_excel_sheet"] = "gui_step.read_excel_sheet"
-
-
-class ReadGoogleSheetStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.read_google_sheet"] = "gui_step.read_google_sheet"
-
-
-class EmailActionStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.email_action"] = "gui_step.email_action"
-    provider_status: str | None = None
-
-
-class SlackActionStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.slack_action"] = "gui_step.slack_action"
-    provider_status: str | None = None
-
-
-class SetVariableStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.set_variable"] = "gui_step.set_variable"
-    variable_name: str | None = None
-
-
-class PromptForUserInputStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.prompt_for_user_input"] = "gui_step.prompt_for_user_input"
-
-
-class StartStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.start"] = "gui_step.start"
-
-
-class ThrowStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.throw"] = "gui_step.throw"
-
-
-class TryCatchStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.try_catch"] = "gui_step.try_catch"
-    caught_error: bool | None = None
-    executed_catch: bool | None = None
-    executed_finally: bool | None = None
-
-
-class UserApprovalStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.user_approval"] = "gui_step.user_approval"
-
-
-class WaitStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.wait"] = "gui_step.wait"
-    duration_ms: NonNegativeInt | None = None
-
-
-class WaitForElementStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.wait_for_element"] = "gui_step.wait_for_element"
-
-
-class WhileStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.while"] = "gui_step.while"
-    condition_summary: str | None = None
-    total_iterations: NonNegativeInt
-
-
-class WriteExcelSheetStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.write_excel_sheet"] = "gui_step.write_excel_sheet"
-
-
-class WriteGoogleSheetStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.write_google_sheet"] = "gui_step.write_google_sheet"
-
-
-class RunCustomAgentStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.run_custom_agent"] = "gui_step.run_custom_agent"
-    workflow_id: str
-    workflow_name: str
-
-
-class RunCustomAgentsInParallelStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.run_custom_agents_in_parallel"] = (
-        "gui_step.run_custom_agents_in_parallel"
+class RunBashScriptStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.run_bash_script"] = Field(
+        default="gui_step.run_bash_script",
+        description="Identifies a GUI run-Bash-script step.",
     )
 
 
-class RunCustomAgentForEachStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.run_custom_agent_for_each"] = (
-        "gui_step.run_custom_agent_for_each"
+class BreakStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.break"] = Field(
+        default="gui_step.break",
+        description="Identifies a GUI break step.",
     )
-    workflow_id: str
-    workflow_name: str
-    total_items: NonNegativeInt
 
 
-class OutputStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.output"] = "gui_step.output"
-    output_names: list[str] | None = None
+class CloseTabStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.close_tab"] = Field(
+        default="gui_step.close_tab",
+        description="Identifies a GUI close-tab step.",
+    )
 
 
-class CriticAgentStepData(GuiStepSpanDataBase):
-    type: Literal["gui_step.critic_agent"] = "gui_step.critic_agent"
-    prompt_summary: str | None = None
+class ContinueStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.continue"] = Field(
+        default="gui_step.continue",
+        description="Identifies a GUI continue step.",
+    )
+
+
+class DataTableExportAsCsvStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.data_table_export_as_csv"] = Field(
+        default="gui_step.data_table_export_as_csv",
+        description="Identifies a GUI data-table CSV export step.",
+    )
+
+
+class DataTableInsertRowStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.data_table_insert_row"] = Field(
+        default="gui_step.data_table_insert_row",
+        description="Identifies a GUI data-table row insertion step.",
+    )
+
+
+class DataTableUpdateCellValueStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.data_table_update_cell_value"] = Field(
+        default="gui_step.data_table_update_cell_value",
+        description="Identifies a GUI data-table cell update step.",
+    )
+
+
+class DesktopAgenticSelectorStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.desktop_agentic_selector"] = Field(
+        default="gui_step.desktop_agentic_selector",
+        description="Identifies a GUI desktop agentic selector step.",
+    )
+
+
+class ExecuteJavaScriptOnPageStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.execute_javascript_on_page"] = Field(
+        default="gui_step.execute_javascript_on_page",
+        description="Identifies a GUI in-page JavaScript execution step.",
+    )
+
+
+class OpenDesktopApplicationStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.open_desktop_application"] = Field(
+        default="gui_step.open_desktop_application",
+        description="Identifies a GUI open-desktop-application step.",
+    )
+
+
+class ReadLocalFilesystemStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.read_local_filesystem"] = Field(
+        default="gui_step.read_local_filesystem",
+        description="Identifies a GUI local-filesystem read step.",
+    )
+
+
+class WriteLocalFilesystemStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.write_local_filesystem"] = Field(
+        default="gui_step.write_local_filesystem",
+        description="Identifies a GUI local-filesystem write step.",
+    )
+
+
+class EndStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.end"] = Field(
+        default="gui_step.end",
+        description="Identifies a GUI end step.",
+    )
+    result_status: Literal["success", "error"] | None = Field(
+        default=None,
+        description="Workflow result selected by the executed end step, when provided.",
+    )
+    message: str | None = Field(
+        default=None,
+        description="Runtime message produced by the end step, when provided.",
+    )
+
+
+class ForStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.for"] = Field(
+        default="gui_step.for",
+        description="Identifies a GUI for-loop step.",
+    )
+    total_iterations: NonNegativeInt = Field(
+        description="Number of loop iterations that started during this execution."
+    )
+
+
+class SavePdfFileStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.save_pdf_file"] = Field(
+        default="gui_step.save_pdf_file",
+        description="Identifies a GUI save-PDF-file step.",
+    )
+
+
+class GetFullHtmlStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.get_full_html"] = Field(
+        default="gui_step.get_full_html",
+        description="Identifies a GUI full-HTML retrieval step.",
+    )
+
+
+class GetScreenshotStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.get_screenshot"] = Field(
+        default="gui_step.get_screenshot",
+        description="Identifies a GUI screenshot step.",
+    )
+
+
+class GetSimplifiedHtmlStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.get_simplified_html"] = Field(
+        default="gui_step.get_simplified_html",
+        description="Identifies a GUI simplified-HTML retrieval step.",
+    )
+
+
+class GetUrlStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.get_url"] = Field(
+        default="gui_step.get_url",
+        description="Identifies a GUI get-URL step.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="URL returned by the step during execution.",
+    )
+
+
+class NavigateStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.navigate"] = Field(
+        default="gui_step.navigate",
+        description="Identifies a GUI navigation step.",
+    )
+    final_url: str | None = Field(
+        default=None,
+        description="Browser URL observed after navigation completed.",
+    )
+
+
+class HttpRequestStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.http_request"] = Field(
+        default="gui_step.http_request",
+        description="Identifies a GUI HTTP-request step.",
+    )
+    status_code: NonNegativeInt | None = Field(
+        default=None,
+        description="HTTP response status code observed at runtime.",
+    )
+
+
+class IfStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.if"] = Field(
+        default="gui_step.if",
+        description="Identifies a GUI conditional step.",
+    )
+    selected_branch_role: Literal["then", "else_if", "else"] | None = Field(
+        default=None,
+        description="Role of the branch selected during execution.",
+    )
+    selected_branch_index: NonNegativeInt | None = Field(
+        default=None,
+        description=(
+            "Zero-based index of the selected branch among branches with the "
+            "reported role. It is absent when no branch ran."
+        ),
+    )
+
+
+class LogVariablesToFileStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.log_variables_to_file"] = Field(
+        default="gui_step.log_variables_to_file",
+        description="Identifies a GUI variable-log file step.",
+    )
+
+
+class ObjectExportAsJsonStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.object_export_as_json"] = Field(
+        default="gui_step.object_export_as_json",
+        description="Identifies a GUI object JSON export step.",
+    )
+
+
+class ObjectSetPropertiesStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.object_set_properties"] = Field(
+        default="gui_step.object_set_properties",
+        description="Identifies a GUI object-property update step.",
+    )
+
+
+class PressKeysStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.press_keys"] = Field(
+        default="gui_step.press_keys",
+        description="Identifies a GUI key-press step.",
+    )
+
+
+class PrintStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.print"] = Field(
+        default="gui_step.print",
+        description="Identifies a GUI print step.",
+    )
+    message: str | None = Field(
+        default=None,
+        description="Rendered message emitted by the step during execution.",
+    )
+
+
+class ProjectExecutableStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.project_executable"] = Field(
+        default="gui_step.project_executable",
+        description="Identifies a GUI project-executable step.",
+    )
+
+
+class ExecutePythonStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.execute_python"] = Field(
+        default="gui_step.execute_python",
+        description="Identifies a GUI Python execution step.",
+    )
+
+
+class ReadCsvStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.read_csv"] = Field(
+        default="gui_step.read_csv",
+        description="Identifies a GUI CSV-read step.",
+    )
+
+
+class ReadExcelSheetStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.read_excel_sheet"] = Field(
+        default="gui_step.read_excel_sheet",
+        description="Identifies a GUI Excel-sheet read step.",
+    )
+
+
+class ReadGoogleSheetStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.read_google_sheet"] = Field(
+        default="gui_step.read_google_sheet",
+        description="Identifies a GUI Google-Sheet read step.",
+    )
+
+
+class EmailActionStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.email_action"] = Field(
+        default="gui_step.email_action",
+        description="Identifies a GUI email action step.",
+    )
+    provider_status: str | None = Field(
+        default=None,
+        description="Status returned by the email provider, when available.",
+    )
+
+
+class SlackActionStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.slack_action"] = Field(
+        default="gui_step.slack_action",
+        description="Identifies a GUI Slack action step.",
+    )
+    provider_status: str | None = Field(
+        default=None,
+        description="Status returned by Slack, when available.",
+    )
+
+
+class SetVariableStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.set_variable"] = Field(
+        default="gui_step.set_variable",
+        description="Identifies a GUI set-variable step.",
+    )
+
+
+class PromptForUserInputStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.prompt_for_user_input"] = Field(
+        default="gui_step.prompt_for_user_input",
+        description="Identifies a GUI user-input prompt step.",
+    )
+
+
+class StartStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.start"] = Field(
+        default="gui_step.start",
+        description="Identifies a GUI start step.",
+    )
+
+
+class ThrowStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.throw"] = Field(
+        default="gui_step.throw",
+        description="Identifies a GUI throw step.",
+    )
+
+
+class TryCatchStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.try_catch"] = Field(
+        default="gui_step.try_catch",
+        description="Identifies a GUI try/catch step.",
+    )
+    caught_error: bool = Field(
+        description="Whether the try section produced an error that was caught."
+    )
+    executed_catch: bool = Field(description="Whether the catch section executed.")
+    executed_finally: bool = Field(description="Whether the finally section executed.")
+
+
+class UserApprovalStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.user_approval"] = Field(
+        default="gui_step.user_approval",
+        description="Identifies a GUI user-approval step.",
+    )
+
+
+class WaitStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.wait"] = Field(
+        default="gui_step.wait",
+        description="Identifies a GUI wait step.",
+    )
+
+
+class WaitForElementStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.wait_for_element"] = Field(
+        default="gui_step.wait_for_element",
+        description="Identifies a GUI wait-for-element step.",
+    )
+
+
+class WhileStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.while"] = Field(
+        default="gui_step.while",
+        description="Identifies a GUI while-loop step.",
+    )
+    total_iterations: NonNegativeInt = Field(
+        description="Number of loop iterations that started during this execution."
+    )
+
+
+class WriteExcelSheetStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.write_excel_sheet"] = Field(
+        default="gui_step.write_excel_sheet",
+        description="Identifies a GUI Excel-sheet write step.",
+    )
+
+
+class WriteGoogleSheetStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.write_google_sheet"] = Field(
+        default="gui_step.write_google_sheet",
+        description="Identifies a GUI Google-Sheet write step.",
+    )
+
+
+class RunCustomAgentStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.run_custom_agent"] = Field(
+        default="gui_step.run_custom_agent",
+        description="Identifies a GUI custom-agent step.",
+    )
+
+
+class RunCustomAgentsInParallelStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.run_custom_agents_in_parallel"] = Field(
+        default="gui_step.run_custom_agents_in_parallel",
+        description="Identifies a GUI parallel custom-agent step.",
+    )
+
+
+class RunCustomAgentForEachStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.run_custom_agent_for_each"] = Field(
+        default="gui_step.run_custom_agent_for_each",
+        description="Identifies a GUI custom-agent-for-each step.",
+    )
+    total_items: NonNegativeInt = Field(
+        description="Number of input items encountered during execution."
+    )
+
+
+class OutputStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.output"] = Field(
+        default="gui_step.output",
+        description="Identifies a GUI output step.",
+    )
+    output_variables: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Runtime variable values emitted by the output step.",
+    )
+
+
+class CriticAgentStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.critic_agent"] = Field(
+        default="gui_step.critic_agent",
+        description="Identifies a GUI critic-agent step.",
+    )
 
 
 type GuiStepSpanData = Annotated[
@@ -409,26 +615,39 @@ type GuiStepSpanData = Annotated[
 ]
 
 
-class ControlFlowSpanDataBase(SpanData):
-    type: str
-    status: SpanStatus
+class BaseControlFlowSpanData(SpanData):
+    type: str = Field(description="Discriminator for the control-flow scope.")
 
 
-class IterationSpanData(ControlFlowSpanDataBase):
-    type: Literal["control_flow.iteration"] = "control_flow.iteration"
-    iteration_index: NonNegativeInt
+class IterationSpanData(BaseControlFlowSpanData):
+    type: Literal["control_flow.iteration"] = Field(
+        default="control_flow.iteration",
+        description="Identifies one executed loop iteration.",
+    )
+    iteration_index: NonNegativeInt = Field(
+        description="Zero-based position of this iteration in the loop execution."
+    )
 
 
-class TrySpanData(ControlFlowSpanDataBase):
-    type: Literal["control_flow.try"] = "control_flow.try"
+class TrySpanData(BaseControlFlowSpanData):
+    type: Literal["control_flow.try"] = Field(
+        default="control_flow.try",
+        description="Identifies an executed try section.",
+    )
 
 
-class CatchSpanData(ControlFlowSpanDataBase):
-    type: Literal["control_flow.catch"] = "control_flow.catch"
+class CatchSpanData(BaseControlFlowSpanData):
+    type: Literal["control_flow.catch"] = Field(
+        default="control_flow.catch",
+        description="Identifies an executed catch section.",
+    )
 
 
-class FinallySpanData(ControlFlowSpanDataBase):
-    type: Literal["control_flow.finally"] = "control_flow.finally"
+class FinallySpanData(BaseControlFlowSpanData):
+    type: Literal["control_flow.finally"] = Field(
+        default="control_flow.finally",
+        description="Identifies an executed finally section.",
+    )
 
 
 type ControlFlowSpanData = Annotated[
@@ -437,75 +656,81 @@ type ControlFlowSpanData = Annotated[
 ]
 
 
-class UsageData(_OmitNoneModel):
-    credits: NonNegativeFloat
-    input_tokens: NonNegativeInt | None = None
-    output_tokens: NonNegativeInt | None = None
-    total_tokens: NonNegativeInt | None = None
+class UsageData(BaseModel):
+    actions: NonNegativeInt = Field(
+        description=(
+            "Aggregate number of billable agent actions recorded for this run. "
+            "This may differ from the number of returned action spans."
+        )
+    )
+    credits: NonNegativeFloat = Field(
+        description="Aggregate credits consumed by the agent run."
+    )
 
 
 class BaseAgentSpanData(SpanData):
-    type: str
-    name: str
-    output_type: str | None = None
-    additional_tools: list[str] = Field(default_factory=list)
-    attachments: list[str] = Field(default_factory=list)
-    vector_stores: list[str] = Field(default_factory=list)
-    output_variables: list[dict[str, Any]] = Field(default_factory=list)
-    reasoning_effort: Literal[
-        "agent_default",
-        "none",
-        "low",
-        "medium",
-        "high",
-    ] = "agent_default"
-    status: SpanStatus
-    agent_id: str | None = None
-    request_id: str | None = None
-    page_url: str | None = None
-    input_summary: str | None = None
-    output_summary: str | None = None
-    usage: UsageData | None = None
-
-    @model_serializer(mode="wrap")
-    def _serialize_agent_data(
-        self,
-        handler: SerializerFunctionWrapHandler,
-    ) -> Any:
-        serialized = handler(self)
-        if not isinstance(serialized, dict):
-            return serialized
-        nullable_openai_fields = {"output_type"}
-        return {
-            key: value
-            for key, value in serialized.items()
-            if value is not None or key in nullable_openai_fields
-        }
+    type: str = Field(description="Discriminator for the executed agent type.")
+    name: str = Field(description="Display name of the agent that executed.")
+    output_variables: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured output variables produced by the agent run.",
+    )
+    status: AgentSpanStatus = Field(
+        description="Terminal status reported for the agent run."
+    )
+    request_id: str | None = Field(
+        default=None,
+        description="Request identifier associated with the agent run, when available.",
+    )
+    usage: UsageData | None = Field(
+        default=None,
+        description="Aggregate billable usage recorded for the agent run.",
+    )
 
 
 class OperatorAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.operator"] = "agent.operator"
+    type: Literal["agent.operator"] = Field(
+        default="agent.operator",
+        description="Identifies an Operator agent run.",
+    )
 
 
 class CoreAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.core"] = "agent.core"
+    type: Literal["agent.core"] = Field(
+        default="agent.core",
+        description="Identifies a Core agent run.",
+    )
 
 
 class ProductivityAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.productivity"] = "agent.productivity"
+    type: Literal["agent.productivity"] = Field(
+        default="agent.productivity",
+        description="Identifies a Productivity agent run.",
+    )
 
 
 class CustomAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.custom"] = "agent.custom"
+    type: Literal["agent.custom"] = Field(
+        default="agent.custom",
+        description="Identifies a custom agent run.",
+    )
 
 
 class CriticAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.critic"] = "agent.critic"
+    type: Literal["agent.critic"] = Field(
+        default="agent.critic",
+        description="Identifies a critic agent run.",
+    )
 
 
 class OtherAgentSpanData(BaseAgentSpanData):
-    type: Literal["agent.other"] = "agent.other"
-    agent_kind: str
+    type: Literal["agent.other"] = Field(
+        default="agent.other",
+        description="Identifies an agent run outside Narada's known agent types.",
+    )
+    agent_kind: str = Field(
+        description="Runtime agent-kind value when no specific subtype is available."
+    )
 
 
 type AgentSpanData = Annotated[
@@ -520,12 +745,22 @@ type AgentSpanData = Annotated[
 
 
 class AgentActionSpanData(SpanData):
-    type: Literal["agent_action"] = "agent_action"
-    name: str
-    message: str
-    status: SpanStatus
-    url: str | None = None
-    credits: NonNegativeFloat | None = None
+    type: Literal["agent_action"] = Field(
+        default="agent_action",
+        description="Identifies one user-facing action performed by an agent.",
+    )
+    name: str = Field(
+        description="Short user-facing name for the action that executed."
+    )
+    message: str = Field(description="User-facing description of what the agent did.")
+    url: str | None = Field(
+        default=None,
+        description="Browser page URL associated with the action, when available.",
+    )
+    credits: NonNegativeFloat | None = Field(
+        default=None,
+        description="Credits attributed to this individual action, when available.",
+    )
 
 
 type SpanDataUnion = Annotated[
@@ -539,14 +774,31 @@ type SpanDataUnion = Annotated[
 
 
 class Span(BaseModel):
-    object: Literal["trace.span"] = "trace.span"
-    id: str
-    trace_id: str
-    parent_id: str | None = None
-    started_at: datetime | None = None
-    ended_at: datetime | None = None
-    span_data: SpanDataUnion
-    error: SpanError | None = None
+    object: Literal["trace.span"] = Field(
+        default="trace.span",
+        description="Discriminator identifying this record as a span.",
+    )
+    id: str = Field(description="Unique identifier for the span.")
+    trace_id: str = Field(description="Identifier of the trace containing this span.")
+    parent_id: str | None = Field(
+        default=None,
+        description="Identifier of the parent span, or null for a root span.",
+    )
+    started_at: datetime | None = Field(
+        default=None,
+        description="UTC ISO 8601 timestamp at which the span started.",
+    )
+    ended_at: datetime | None = Field(
+        default=None,
+        description="UTC ISO 8601 timestamp at which the span ended.",
+    )
+    span_data: SpanDataUnion = Field(
+        description="Typed payload describing the operation represented by the span."
+    )
+    error: SpanError | None = Field(
+        default=None,
+        description="Error recorded for the span, or null when no error was recorded.",
+    )
 
     @field_validator("started_at", "ended_at")
     @classmethod
@@ -566,7 +818,7 @@ class Span(BaseModel):
         return self
 
 
-type TraceRecord = Annotated[Trace | Span, Field(discriminator="object")]
+type TraceItem = Annotated[Trace | Span, Field(discriminator="object")]
 
 
 __all__ = [
@@ -574,14 +826,16 @@ __all__ = [
     "AgenticMouseActionStepData",
     "AgenticSelectorStepData",
     "AgentSpanData",
-    "BaseAgentSpanData",
+    "AgentSpanStatus",
     "AgentStepData",
+    "BaseAgentSpanData",
+    "BaseControlFlowSpanData",
+    "BaseGuiStepSpanData",
     "BreakStepData",
     "CatchSpanData",
     "CloseTabStepData",
     "ContinueStepData",
     "ControlFlowSpanData",
-    "ControlFlowSpanDataBase",
     "CoreAgentSpanData",
     "CriticAgentSpanData",
     "CriticAgentStepData",
@@ -601,7 +855,7 @@ __all__ = [
     "GetSimplifiedHtmlStepData",
     "GetUrlStepData",
     "GuiStepSpanData",
-    "GuiStepSpanDataBase",
+    "GuiStepSpanStatus",
     "HttpRequestStepData",
     "IfStepData",
     "IterationSpanData",
@@ -634,12 +888,10 @@ __all__ = [
     "SpanData",
     "SpanDataUnion",
     "SpanError",
-    "SpanStatus",
     "StartStepData",
     "ThrowStepData",
     "Trace",
-    "TraceMetadata",
-    "TraceRecord",
+    "TraceItem",
     "TryCatchStepData",
     "TrySpanData",
     "UsageData",
@@ -648,6 +900,7 @@ __all__ = [
     "WaitStepData",
     "WhileStepData",
     "WorkflowSpanData",
+    "WorkflowSpanStatus",
     "WriteExcelSheetStepData",
     "WriteGoogleSheetStepData",
     "WriteLocalFilesystemStepData",

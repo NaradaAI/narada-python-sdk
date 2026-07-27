@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from narada_core.tracing import response_trace
 from narada_core.tracing.response_trace import (
     AgentSpanData,
     ControlFlowSpanData,
@@ -10,11 +11,12 @@ from narada_core.tracing.response_trace import (
     OperatorAgentSpanData,
     Span,
     Trace,
-    TraceRecord,
+    TraceItem,
+    TryCatchStepData,
     UsageData,
     WorkflowSpanData,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 GUI_STEP_TYPES = {
     "gui_step.agent",
@@ -79,29 +81,26 @@ def _discriminator_values(annotation: object) -> set[str]:
 
 
 def test_trace_serializes_with_openai_envelope() -> None:
-    trace = Trace(id="trace_123", workflow_name="Process renewals")
+    trace = Trace(id="trace_123")
 
     assert trace.model_dump(mode="json") == {
         "object": "trace",
         "id": "trace_123",
-        "workflow_name": "Process renewals",
         "group_id": None,
-        "metadata": {"schema_version": "1"},
+        "metadata": None,
     }
 
 
-def test_span_serializes_with_openai_envelope_and_omits_narada_nulls() -> None:
+def test_span_serializes_with_openai_envelope() -> None:
     span = Span(
         id="span_workflow",
         trace_id="trace_123",
         started_at=datetime(2026, 7, 24, 18, 0, tzinfo=UTC),
         ended_at=datetime(2026, 7, 24, 18, 0, 5, tzinfo=UTC),
         span_data=WorkflowSpanData(
-            name="Process renewals",
+            workflow_name="Process renewals",
             workflow_id="workflow_123",
-            workflow_run_id=None,
             status="success",
-            termination_mode="completed",
         ),
     )
 
@@ -114,16 +113,17 @@ def test_span_serializes_with_openai_envelope_and_omits_narada_nulls() -> None:
         "ended_at": "2026-07-24T18:00:05Z",
         "span_data": {
             "type": "workflow",
-            "name": "Process renewals",
+            "workflow_name": "Process renewals",
             "workflow_id": "workflow_123",
             "status": "success",
-            "termination_mode": "completed",
+            "request_id": None,
+            "output_variables": None,
         },
         "error": None,
     }
 
 
-def test_agent_span_keeps_nullable_output_type_and_empty_run_configuration() -> None:
+def test_agent_span_contains_only_execution_results() -> None:
     span = Span(
         id="span_agent",
         trace_id="trace_123",
@@ -133,58 +133,39 @@ def test_agent_span_keeps_nullable_output_type_and_empty_run_configuration() -> 
     assert span.model_dump(mode="json")["span_data"] == {
         "type": "agent.operator",
         "name": "Operator",
-        "output_type": None,
-        "additional_tools": [],
-        "attachments": [],
-        "vector_stores": [],
-        "output_variables": [],
-        "reasoning_effort": "agent_default",
+        "output_variables": {},
         "status": "success",
+        "request_id": None,
+        "usage": None,
     }
 
 
-def test_usage_data_does_not_include_aggregate_action_count() -> None:
-    usage = UsageData(credits=1)
+def test_usage_data_contains_billable_action_and_credit_totals() -> None:
+    usage = UsageData(actions=2, credits=1)
 
-    assert usage.model_dump(mode="json") == {"credits": 1.0}
-    assert "actions" not in UsageData.model_json_schema()["properties"]
+    assert usage.model_dump(mode="json") == {"actions": 2, "credits": 1.0}
+    assert set(UsageData.model_json_schema()["properties"]) == {"actions", "credits"}
 
 
-def test_agent_span_accepts_explicit_reasoning_effort() -> None:
+def test_agent_span_serializes_runtime_output_variables() -> None:
     agent = OperatorAgentSpanData(
         name="Operator",
-        reasoning_effort="high",
-        status="success",
-    )
-
-    assert agent.model_dump(mode="json")["reasoning_effort"] == "high"
-
-    with pytest.raises(ValidationError):
-        OperatorAgentSpanData(
-            name="Operator",
-            reasoning_effort="unsupported",  # type: ignore[arg-type]
-            status="success",
-        )
-
-
-def test_agent_span_serializes_run_configuration() -> None:
-    agent = OperatorAgentSpanData(
-        name="Operator",
-        additional_tools=["search_email"],
-        attachments=["contract.pdf"],
-        vector_stores=["customer_documents"],
-        output_variables=[{"name": "renewal_date", "type": "string"}],
+        output_variables={"renewal_date": "2027-01-01"},
         status="success",
     )
 
     serialized = agent.model_dump(mode="json")
 
-    assert serialized["additional_tools"] == ["search_email"]
-    assert serialized["attachments"] == ["contract.pdf"]
-    assert serialized["vector_stores"] == ["customer_documents"]
-    assert serialized["output_variables"] == [
-        {"name": "renewal_date", "type": "string"}
-    ]
+    assert serialized["output_variables"] == {"renewal_date": "2027-01-01"}
+    assert {
+        "additional_tools",
+        "attachments",
+        "vector_stores",
+        "reasoning_effort",
+        "input_summary",
+        "output_summary",
+        "page_url",
+    }.isdisjoint(serialized)
 
 
 def test_span_data_unions_parse_concrete_subtypes() -> None:
@@ -196,7 +177,6 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
                 "type": "gui_step.http_request",
                 "step_id": "step_123",
                 "status": "success",
-                "method": "GET",
                 "status_code": 200,
             },
         }
@@ -204,7 +184,6 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
     control_flow = TypeAdapter(ControlFlowSpanData).validate_python(
         {
             "type": "control_flow.iteration",
-            "status": "success",
             "iteration_index": 2,
         }
     )
@@ -232,12 +211,10 @@ def test_taxonomy_discriminators_are_complete() -> None:
     }
 
 
-def test_trace_record_discriminator_parses_trace_and_span() -> None:
-    adapter = TypeAdapter(TraceRecord)
+def test_trace_item_discriminator_parses_trace_and_span() -> None:
+    adapter = TypeAdapter(TraceItem)
 
-    trace = adapter.validate_python(
-        {"object": "trace", "id": "trace_123", "workflow_name": "Demo"}
-    )
+    trace = adapter.validate_python({"object": "trace", "id": "trace_123"})
     span = adapter.validate_python(
         {
             "object": "trace.span",
@@ -245,9 +222,8 @@ def test_trace_record_discriminator_parses_trace_and_span() -> None:
             "trace_id": "trace_123",
             "span_data": {
                 "type": "workflow",
-                "name": "Demo",
+                "workflow_name": "Demo",
                 "workflow_id": "workflow_123",
-                "workflow_run_id": None,
                 "status": "success",
             },
         }
@@ -255,7 +231,52 @@ def test_trace_record_discriminator_parses_trace_and_span() -> None:
 
     assert isinstance(trace, Trace)
     assert isinstance(span, Span)
-    assert span.span_data.workflow_run_id is None
+    assert span.span_data.request_id is None
+
+
+def test_span_types_use_their_source_statuses() -> None:
+    workflow = WorkflowSpanData(
+        workflow_name="Demo",
+        workflow_id="workflow_123",
+        status="input-required",
+    )
+    agent = OperatorAgentSpanData(name="Operator", status="timeout")
+    iteration = IterationSpanData(iteration_index=0)
+
+    assert workflow.status == "input-required"
+    assert agent.status == "timeout"
+    assert "status" not in type(iteration).model_fields
+
+    with pytest.raises(ValidationError):
+        WorkflowSpanData(
+            workflow_name="Demo",
+            workflow_id="workflow_123",
+            status="running",  # type: ignore[arg-type]
+        )
+
+
+def test_try_catch_execution_flags_are_required_booleans() -> None:
+    with pytest.raises(ValidationError):
+        TryCatchStepData(step_id="step_123", status="success")
+
+    trace = TryCatchStepData(
+        step_id="step_123",
+        status="success",
+        caught_error=False,
+        executed_catch=False,
+        executed_finally=True,
+    )
+
+    assert trace.executed_finally is True
+
+
+def test_every_public_model_field_has_a_description() -> None:
+    for name in response_trace.__all__:
+        value = getattr(response_trace, name)
+        if not isinstance(value, type) or not issubclass(value, BaseModel):
+            continue
+        for field_name, field in value.model_fields.items():
+            assert field.description, f"{name}.{field_name} has no description"
 
 
 @pytest.mark.parametrize(
@@ -293,7 +314,7 @@ def test_span_rejects_non_utc_or_reversed_timestamps(
             started_at=started_at,
             ended_at=ended_at,
             span_data=WorkflowSpanData(
-                name="Demo",
+                workflow_name="Demo",
                 workflow_id="workflow_123",
                 status="success",
             ),
@@ -309,7 +330,7 @@ def test_negative_numeric_values_are_rejected() -> None:
         )
 
     with pytest.raises(ValidationError):
-        IterationSpanData(status="success", iteration_index=-1)
+        IterationSpanData(iteration_index=-1)
 
     with pytest.raises(ValidationError):
-        IterationSpanData(status="success")
+        IterationSpanData()
