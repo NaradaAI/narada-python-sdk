@@ -7,3 +7,4 @@ def test_trace_models_are_publicly_exported() -> None:
     assert narada.Span is narada.tracing.Span
     assert narada.WorkflowSpanData is narada.tracing.WorkflowSpanData
     assert narada.AgentActionSpanData is narada.tracing.AgentActionSpanData
+    assert narada.tracing.BaseAgentSpanData.__name__ == "BaseAgentSpanData"

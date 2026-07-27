@@ -135,8 +135,26 @@ def test_agent_span_keeps_openai_nullable_fields() -> None:
         "handoffs": None,
         "tools": None,
         "output_type": None,
+        "reasoning_effort": "agent_default",
         "status": "success",
     }
+
+
+def test_agent_span_accepts_explicit_reasoning_effort() -> None:
+    agent = OperatorAgentSpanData(
+        name="Operator",
+        reasoning_effort="high",
+        status="success",
+    )
+
+    assert agent.model_dump(mode="json")["reasoning_effort"] == "high"
+
+    with pytest.raises(ValidationError):
+        OperatorAgentSpanData(
+            name="Operator",
+            reasoning_effort="unsupported",  # type: ignore[arg-type]
+            status="success",
+        )
 
 
 def test_span_data_unions_parse_concrete_subtypes() -> None:

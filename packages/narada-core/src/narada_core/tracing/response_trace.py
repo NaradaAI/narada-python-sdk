@@ -445,12 +445,19 @@ class UsageData(_OmitNoneModel):
     total_tokens: NonNegativeInt | None = None
 
 
-class AgentSpanDataBase(SpanData):
+class BaseAgentSpanData(SpanData):
     type: str
     name: str
     handoffs: list[str] | None = None
     tools: list[str] | None = None
     output_type: str | None = None
+    reasoning_effort: Literal[
+        "agent_default",
+        "none",
+        "low",
+        "medium",
+        "high",
+    ] = "agent_default"
     status: SpanStatus
     agent_id: str | None = None
     request_id: str | None = None
@@ -475,27 +482,27 @@ class AgentSpanDataBase(SpanData):
         }
 
 
-class OperatorAgentSpanData(AgentSpanDataBase):
+class OperatorAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.operator"] = "agent.operator"
 
 
-class CoreAgentSpanData(AgentSpanDataBase):
+class CoreAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.core"] = "agent.core"
 
 
-class ProductivityAgentSpanData(AgentSpanDataBase):
+class ProductivityAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.productivity"] = "agent.productivity"
 
 
-class CustomAgentSpanData(AgentSpanDataBase):
+class CustomAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.custom"] = "agent.custom"
 
 
-class CriticAgentSpanData(AgentSpanDataBase):
+class CriticAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.critic"] = "agent.critic"
 
 
-class OtherAgentSpanData(AgentSpanDataBase):
+class OtherAgentSpanData(BaseAgentSpanData):
     type: Literal["agent.other"] = "agent.other"
     agent_kind: str
 
@@ -566,7 +573,7 @@ __all__ = [
     "AgenticMouseActionStepData",
     "AgenticSelectorStepData",
     "AgentSpanData",
-    "AgentSpanDataBase",
+    "BaseAgentSpanData",
     "AgentStepData",
     "BreakStepData",
     "CatchSpanData",
