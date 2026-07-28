@@ -70,9 +70,6 @@ class SpanData(BaseModel):
     type: str = Field(description="Discriminator for the span-specific payload.")
 
 
-TSpanData = TypeVar("TSpanData", bound=SpanData)
-
-
 class WorkflowSpanData(SpanData):
     type: Literal["workflow"] = Field(
         default="workflow",
@@ -375,54 +372,6 @@ class EndStepInput(BaseModel):
     )
 
 
-class BaseForStepInput(BaseModel):
-    loop_type: str = Field(description="Discriminator for the configured loop mode.")
-    index_output_variable: str | None = Field(
-        default=None,
-        description="Workflow variable selected to receive the loop index.",
-    )
-
-
-class ForNTimesStepInput(BaseForStepInput):
-    loop_type: Literal["nTimes"] = Field(
-        default="nTimes",
-        description="Identifies a fixed-count loop input.",
-    )
-    iterations: str = Field(description="Effective number of requested iterations.")
-
-
-class ForEachRowStepInput(BaseForStepInput):
-    loop_type: Literal["forEachRowInDataTable"] = Field(
-        default="forEachRowInDataTable",
-        description="Identifies a data-table row loop input.",
-    )
-    data_table_input_variable: str = Field(
-        description="Workflow data-table variable iterated by the step."
-    )
-    row_output_variable: str = Field(
-        description="Workflow variable receiving the current row."
-    )
-
-
-class ForEachItemStepInput(BaseForStepInput):
-    loop_type: Literal["forEachItemsInArray"] = Field(
-        default="forEachItemsInArray",
-        description="Identifies an array item loop input.",
-    )
-    array_input_variable: str = Field(
-        description="Workflow array variable iterated by the step."
-    )
-    item_output_variable: str = Field(
-        description="Workflow variable receiving the current item."
-    )
-
-
-type ForStepInput = Annotated[
-    ForNTimesStepInput | ForEachRowStepInput | ForEachItemStepInput,
-    Field(discriminator="loop_type"),
-]
-
-
 class OutputVariableStepInput(BaseModel):
     output_variable: str = Field(
         description="Workflow variable selected to receive the step result."
@@ -620,76 +569,6 @@ class ReadGoogleSheetStepInput(BaseModel):
     output_variable: str = Field(
         description="Workflow variable selected to receive the sheet data."
     )
-
-
-class BaseEmailActionStepInput(BaseModel):
-    action: str = Field(description="Discriminator for the configured email action.")
-    connector: str = Field(description="Stable reference for the selected connector.")
-    output_variable: str | None = Field(
-        default=None,
-        description="Workflow variable selected to receive the provider result.",
-    )
-
-
-class SendEmailStepInput(BaseEmailActionStepInput):
-    action: Literal["send"] = Field(
-        default="send",
-        description="Identifies a send-email input.",
-    )
-    to: str = Field(description="Effective primary recipients.")
-    cc: str = Field(description="Effective carbon-copy recipients.")
-    bcc: str = Field(description="Effective blind-carbon-copy recipients.")
-    subject: str = Field(description="Effective email subject.")
-    body: str = Field(description="Effective email body.")
-    file_variable_attachments: list[str] = Field(
-        default_factory=list,
-        description="Names of file variables attached to the email.",
-    )
-
-
-class GetManyEmailsStepInput(BaseEmailActionStepInput):
-    action: Literal["getMany"] = Field(
-        default="getMany",
-        description="Identifies a multi-email retrieval input.",
-    )
-    gmail_filters: dict[str, Any] | None = Field(
-        default=None,
-        description="Filters applied to the email search.",
-    )
-    max_results: NonNegativeInt = Field(
-        description="Maximum number of emails requested."
-    )
-
-
-class MarkEmailStepInput(BaseEmailActionStepInput):
-    action: Literal["markRead", "markUnread"] = Field(
-        description="Identifies a mark-read or mark-unread input."
-    )
-    message_id: str = Field(description="Effective email message identifier.")
-
-
-class GetEmailByIdStepInput(BaseEmailActionStepInput):
-    action: Literal["getById"] = Field(
-        default="getById",
-        description="Identifies a single-email retrieval input.",
-    )
-    message_id: str = Field(description="Effective email message identifier.")
-    attachment_output_variable: str | None = Field(
-        default=None,
-        description="Workflow variable selected to receive downloaded attachments.",
-    )
-    download_attachments: bool = Field(
-        description="Whether attachments are downloaded with the email."
-    )
-
-
-type EmailActionStepInput = Annotated[
-    SendEmailStepInput
-    | GetManyEmailsStepInput
-    | MarkEmailStepInput
-    | GetEmailByIdStepInput,
-    Field(discriminator="action"),
-]
 
 
 class SlackActionStepInput(BaseModel):
@@ -900,25 +779,17 @@ class BaseGuiStepSpanData(SpanData):
     )
 
 
-class AgentStepData(BaseGuiStepSpanData):
+class AgentStepData(AgentStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.agent"] = Field(
         default="gui_step.agent",
         description="Identifies a GUI agent step.",
     )
-    input: AgentStepInput | None = Field(
-        default=None,
-        description="Effective configuration used to invoke the agent.",
-    )
 
 
-class AgenticMouseActionStepData(BaseGuiStepSpanData):
+class AgenticMouseActionStepData(AgenticMouseActionStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.agentic_mouse_action"] = Field(
         default="gui_step.agentic_mouse_action",
         description="Identifies a GUI agentic mouse action step.",
-    )
-    input: AgenticMouseActionStepInput | None = Field(
-        default=None,
-        description="Effective mouse-action configuration used by the step.",
     )
     strategy: Literal["direct", "operator_fallback"] = Field(
         description="Execution path that ultimately performed the mouse action."
@@ -932,160 +803,112 @@ class AgenticMouseActionStepData(BaseGuiStepSpanData):
     )
 
 
-class AgenticSelectorStepData(BaseGuiStepSpanData):
+class AgenticSelectorStepData(AgenticSelectorStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.agentic_selector"] = Field(
         default="gui_step.agentic_selector",
         description="Identifies a GUI agentic selector step.",
-    )
-    input: AgenticSelectorStepInput | None = Field(
-        default=None,
-        description="Effective selector configuration used by the step.",
     )
     strategy: Literal["selector", "operator_fallback"] = Field(
         description="Execution path that ultimately selected the element."
     )
 
 
-class RunBashScriptStepData(BaseGuiStepSpanData):
+class RunBashScriptStepData(RunBashScriptStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.run_bash_script"] = Field(
         default="gui_step.run_bash_script",
         description="Identifies a GUI run-Bash-script step.",
     )
-    input: RunBashScriptStepInput | None = Field(
-        default=None,
-        description="Effective Bash input used by the step.",
-    )
 
 
-class BreakStepData(BaseGuiStepSpanData):
+class BreakStepData(BreakStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.break"] = Field(
         default="gui_step.break",
         description="Identifies a GUI break step.",
     )
-    input: BreakStepInput | None = Field(
-        default=None,
-        description="Input for the break step.",
-    )
 
 
-class CloseTabStepData(BaseGuiStepSpanData):
+class CloseTabStepData(CloseTabStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.close_tab"] = Field(
         default="gui_step.close_tab",
         description="Identifies a GUI close-tab step.",
     )
-    input: CloseTabStepInput | None = Field(
-        default=None,
-        description="Input for the close-tab step.",
-    )
 
 
-class ContinueStepData(BaseGuiStepSpanData):
+class ContinueStepData(ContinueStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.continue"] = Field(
         default="gui_step.continue",
         description="Identifies a GUI continue step.",
     )
-    input: ContinueStepInput | None = Field(
-        default=None,
-        description="Input for the continue step.",
-    )
 
 
-class DataTableExportAsCsvStepData(BaseGuiStepSpanData):
+class DataTableExportAsCsvStepData(DataTableExportAsCsvStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.data_table_export_as_csv"] = Field(
         default="gui_step.data_table_export_as_csv",
         description="Identifies a GUI data-table CSV export step.",
     )
-    input: DataTableExportAsCsvStepInput | None = Field(
-        default=None,
-        description="Effective data-table export input used by the step.",
-    )
 
 
-class DataTableInsertRowStepData(BaseGuiStepSpanData):
+class DataTableInsertRowStepData(DataTableInsertRowStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.data_table_insert_row"] = Field(
         default="gui_step.data_table_insert_row",
         description="Identifies a GUI data-table row insertion step.",
     )
-    input: DataTableInsertRowStepInput | None = Field(
-        default=None,
-        description="Effective row-insertion input used by the step.",
-    )
 
 
-class DataTableUpdateCellValueStepData(BaseGuiStepSpanData):
+class DataTableUpdateCellValueStepData(
+    DataTableUpdateCellValueStepInput, BaseGuiStepSpanData
+):
     type: Literal["gui_step.data_table_update_cell_value"] = Field(
         default="gui_step.data_table_update_cell_value",
         description="Identifies a GUI data-table cell update step.",
     )
-    input: DataTableUpdateCellValueStepInput | None = Field(
-        default=None,
-        description="Effective cell-update input used by the step.",
-    )
 
 
-class DesktopAgenticSelectorStepData(BaseGuiStepSpanData):
+class DesktopAgenticSelectorStepData(
+    DesktopAgenticSelectorStepInput, BaseGuiStepSpanData
+):
     type: Literal["gui_step.desktop_agentic_selector"] = Field(
         default="gui_step.desktop_agentic_selector",
         description="Identifies a GUI desktop agentic selector step.",
     )
-    input: DesktopAgenticSelectorStepInput | None = Field(
-        default=None,
-        description="Effective desktop-selector input used by the step.",
-    )
 
 
-class ExecuteJavaScriptOnPageStepData(BaseGuiStepSpanData):
+class ExecuteJavaScriptOnPageStepData(
+    ExecuteJavaScriptOnPageStepInput, BaseGuiStepSpanData
+):
     type: Literal["gui_step.execute_javascript_on_page"] = Field(
         default="gui_step.execute_javascript_on_page",
         description="Identifies a GUI in-page JavaScript execution step.",
     )
-    input: ExecuteJavaScriptOnPageStepInput | None = Field(
-        default=None,
-        description="Effective JavaScript input used by the step.",
-    )
 
 
-class OpenDesktopApplicationStepData(BaseGuiStepSpanData):
+class OpenDesktopApplicationStepData(
+    OpenDesktopApplicationStepInput, BaseGuiStepSpanData
+):
     type: Literal["gui_step.open_desktop_application"] = Field(
         default="gui_step.open_desktop_application",
         description="Identifies a GUI open-desktop-application step.",
     )
-    input: OpenDesktopApplicationStepInput | None = Field(
-        default=None,
-        description="Effective desktop-application input used by the step.",
-    )
 
 
-class ReadLocalFilesystemStepData(BaseGuiStepSpanData):
+class ReadLocalFilesystemStepData(ReadLocalFilesystemStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.read_local_filesystem"] = Field(
         default="gui_step.read_local_filesystem",
         description="Identifies a GUI local-filesystem read step.",
     )
-    input: ReadLocalFilesystemStepInput | None = Field(
-        default=None,
-        description="Effective local-filesystem read input used by the step.",
-    )
 
 
-class WriteLocalFilesystemStepData(BaseGuiStepSpanData):
+class WriteLocalFilesystemStepData(WriteLocalFilesystemStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.write_local_filesystem"] = Field(
         default="gui_step.write_local_filesystem",
         description="Identifies a GUI local-filesystem write step.",
     )
-    input: WriteLocalFilesystemStepInput | None = Field(
-        default=None,
-        description="Effective local-filesystem write input used by the step.",
-    )
 
 
-class EndStepData(BaseGuiStepSpanData):
+class EndStepData(EndStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.end"] = Field(
         default="gui_step.end",
         description="Identifies a GUI end step.",
-    )
-    input: EndStepInput | None = Field(
-        default=None,
-        description="Effective workflow-termination input used by the step.",
     )
 
 
@@ -1094,100 +917,91 @@ class ForStepData(BaseGuiStepSpanData):
         default="gui_step.for",
         description="Identifies a GUI for-loop step.",
     )
-    input: ForStepInput | None = Field(
+    loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"] = (
+        Field(description="Configured loop mode.")
+    )
+    index_output_variable: str | None = Field(
         default=None,
-        description="Effective loop configuration used by the step.",
+        description="Workflow variable selected to receive the loop index.",
+    )
+    iterations: str | None = Field(
+        default=None,
+        description="Effective number of requested iterations for a fixed-count loop.",
+    )
+    data_table_input_variable: str | None = Field(
+        default=None,
+        description="Workflow data-table variable iterated by a row loop.",
+    )
+    row_output_variable: str | None = Field(
+        default=None,
+        description="Workflow variable receiving the current row.",
+    )
+    array_input_variable: str | None = Field(
+        default=None,
+        description="Workflow array variable iterated by an item loop.",
+    )
+    item_output_variable: str | None = Field(
+        default=None,
+        description="Workflow variable receiving the current item.",
     )
     total_iterations: NonNegativeInt = Field(
         description="Number of loop iterations that started during this execution."
     )
 
 
-class SavePdfFileStepData(BaseGuiStepSpanData):
+class SavePdfFileStepData(SavePdfFileStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.save_pdf_file"] = Field(
         default="gui_step.save_pdf_file",
         description="Identifies a GUI save-PDF-file step.",
     )
-    input: SavePdfFileStepInput | None = Field(
-        default=None,
-        description="Effective PDF-save input used by the step.",
-    )
 
 
-class GetFullHtmlStepData(BaseGuiStepSpanData):
+class GetFullHtmlStepData(GetFullHtmlStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.get_full_html"] = Field(
         default="gui_step.get_full_html",
         description="Identifies a GUI full-HTML retrieval step.",
     )
-    input: GetFullHtmlStepInput | None = Field(
-        default=None,
-        description="Effective full-HTML retrieval input used by the step.",
-    )
 
 
-class GetScreenshotStepData(BaseGuiStepSpanData):
+class GetScreenshotStepData(GetScreenshotStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.get_screenshot"] = Field(
         default="gui_step.get_screenshot",
         description="Identifies a GUI screenshot step.",
     )
-    input: GetScreenshotStepInput | None = Field(
-        default=None,
-        description="Effective screenshot input used by the step.",
-    )
 
 
-class GetSimplifiedHtmlStepData(BaseGuiStepSpanData):
+class GetSimplifiedHtmlStepData(GetSimplifiedHtmlStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.get_simplified_html"] = Field(
         default="gui_step.get_simplified_html",
         description="Identifies a GUI simplified-HTML retrieval step.",
     )
-    input: GetSimplifiedHtmlStepInput | None = Field(
-        default=None,
-        description="Effective simplified-HTML retrieval input used by the step.",
-    )
 
 
-class GetUrlStepData(BaseGuiStepSpanData):
+class GetUrlStepData(GetUrlStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.get_url"] = Field(
         default="gui_step.get_url",
         description="Identifies a GUI get-URL step.",
     )
-    input: GetUrlStepInput | None = Field(
-        default=None,
-        description="Effective URL-retrieval input used by the step.",
-    )
 
 
-class GoToUrlStepData(BaseGuiStepSpanData):
+class GoToUrlStepData(GoToUrlStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.go_to_url"] = Field(
         default="gui_step.go_to_url",
         description="Identifies a GUI go-to-URL step.",
     )
-    input: GoToUrlStepInput | None = Field(
-        default=None,
-        description="Effective navigation input used by the step.",
-    )
 
 
-class HttpRequestStepData(BaseGuiStepSpanData):
+class HttpRequestStepData(HttpRequestStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.http_request"] = Field(
         default="gui_step.http_request",
         description="Identifies a GUI HTTP-request step.",
     )
-    input: HttpRequestStepInput | None = Field(
-        default=None,
-        description="Effective HTTP request input used by the step.",
-    )
 
 
-class IfStepData(BaseGuiStepSpanData):
+class IfStepData(IfStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.if"] = Field(
         default="gui_step.if",
         description="Identifies a GUI conditional step.",
-    )
-    input: IfStepInput | None = Field(
-        default=None,
-        description="Authored branch configuration used by the step.",
     )
     selected_condition: str | None = Field(
         default=None,
@@ -1198,113 +1012,75 @@ class IfStepData(BaseGuiStepSpanData):
     )
 
 
-class LogVariablesToFileStepData(BaseGuiStepSpanData):
+class LogVariablesToFileStepData(LogVariablesToFileStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.log_variables_to_file"] = Field(
         default="gui_step.log_variables_to_file",
         description="Identifies a GUI variable-log file step.",
     )
-    input: LogVariablesToFileStepInput | None = Field(
-        default=None,
-        description="Effective variable-log input used by the step.",
-    )
 
 
-class ObjectExportAsJsonStepData(BaseGuiStepSpanData):
+class ObjectExportAsJsonStepData(ObjectExportAsJsonStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.object_export_as_json"] = Field(
         default="gui_step.object_export_as_json",
         description="Identifies a GUI object JSON export step.",
     )
-    input: ObjectExportAsJsonStepInput | None = Field(
-        default=None,
-        description="Effective object-export input used by the step.",
-    )
 
 
-class ObjectSetPropertiesStepData(BaseGuiStepSpanData):
+class ObjectSetPropertiesStepData(ObjectSetPropertiesStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.object_set_properties"] = Field(
         default="gui_step.object_set_properties",
         description="Identifies a GUI object-property update step.",
     )
-    input: ObjectSetPropertiesStepInput | None = Field(
-        default=None,
-        description="Effective object-property input used by the step.",
-    )
 
 
-class PressKeysStepData(BaseGuiStepSpanData):
+class PressKeysStepData(PressKeysStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.press_keys"] = Field(
         default="gui_step.press_keys",
         description="Identifies a GUI key-press step.",
     )
-    input: PressKeysStepInput | None = Field(
-        default=None,
-        description="Effective key input replayed by the step.",
-    )
 
 
-class PrintStepData(BaseGuiStepSpanData):
+class PrintStepData(PrintStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.print"] = Field(
         default="gui_step.print",
         description="Identifies a GUI print step.",
     )
-    input: PrintStepInput | None = Field(
-        default=None,
-        description="Effective print input used by the step.",
-    )
 
 
-class NaradaCodeProjectExecutableStepData(BaseGuiStepSpanData):
+class NaradaCodeProjectExecutableStepData(
+    NaradaCodeProjectExecutableStepInput, BaseGuiStepSpanData
+):
     type: Literal["gui_step.narada_code_project_executable"] = Field(
         default="gui_step.narada_code_project_executable",
         description="Identifies a GUI Narada Code project-executable step.",
     )
-    input: NaradaCodeProjectExecutableStepInput | None = Field(
-        default=None,
-        description="Effective project-executable input used by the step.",
-    )
 
 
-class PythonStepData(BaseGuiStepSpanData):
+class PythonStepData(PythonStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.python"] = Field(
         default="gui_step.python",
         description="Identifies a GUI Python execution step.",
     )
-    input: PythonStepInput | None = Field(
-        default=None,
-        description="Effective Python input used by the step.",
-    )
 
 
-class ReadCsvStepData(BaseGuiStepSpanData):
+class ReadCsvStepData(ReadCsvStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.read_csv"] = Field(
         default="gui_step.read_csv",
         description="Identifies a GUI CSV-read step.",
     )
-    input: ReadCsvStepInput | None = Field(
-        default=None,
-        description="Effective CSV-read input used by the step.",
-    )
 
 
-class ReadExcelSheetStepData(BaseGuiStepSpanData):
+class ReadExcelSheetStepData(ReadExcelSheetStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.read_excel_sheet"] = Field(
         default="gui_step.read_excel_sheet",
         description="Identifies a GUI Excel-sheet read step.",
     )
-    input: ReadExcelSheetStepInput | None = Field(
-        default=None,
-        description="Effective Excel read input used by the step.",
-    )
 
 
-class ReadGoogleSheetStepData(BaseGuiStepSpanData):
+class ReadGoogleSheetStepData(ReadGoogleSheetStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.read_google_sheet"] = Field(
         default="gui_step.read_google_sheet",
         description="Identifies a GUI Google-Sheet read step.",
-    )
-    input: ReadGoogleSheetStepInput | None = Field(
-        default=None,
-        description="Effective Google Sheets read input used by the step.",
     )
 
 
@@ -1313,75 +1089,99 @@ class EmailActionStepData(BaseGuiStepSpanData):
         default="gui_step.email_action",
         description="Identifies a GUI email action step.",
     )
-    input: EmailActionStepInput | None = Field(
+    action: Literal["send", "getMany", "markRead", "markUnread", "getById"] = Field(
+        description="Email operation performed by the step."
+    )
+    connector: str = Field(description="Stable reference for the selected connector.")
+    output_variable: str | None = Field(
         default=None,
-        description="Effective email-action input used by the step.",
+        description="Workflow variable selected to receive the provider result.",
+    )
+    to: str | None = Field(
+        default=None,
+        description="Effective primary recipients for a send operation.",
+    )
+    cc: str | None = Field(
+        default=None,
+        description="Effective carbon-copy recipients for a send operation.",
+    )
+    bcc: str | None = Field(
+        default=None,
+        description="Effective blind-carbon-copy recipients for a send operation.",
+    )
+    subject: str | None = Field(
+        default=None,
+        description="Effective email subject for a send operation.",
+    )
+    body: str | None = Field(
+        default=None,
+        description="Effective email body for a send operation.",
+    )
+    file_variable_attachments: list[str] = Field(
+        default_factory=list,
+        description="Names of file variables attached to a sent email.",
+    )
+    gmail_filters: dict[str, Any] | None = Field(
+        default=None,
+        description="Filters applied by a multi-email retrieval operation.",
+    )
+    max_results: NonNegativeInt | None = Field(
+        default=None,
+        description="Maximum number of emails requested by a retrieval operation.",
+    )
+    message_id: str | None = Field(
+        default=None,
+        description="Effective message identifier used by a message operation.",
+    )
+    attachment_output_variable: str | None = Field(
+        default=None,
+        description="Workflow variable selected to receive downloaded attachments.",
+    )
+    download_attachments: bool | None = Field(
+        default=None,
+        description="Whether a single-email retrieval downloaded attachments.",
     )
 
 
-class SlackActionStepData(BaseGuiStepSpanData):
+class SlackActionStepData(SlackActionStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.slack_action"] = Field(
         default="gui_step.slack_action",
         description="Identifies a GUI Slack action step.",
     )
-    input: SlackActionStepInput | None = Field(
-        default=None,
-        description="Effective Slack-action input used by the step.",
-    )
 
 
-class SetVariableStepData(BaseGuiStepSpanData):
+class SetVariableStepData(SetVariableStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.set_variable"] = Field(
         default="gui_step.set_variable",
         description="Identifies a GUI set-variable step.",
     )
-    input: SetVariableStepInput | None = Field(
-        default=None,
-        description="Effective variable-assignment input used by the step.",
-    )
 
 
-class PromptForUserInputStepData(BaseGuiStepSpanData):
+class PromptForUserInputStepData(PromptForUserInputStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.prompt_for_user_input"] = Field(
         default="gui_step.prompt_for_user_input",
         description="Identifies a GUI user-input prompt step.",
     )
-    input: PromptForUserInputStepInput | None = Field(
-        default=None,
-        description="Effective user-prompt input used by the step.",
-    )
 
 
-class StartStepData(BaseGuiStepSpanData):
+class StartStepData(StartStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.start"] = Field(
         default="gui_step.start",
         description="Identifies a GUI start step.",
     )
-    input: StartStepInput | None = Field(
-        default=None,
-        description="Input for the start step.",
-    )
 
 
-class ThrowStepData(BaseGuiStepSpanData):
+class ThrowStepData(ThrowStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.throw"] = Field(
         default="gui_step.throw",
         description="Identifies a GUI throw step.",
     )
-    input: ThrowStepInput | None = Field(
-        default=None,
-        description="Effective error input used by the step.",
-    )
 
 
-class TryCatchStepData(BaseGuiStepSpanData):
+class TryCatchStepData(TryCatchStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.try_catch"] = Field(
         default="gui_step.try_catch",
         description="Identifies a GUI try/catch step.",
-    )
-    input: TryCatchStepInput | None = Field(
-        default=None,
-        description="Authored try/catch configuration used by the step.",
     )
     caught_condition: str | None = Field(
         default=None,
@@ -1392,76 +1192,52 @@ class TryCatchStepData(BaseGuiStepSpanData):
     )
 
 
-class UserApprovalStepData(BaseGuiStepSpanData):
+class UserApprovalStepData(UserApprovalStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.user_approval"] = Field(
         default="gui_step.user_approval",
         description="Identifies a GUI user-approval step.",
     )
-    input: UserApprovalStepInput | None = Field(
-        default=None,
-        description="Effective approval input used by the step.",
-    )
 
 
-class WaitStepData(BaseGuiStepSpanData):
+class WaitStepData(WaitStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.wait"] = Field(
         default="gui_step.wait",
         description="Identifies a GUI wait step.",
     )
-    input: WaitStepInput | None = Field(
-        default=None,
-        description="Effective wait input used by the step.",
-    )
 
 
-class WaitForElementStepData(BaseGuiStepSpanData):
+class WaitForElementStepData(WaitForElementStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.wait_for_element"] = Field(
         default="gui_step.wait_for_element",
         description="Identifies a GUI wait-for-element step.",
     )
-    input: WaitForElementStepInput | None = Field(
-        default=None,
-        description="Effective element-wait input used by the step.",
-    )
 
 
-class WhileStepData(BaseGuiStepSpanData):
+class WhileStepData(WhileStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.while"] = Field(
         default="gui_step.while",
         description="Identifies a GUI while-loop step.",
-    )
-    input: WhileStepInput | None = Field(
-        default=None,
-        description="Effective while-loop input used by the step.",
     )
     total_iterations: NonNegativeInt = Field(
         description="Number of loop iterations that started during this execution."
     )
 
 
-class WriteExcelSheetStepData(BaseGuiStepSpanData):
+class WriteExcelSheetStepData(WriteExcelSheetStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.write_excel_sheet"] = Field(
         default="gui_step.write_excel_sheet",
         description="Identifies a GUI Excel-sheet write step.",
     )
-    input: WriteExcelSheetStepInput | None = Field(
-        default=None,
-        description="Effective Excel write input used by the step.",
-    )
 
 
-class WriteGoogleSheetStepData(BaseGuiStepSpanData):
+class WriteGoogleSheetStepData(WriteGoogleSheetStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.write_google_sheet"] = Field(
         default="gui_step.write_google_sheet",
         description="Identifies a GUI Google-Sheet write step.",
     )
-    input: WriteGoogleSheetStepInput | None = Field(
-        default=None,
-        description="Effective Google Sheets write input used by the step.",
-    )
 
 
-class RunCustomAgentStepData(BaseGuiStepSpanData):
+class RunCustomAgentStepData(RunCustomAgentStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.run_custom_agent"] = Field(
         default="gui_step.run_custom_agent",
         description=(
@@ -1469,31 +1245,19 @@ class RunCustomAgentStepData(BaseGuiStepSpanData):
             "the workflow span for the invoked workflow."
         ),
     )
-    input: RunCustomAgentStepInput | None = Field(
-        default=None,
-        description="Effective custom-workflow input used by the step.",
-    )
 
 
-class OutputStepData(BaseGuiStepSpanData):
+class OutputStepData(OutputStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.output"] = Field(
         default="gui_step.output",
         description="Identifies a GUI output step.",
     )
-    input: OutputStepInput | None = Field(
-        default=None,
-        description="Workflow-output selection used by the step.",
-    )
 
 
-class CriticAgentStepData(BaseGuiStepSpanData):
+class CriticAgentStepData(CriticAgentStepInput, BaseGuiStepSpanData):
     type: Literal["gui_step.critic_agent"] = Field(
         default="gui_step.critic_agent",
         description="Identifies a GUI critic-agent step.",
-    )
-    input: CriticAgentStepInput | None = Field(
-        default=None,
-        description="Effective critic-agent input used by the step.",
     )
 
 
@@ -1664,6 +1428,9 @@ type SpanDataUnion = Annotated[
 ]
 
 
+TSpanData = TypeVar("TSpanData", bound=SpanDataUnion)
+
+
 class Span(BaseModel, Generic[TSpanData]):
     """A trace span that preserves the concrete type of its span data.
 
@@ -1728,144 +1495,83 @@ class Span(BaseModel, Generic[TSpanData]):
 
 __all__ = [
     "AgentActionSpanData",
-    "AgenticMouseActionStepInput",
     "AgenticMouseActionStepData",
-    "AgenticSelectorStepInput",
     "AgenticSelectorStepData",
     "AgentSpanData",
     "AgentSpanStatus",
     "AgentType",
-    "AgentStepInput",
     "AgentStepData",
     "BaseControlFlowSpanData",
-    "BaseEmailActionStepInput",
-    "BaseForStepInput",
     "BaseGuiStepSpanData",
-    "BreakStepInput",
     "BreakStepData",
     "CatchBranchInput",
     "CatchSpanData",
-    "CloseTabStepInput",
     "CloseTabStepData",
     "ConditionalBranchInput",
-    "ContinueStepInput",
     "ContinueStepData",
     "ControlFlowSpanData",
-    "CriticAgentStepInput",
     "CriticAgentStepData",
-    "DataTableExportAsCsvStepInput",
     "DataTableExportAsCsvStepData",
-    "DataTableInsertRowStepInput",
     "DataTableInsertRowStepData",
-    "DataTableUpdateCellValueStepInput",
     "DataTableUpdateCellValueStepData",
-    "DesktopAgenticSelectorStepInput",
     "DesktopAgenticSelectorStepData",
-    "EmailActionStepInput",
     "EmailActionStepData",
-    "EndStepInput",
     "EndStepData",
-    "ExecuteJavaScriptOnPageStepInput",
     "ExecuteJavaScriptOnPageStepData",
     "FinallySpanData",
-    "ForEachItemStepInput",
-    "ForEachRowStepInput",
-    "ForNTimesStepInput",
-    "ForStepInput",
     "ForStepData",
-    "GetEmailByIdStepInput",
-    "GetFullHtmlStepInput",
     "GetFullHtmlStepData",
-    "GetManyEmailsStepInput",
-    "GetScreenshotStepInput",
     "GetScreenshotStepData",
-    "GetSimplifiedHtmlStepInput",
     "GetSimplifiedHtmlStepData",
-    "GetUrlStepInput",
     "GetUrlStepData",
-    "GoToUrlStepInput",
     "GoToUrlStepData",
     "GuiStepSpanData",
     "GuiStepSpanStatus",
     "HttpRequestAuthInput",
     "HttpRequestMultipartInput",
-    "HttpRequestStepInput",
     "HttpRequestStepData",
-    "IfStepInput",
     "IfStepData",
     "IterationSpanData",
-    "LogVariablesToFileStepInput",
     "LogVariablesToFileStepData",
-    "MarkEmailStepInput",
-    "NaradaCodeProjectExecutableStepInput",
     "NaradaCodeProjectExecutableStepData",
-    "ObjectExportAsJsonStepInput",
     "ObjectExportAsJsonStepData",
     "ObjectPropertyAssignmentInput",
-    "ObjectSetPropertiesStepInput",
     "ObjectSetPropertiesStepData",
-    "OpenDesktopApplicationStepInput",
     "OpenDesktopApplicationStepData",
-    "OutputStepInput",
     "OutputStepData",
     "OutputVariableMappingInput",
-    "OutputVariableStepInput",
-    "PressKeysStepInput",
     "PressKeysStepData",
-    "PrintStepInput",
     "PrintStepData",
-    "PromptForUserInputStepInput",
     "PromptForUserInputVariable",
     "PromptForUserInputStepData",
-    "PythonStepInput",
     "PythonStepData",
-    "ReadCsvStepInput",
     "ReadCsvStepData",
-    "ReadExcelSheetStepInput",
     "ReadExcelSheetStepData",
-    "ReadGoogleSheetStepInput",
     "ReadGoogleSheetStepData",
-    "ReadLocalFilesystemStepInput",
     "ReadLocalFilesystemStepData",
-    "RunBashScriptStepInput",
     "RunBashScriptStepData",
-    "RunCustomAgentStepInput",
     "RunCustomAgentStepData",
-    "SavePdfFileStepInput",
     "SavePdfFileStepData",
-    "SendEmailStepInput",
-    "SetVariableStepInput",
     "SetVariableStepData",
-    "SlackActionStepInput",
     "SlackActionStepData",
     "Span",
     "SpanData",
     "SpanDataUnion",
     "SpanError",
-    "StartStepInput",
     "StartStepData",
-    "ThrowStepInput",
     "ThrowStepData",
     "Trace",
-    "TryCatchStepInput",
     "TryCatchStepData",
     "TrySpanData",
     "UsageData",
-    "UserApprovalStepInput",
     "UserApprovalStepData",
     "VariableMappingInput",
-    "WaitForElementStepInput",
     "WaitForElementStepData",
-    "WaitStepInput",
     "WaitStepData",
-    "WhileStepInput",
     "WhileStepData",
     "WorkflowSpanData",
     "WorkflowSpanStatus",
-    "WriteExcelSheetStepInput",
     "WriteExcelSheetStepData",
-    "WriteGoogleSheetStepInput",
     "WriteGoogleSheetStepData",
-    "WriteLocalFilesystemStepInput",
     "WriteLocalFilesystemStepData",
 ]

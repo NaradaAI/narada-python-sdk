@@ -5,22 +5,19 @@ from narada_core.tracing import response_trace
 from narada_core.tracing.response_trace import (
     AgentSpanData,
     AgentStepData,
-    AgentStepInput,
     ControlFlowSpanData,
-    EndStepInput,
-    ForNTimesStepInput,
+    EmailActionStepData,
+    EndStepData,
+    ForStepData,
     GoToUrlStepData,
-    GoToUrlStepInput,
     GuiStepSpanData,
     HttpRequestAuthInput,
     HttpRequestStepData,
-    HttpRequestStepInput,
     IfStepData,
     IterationSpanData,
     NaradaCodeProjectExecutableStepData,
     PythonStepData,
     RunCustomAgentStepData,
-    SendEmailStepInput,
     Span,
     SpanDataUnion,
     SpanError,
@@ -89,20 +86,6 @@ GUI_STEP_TYPES = {
 def _discriminator_values(annotation: object) -> set[str]:
     schema = TypeAdapter(annotation).json_schema()
     return set(schema["discriminator"]["mapping"])
-
-
-def _schema_refs(value: object) -> set[str]:
-    if isinstance(value, dict):
-        refs = {value["$ref"]} if "$ref" in value else set()
-        for child in value.values():
-            refs.update(_schema_refs(child))
-        return refs
-    if isinstance(value, list):
-        refs: set[str] = set()
-        for child in value:
-            refs.update(_schema_refs(child))
-        return refs
-    return set()
 
 
 def test_trace_uses_openai_python_object_fields() -> None:
@@ -220,15 +203,13 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
                 "type": "gui_step.http_request",
                 "step_id": "step_123",
                 "status": "success",
-                "input": {
-                    "url": "https://example.test/orders",
-                    "method": "GET",
-                    "headers": {},
-                    "auth": {"type": "none"},
-                    "body_mode": "none",
-                    "timeout_ms": 30_000,
-                    "output_variable": "response",
-                },
+                "url": "https://example.test/orders",
+                "method": "GET",
+                "headers": {},
+                "auth": {"type": "none"},
+                "body_mode": "none",
+                "timeout_ms": 30_000,
+                "output_variable": "response",
                 "output_variables": {
                     "response": {"orders": []},
                 },
@@ -243,8 +224,7 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
     )
 
     assert isinstance(gui_span.span_data, HttpRequestStepData)
-    assert gui_span.span_data.input is not None
-    assert gui_span.span_data.input.method == "GET"
+    assert gui_span.span_data.method == "GET"
     assert gui_span.span_data.output_variables == {"response": {"orders": []}}
     assert isinstance(control_flow, IterationSpanData)
     assert control_flow.iteration_index == 2
@@ -261,40 +241,47 @@ def test_taxonomy_discriminators_are_complete() -> None:
     assert AgentSpanData.model_json_schema()["properties"]["type"]["const"] == "agent"
 
 
-def test_every_gui_step_has_a_distinct_typed_input_and_common_outputs() -> None:
+def test_every_gui_step_flattens_inputs_and_has_common_outputs() -> None:
     schema = TypeAdapter(GuiStepSpanData).json_schema()
-    input_refs_by_type: dict[str, frozenset[str]] = {}
 
     for step_type, data_ref in schema["discriminator"]["mapping"].items():
         data_model_name = data_ref.rsplit("/", 1)[-1]
         properties = schema["$defs"][data_model_name]["properties"]
 
-        assert "input" in properties, step_type
+        assert "input" not in properties, step_type
         assert "output_variables" in properties, step_type
 
-        input_refs = frozenset(
-            ref
-            for ref in _schema_refs(properties["input"])
-            if ref.rsplit("/", 1)[-1].endswith("StepInput")
-        )
-        assert input_refs, step_type
-        input_refs_by_type[step_type] = input_refs
+    assert "url" in GoToUrlStepData.model_fields
+    assert {
+        "url",
+        "method",
+        "headers",
+        "auth",
+        "body_mode",
+        "timeout_ms",
+        "output_variable",
+    } <= set(HttpRequestStepData.model_fields)
 
-    assert len(set(input_refs_by_type.values())) == len(GUI_STEP_TYPES)
 
-
-def test_end_step_input_preserves_conditional_runtime_configuration() -> None:
-    end_input = EndStepInput(
+def test_end_step_preserves_conditional_runtime_configuration() -> None:
+    end_step = EndStepData(
+        step_id="step_end",
+        status="end_tree",
         terminate_tree=True,
         result_status="error",
         message="Unable to complete the workflow",
     )
 
-    assert end_input.model_dump(mode="json") == {
-        "terminate_tree": True,
-        "result_status": "error",
-        "message": "Unable to complete the workflow",
-    }
+    serialized = end_step.model_dump(mode="json")
+
+    assert "input" not in serialized
+    assert serialized["terminate_tree"] is True
+    assert serialized["result_status"] == "error"
+    assert serialized["message"] == "Unable to complete the workflow"
+
+
+def test_span_generic_is_bounded_to_supported_span_data() -> None:
+    assert response_trace.TSpanData.__bound__ is SpanDataUnion
 
 
 def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
@@ -345,6 +332,8 @@ def test_span_types_use_their_source_statuses() -> None:
     gui_step = AgentStepData(
         step_id="step_123",
         status="end_tree",
+        agent_type="operator",
+        query="Complete the task",
     )
 
     assert workflow.status == "input-required"
@@ -394,18 +383,29 @@ def test_if_and_try_catch_preserve_authored_conditions() -> None:
     branch = IfStepData(
         step_id="if_123",
         status="success",
+        condition={
+            "left": "${renewalDate}",
+            "operator": "before",
+            "right": "2027-01-01",
+        },
         selected_condition="${renewalDate} < '2027-01-01'",
     )
     trace = TryCatchStepData(
         step_id="step_123",
         status="success",
+        catch_branches=[],
         caught_condition="${errorCode} == 409",
     )
 
     assert branch.selected_condition == "${renewalDate} < '2027-01-01'"
     assert trace.caught_condition == "${errorCode} == 409"
     assert (
-        TryCatchStepData(step_id="step_123", status="success").caught_condition is None
+        TryCatchStepData(
+            step_id="step_123",
+            status="success",
+            catch_branches=[],
+        ).caught_condition
+        is None
     )
 
 
@@ -446,18 +446,26 @@ def test_canonical_gui_step_names_are_public() -> None:
         step_number=4,
         status="success",
         starting_url="https://example.test/start",
-        input=GoToUrlStepInput(url="https://example.test/destination"),
+        url="https://example.test/destination",
     )
     project = NaradaCodeProjectExecutableStepData(
         step_id="step_456",
         status="success",
+        narada_code_project_id="project_123",
+        executable_project_relative_path="scripts/process.py",
+        argument_string="--dry-run",
     )
-    python = PythonStepData(step_id="step_789", status="success")
+    python = PythonStepData(
+        step_id="step_789",
+        status="success",
+        code="print('done')",
+    )
 
     assert go_to_url.type == "gui_step.go_to_url"
     assert go_to_url.step_number == 4
     assert go_to_url.starting_url == "https://example.test/start"
-    assert go_to_url.input.url == "https://example.test/destination"
+    assert go_to_url.url == "https://example.test/destination"
+    assert "input" not in go_to_url.model_dump(mode="json")
     assert go_to_url.output_variables == {}
     assert "final_url" not in GoToUrlStepData.model_fields
     assert project.type == "gui_step.narada_code_project_executable"
@@ -471,6 +479,10 @@ def test_successful_run_custom_agent_step_can_parent_a_workflow_span() -> None:
         span_data=RunCustomAgentStepData(
             step_id="step_123",
             status="success",
+            workflow_id="workflow_child",
+            prompt="Process this record",
+            input_variables_mapping=[],
+            output_variables_mapping=[],
         ),
     )
     child_workflow = Span(
@@ -491,11 +503,9 @@ def test_agent_step_owns_workflow_outputs_and_agent_span_owns_response() -> None
     agent_step = AgentStepData(
         step_id="step_agent",
         status="success",
-        input=AgentStepInput(
-            agent_type="operator",
-            query="Approve order 481",
-            output_variable_names=["confirmation"],
-        ),
+        agent_type="operator",
+        query="Approve order 481",
+        output_variable_names=["confirmation"],
         output_variables={"confirmation": "Order 481 was approved."},
     )
     agent = AgentSpanData(
@@ -510,22 +520,31 @@ def test_agent_step_owns_workflow_outputs_and_agent_span_owns_response() -> None
     assert "output_variables" not in AgentSpanData.model_fields
 
 
-def test_nested_input_discriminators_preserve_runtime_contracts() -> None:
-    loop = ForNTimesStepInput(iterations="${number_of_orders}")
-    email = TypeAdapter(response_trace.EmailActionStepInput).validate_python(
-        {
-            "action": "send",
-            "connector": "gmail-primary",
-            "to": "approver@example.test",
-            "cc": "",
-            "bcc": "",
-            "subject": "Approval needed",
-            "body": "Please approve order 481.",
-        }
+def test_flattened_step_discriminators_preserve_runtime_contracts() -> None:
+    loop = ForStepData(
+        step_id="for_123",
+        status="success",
+        loop_type="nTimes",
+        iterations="${number_of_orders}",
+        total_iterations=3,
+    )
+    email = EmailActionStepData(
+        step_id="email_123",
+        status="success",
+        action="send",
+        connector="gmail-primary",
+        to="approver@example.test",
+        cc="",
+        bcc="",
+        subject="Approval needed",
+        body="Please approve order 481.",
     )
 
     assert loop.loop_type == "nTimes"
-    assert isinstance(email, SendEmailStepInput)
+    assert loop.iterations == "${number_of_orders}"
+    assert email.action == "send"
+    assert email.subject == "Approval needed"
+    assert "input" not in email.model_dump(mode="json")
 
 
 def test_every_public_model_field_has_a_description() -> None:
@@ -574,7 +593,9 @@ def test_span_rejects_non_utc_or_reversed_timestamps(
 
 def test_negative_numeric_values_are_rejected() -> None:
     with pytest.raises(ValidationError):
-        HttpRequestStepInput(
+        HttpRequestStepData(
+            step_id="step_123",
+            status="error",
             url="https://example.test",
             method="GET",
             auth=HttpRequestAuthInput(type="none"),
@@ -594,4 +615,5 @@ def test_negative_numeric_values_are_rejected() -> None:
             step_id="step_123",
             step_number=0,
             status="success",
+            url="https://example.test",
         )
