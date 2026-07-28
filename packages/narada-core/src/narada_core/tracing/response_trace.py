@@ -115,7 +115,7 @@ class BaseGuiStepSpanData(SpanData):
         default=None,
         description="User-facing description produced while the step executed.",
     )
-    page_url: str | None = Field(
+    starting_url: str | None = Field(
         default=None,
         description="Browser page URL captured immediately before the step started.",
     )
@@ -307,10 +307,6 @@ class GoToUrlStepData(BaseGuiStepSpanData):
     type: Literal["gui_step.go_to_url"] = Field(
         default="gui_step.go_to_url",
         description="Identifies a GUI go-to-URL step.",
-    )
-    final_url: str | None = Field(
-        default=None,
-        description="Browser URL observed after navigation completed.",
     )
 
 
