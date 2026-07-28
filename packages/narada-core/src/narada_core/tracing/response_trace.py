@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     NonNegativeInt,
+    PositiveInt,
     field_validator,
     model_validator,
 )
@@ -107,6 +108,13 @@ class BaseGuiStepSpanData(SpanData):
     )
     step_id: str = Field(
         description="Identifier of the step in the workflow definition."
+    )
+    step_number: PositiveInt | None = Field(
+        default=None,
+        description=(
+            "One-based display position of the step in the authored workflow, "
+            "including steps nested inside control flow."
+        ),
     )
     status: GuiStepSpanStatus = Field(
         description="Terminal execution status reported for the GUI step."
@@ -667,6 +675,13 @@ class AgentSpanData(SpanData):
     output_variables: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured output variables produced by the agent run.",
+    )
+    response: Any | None = Field(
+        default=None,
+        description=(
+            "Final response returned by the agent. Text responses are strings; "
+            "structured responses contain their parsed JSON-compatible value."
+        ),
     )
     status: AgentSpanStatus = Field(
         description="Terminal status reported for the agent run."

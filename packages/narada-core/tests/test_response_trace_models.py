@@ -154,6 +154,7 @@ def test_agent_span_contains_only_execution_results() -> None:
         "name": "Operator",
         "agent_type": "operator",
         "output_variables": {},
+        "response": None,
         "status": "success",
         "request_id": None,
         "usage": None,
@@ -172,12 +173,14 @@ def test_agent_span_serializes_runtime_output_variables() -> None:
         name="Operator",
         agent_type="operator",
         output_variables={"renewal_date": "2027-01-01"},
+        response={"status": "approved"},
         status="success",
     )
 
     serialized = agent.model_dump(mode="json")
 
     assert serialized["output_variables"] == {"renewal_date": "2027-01-01"}
+    assert serialized["response"] == {"status": "approved"}
     assert {
         "additional_tools",
         "attachments",
@@ -371,6 +374,7 @@ def test_agent_types_match_agent_studio_runtime_values() -> None:
 def test_canonical_gui_step_names_are_public() -> None:
     go_to_url = GoToUrlStepData(
         step_id="step_123",
+        step_number=4,
         status="success",
         starting_url="https://example.test/start",
     )
@@ -381,6 +385,7 @@ def test_canonical_gui_step_names_are_public() -> None:
     python = PythonStepData(step_id="step_789", status="success")
 
     assert go_to_url.type == "gui_step.go_to_url"
+    assert go_to_url.step_number == 4
     assert go_to_url.starting_url == "https://example.test/start"
     assert "final_url" not in GoToUrlStepData.model_fields
     assert project.type == "gui_step.narada_code_project_executable"
@@ -467,3 +472,10 @@ def test_negative_numeric_values_are_rejected() -> None:
 
     with pytest.raises(ValidationError):
         IterationSpanData()
+
+    with pytest.raises(ValidationError):
+        GoToUrlStepData(
+            step_id="step_123",
+            step_number=0,
+            status="success",
+        )
