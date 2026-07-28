@@ -107,10 +107,10 @@ def test_direct_operator_trace_contains_agent_and_action_spans() -> None:
     assert all(span.parent_id == agent_span.span_id for span in action_spans)
 
     exported = [record.model_dump(mode="json") for record in records]
-    assert exported[0]["id"] == trace.trace_id
-    assert exported[0]["workflow_name"] == "Operator"
+    assert exported[0]["trace_id"] == trace.trace_id
+    assert exported[0]["name"] == "Operator"
     assert exported[1]["object"] == "trace.span"
-    assert exported[1]["id"] == agent_span.span_id
+    assert exported[1]["span_id"] == agent_span.span_id
 
 
 def test_complex_workflow_trace_preserves_hierarchy() -> None:
@@ -242,7 +242,7 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
                 "data": {
                     "step_type": "if",
                     "description": "Took else branch",
-                    "selected_branch_role": "else",
+                    "selected_condition": "${renewal_date} < '2028-01-01'",
                 },
                 "children": [],
             },
@@ -266,9 +266,7 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
                 "data": {
                     "step_type": "tryCatch",
                     "description": "Catch handled the error",
-                    "caught_error": True,
-                    "executed_catch": True,
-                    "executed_finally": True,
+                    "caught_condition": "${error_code} == 409",
                 },
                 "children": [],
             },
@@ -313,6 +311,13 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
     assert workflow_span.ended_at == "1970-01-01T00:00:12.000Z"
     assert workflow_span.span_data.output_variables == {"renewal_date": "2027-01-01"}
 
+    print_span = next(
+        span
+        for span in _spans(records)
+        if getattr(span.span_data, "step_id", None) == "step-print"
+    )
+    assert print_span.span_data.starting_url == "https://example.test"
+
     agent_gui_span = next(
         span
         for span in _spans(records)
@@ -351,7 +356,7 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
         for span in _spans(records)
         if getattr(span.span_data, "step_id", None) == "if-child"
     )
-    assert if_span.span_data.selected_branch_role == "else"
+    assert if_span.span_data.selected_condition == "${renewal_date} < '2028-01-01'"
     assert if_child.parent_id == if_span.span_id
 
     try_span = _span_with_data(records, TryCatchStepData, step_id="step-try")
@@ -360,7 +365,7 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
         for span in _spans(records)
         if getattr(span.span_data, "step_id", None) == "try-child"
     )
-    assert try_span.span_data.executed_finally is True
+    assert try_span.span_data.caught_condition == "${error_code} == 409"
     assert try_child.parent_id == try_span.span_id
 
     second_records = build_response_trace(
@@ -377,7 +382,7 @@ def test_complex_workflow_trace_preserves_hierarchy() -> None:
     ]
 
 
-def test_incomplete_and_unknown_gui_steps_use_the_readable_base_shape() -> None:
+def test_unknown_gui_steps_use_the_readable_base_shape() -> None:
     workflow_trace = {
         "workflowId": "workflow-root",
         "workflowName": "Forward-compatible workflow",
@@ -432,7 +437,8 @@ def test_incomplete_and_unknown_gui_steps_use_the_readable_base_shape() -> None:
         for span in _spans(records)
         if getattr(span.span_data, "step_id", None) == "future-step"
     )
-    assert type(old_try.span_data) is BaseGuiStepSpanData
+    assert isinstance(old_try.span_data, TryCatchStepData)
+    assert old_try.span_data.caught_condition is None
     assert old_try.span_data.type == "gui_step.try_catch"
     assert type(future_step.span_data) is BaseGuiStepSpanData
     assert future_step.span_data.type == "gui_step.future_browser_action"
@@ -456,7 +462,7 @@ def test_nested_control_flow_inference_preserves_grandchildren() -> None:
                 "endTs": 5_000,
                 "data": {
                     "step_type": "if",
-                    "selected_branch_role": "then",
+                    "selected_condition": "${ready}",
                 },
                 "children": [],
             },
@@ -469,9 +475,7 @@ def test_nested_control_flow_inference_preserves_grandchildren() -> None:
                 "endTs": 4_000,
                 "data": {
                     "step_type": "tryCatch",
-                    "caught_error": False,
-                    "executed_catch": False,
-                    "executed_finally": True,
+                    "caught_condition": None,
                 },
                 "children": [],
             },

@@ -30,7 +30,7 @@ _GUI_STEP_DATA_TYPES: dict[str, type[response_trace.BaseGuiStepSpanData]] = {
     "getScreenshot": response_trace.GetScreenshotStepData,
     "getSimplifiedHtml": response_trace.GetSimplifiedHtmlStepData,
     "getUrl": response_trace.GetUrlStepData,
-    "goToUrl": response_trace.NavigateStepData,
+    "goToUrl": response_trace.GoToUrlStepData,
     "httpRequest": response_trace.HttpRequestStepData,
     "if": response_trace.IfStepData,
     "logVariablesToFile": response_trace.LogVariablesToFileStepData,
@@ -40,9 +40,9 @@ _GUI_STEP_DATA_TYPES: dict[str, type[response_trace.BaseGuiStepSpanData]] = {
     "output": response_trace.OutputStepData,
     "pressKeys": response_trace.PressKeysStepData,
     "print": response_trace.PrintStepData,
-    "projectExecutable": response_trace.ProjectExecutableStepData,
+    "projectExecutable": response_trace.NaradaCodeProjectExecutableStepData,
     "promptForUserInput": response_trace.PromptForUserInputStepData,
-    "python": response_trace.ExecutePythonStepData,
+    "python": response_trace.PythonStepData,
     "readCsv": response_trace.ReadCsvStepData,
     "readExcelSheet": response_trace.ReadExcelSheetStepData,
     "readGoogleSheet": response_trace.ReadGoogleSheetStepData,
@@ -398,7 +398,7 @@ def _gui_step_span_data(
         "name": _string(node.get("label")),
         "status": _gui_status(_string(node.get("status"))),
         "description": _string(data.get("description")),
-        "page_url": _string(data.get("url")),
+        "starting_url": _string(data.get("url")),
     }
     extra = _gui_step_specific_fields(
         node=node,
@@ -406,13 +406,7 @@ def _gui_step_span_data(
         step_type=step_type,
     )
 
-    if model is None or (
-        model is response_trace.TryCatchStepData
-        and not all(
-            isinstance(extra.get(field), bool)
-            for field in ("caught_error", "executed_catch", "executed_finally")
-        )
-    ):
+    if model is None:
         return response_trace.BaseGuiStepSpanData(
             type=_gui_step_discriminator(step_type),
             **common,
@@ -471,19 +465,9 @@ def _gui_step_specific_fields(
     if step_type == "getUrl":
         return {"url": _string(data.get("url"))}
     if step_type == "if":
-        branch_role = _string(data.get("selected_branch_role")) or _string(
-            data.get("selectedBranchRole")
-        )
-        if branch_role == "elseIf":
-            branch_role = "else_if"
-        if branch_role not in {"then", "else_if", "else"}:
-            branch_role = None
         return {
-            "selected_branch_role": branch_role,
-            "selected_branch_index": _integer(
-                data.get("selected_branch_index"),
-                data.get("selectedBranchIndex"),
-            ),
+            "selected_condition": _string(data.get("selected_condition"))
+            or _string(data.get("selectedCondition")),
         }
     if step_type == "httpRequest":
         return {
@@ -505,18 +489,8 @@ def _gui_step_specific_fields(
         }
     if step_type == "tryCatch":
         return {
-            "caught_error": _boolean(
-                data.get("caught_error"),
-                data.get("caughtError"),
-            ),
-            "executed_catch": _boolean(
-                data.get("executed_catch"),
-                data.get("executedCatch"),
-            ),
-            "executed_finally": _boolean(
-                data.get("executed_finally"),
-                data.get("executedFinally"),
-            ),
+            "caught_condition": _string(data.get("caught_condition"))
+            or _string(data.get("caughtCondition")),
         }
     if step_type == "output":
         return {
@@ -637,12 +611,12 @@ def _agent_identity(
     if agent_kind is AgentKind.OPERATOR:
         return "Operator", "operator"
     if agent_kind is AgentKind.PRODUCTIVITY:
-        return "Productivity", "productivity"
+        return "Productivity", "generalist"
     if agent_kind is AgentKind.CORE_AGENT:
-        return "Core Agent", "core"
+        return "Core Agent", "coreAgent"
 
     name = agent_kind.strip("/").rsplit("/", maxsplit=1)[-1] or "Custom Agent"
-    return name, "custom"
+    return name, "generalist"
 
 
 def _normalize_agent_type(value: str | None) -> response_trace.AgentType:
@@ -650,14 +624,17 @@ def _normalize_agent_type(value: str | None) -> response_trace.AgentType:
     if normalized == "operator":
         return "operator"
     if normalized in {"generalist", "productivity"}:
-        return "productivity"
+        return "generalist"
     if normalized in {"core", "coreagent"}:
-        return "core"
-    if normalized == "critic":
-        return "critic"
-    if normalized == "custom":
-        return "custom"
-    return "other"
+        return "coreAgent"
+    runtime_types: dict[str, response_trace.AgentType] = {
+        "jira": "jira",
+        "googledrive": "googleDrive",
+        "gmail": "gmail",
+        "googlecalendar": "googleCalendar",
+        "concur": "concur",
+    }
+    return runtime_types.get(normalized, "generalist")
 
 
 def _agent_display_name(
@@ -693,15 +670,7 @@ def _gui_status(value: str | None) -> response_trace.GuiStepSpanStatus:
 def _agent_status(value: str | None) -> response_trace.AgentSpanStatus:
     if value == "endTree":
         return "success"
-    if value == "expired":
-        return "timeout"
-    if value in {
-        "success",
-        "error",
-        "aborted",
-        "input-required",
-        "timeout",
-    }:
+    if value in {"success", "error", "input-required"}:
         return cast(response_trace.AgentSpanStatus, value)
     return "error"
 
