@@ -73,3 +73,9 @@ Low-level, deterministic browser actions with an AI fallback — useful when you
 | [`03_read_element_text_and_properties.py`](06_page_actions/03_read_element_text_and_properties.py) | Read text content and DOM properties from elements. |
 | [`04_replay_recorded_mouse_actions.py`](06_page_actions/04_replay_recorded_mouse_actions.py) | Replay recorded clicks, fills, and scrolls at viewport coordinates, with an AI fallback. |
 | [`05_send_keyboard_events.py`](06_page_actions/05_send_keyboard_events.py) | Send raw keyboard events, including modifier combinations. |
+
+## 07 — Observability
+
+| Example | What it shows |
+| --- | --- |
+| [`01_inspect_response_trace.ipynb`](07_observability/01_inspect_response_trace.ipynb) | Run an agent against a local Narada server, inspect the legacy trace fields beside the new flat trace records, and rebuild the span tree from `parent_id`. |
