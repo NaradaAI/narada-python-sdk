@@ -7,6 +7,7 @@ from narada_core.tracing.response_trace import (
     AgentStepData,
     AgentStepInput,
     ControlFlowSpanData,
+    EndStepInput,
     ForNTimesStepInput,
     GoToUrlStepData,
     GoToUrlStepInput,
@@ -69,8 +70,6 @@ GUI_STEP_TYPES = {
     "gui_step.read_local_filesystem",
     "gui_step.run_bash_script",
     "gui_step.run_custom_agent",
-    "gui_step.run_custom_agent_for_each",
-    "gui_step.run_custom_agents_in_parallel",
     "gui_step.save_pdf_file",
     "gui_step.set_variable",
     "gui_step.slack_action",
@@ -282,6 +281,20 @@ def test_every_gui_step_has_a_distinct_typed_input_and_common_outputs() -> None:
         input_refs_by_type[step_type] = input_refs
 
     assert len(set(input_refs_by_type.values())) == len(GUI_STEP_TYPES)
+
+
+def test_end_step_input_preserves_conditional_runtime_configuration() -> None:
+    end_input = EndStepInput(
+        terminate_tree=True,
+        result_status="error",
+        message="Unable to complete the workflow",
+    )
+
+    assert end_input.model_dump(mode="json") == {
+        "terminate_tree": True,
+        "result_status": "error",
+        "message": "Unable to complete the workflow",
+    }
 
 
 def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:

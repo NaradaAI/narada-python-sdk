@@ -865,98 +865,6 @@ class OutputStepInput(BaseModel):
     )
 
 
-class ParallelCustomAgentInput(BaseModel):
-    custom_agent_id: str = Field(description="Stable identifier of the custom agent.")
-    custom_agent_name: str | None = Field(
-        default=None,
-        description="Display name of the custom agent.",
-    )
-    prompt: str = Field(description="Effective prompt sent to the custom agent.")
-    input_variables_mapping: list[VariableMappingInput] = Field(
-        description="Parent-to-child workflow input mappings."
-    )
-    output_variables_mapping: list[OutputVariableMappingInput] = Field(
-        description="Child-to-parent workflow output mappings."
-    )
-
-
-class RunCustomAgentsInParallelStepInput(BaseModel):
-    agents: list[ParallelCustomAgentInput] = Field(
-        description="Custom-agent invocations configured for parallel execution."
-    )
-
-
-class CollectedOutputVariableMappingInput(BaseModel):
-    child_variable: str = Field(description="Output variable in each child workflow.")
-    parent_array_variable: str = Field(
-        description="Parent array variable collecting child output values."
-    )
-
-
-class BaseRunCustomAgentForEachStepInput(BaseModel):
-    loop_type: str = Field(description="Discriminator for the collection type.")
-    index_output_variable: str | None = Field(
-        default=None,
-        description="Workflow variable selected to receive the current item index.",
-    )
-    custom_agent_id: str = Field(
-        description="Stable identifier of the custom agent invoked for each item."
-    )
-    custom_agent_name: str | None = Field(
-        default=None,
-        description="Display name of the custom agent invoked for each item.",
-    )
-    prompt: str = Field(description="Effective prompt sent for each invocation.")
-    input_variables_mapping: list[VariableMappingInput] = Field(
-        description="Parent-to-child workflow input mappings."
-    )
-    collected_outputs_mapping: list[CollectedOutputVariableMappingInput] = Field(
-        description="Child outputs collected into parent array variables."
-    )
-    run_summary_output_variable: str | None = Field(
-        default=None,
-        description="Parent variable selected to receive per-run status summaries.",
-    )
-    max_concurrent_runs: PositiveInt = Field(
-        description="Maximum number of child runs executed concurrently."
-    )
-    on_item_error: Literal["failStep", "continueAndCollect"] = Field(
-        description="Configured behavior when one child invocation fails."
-    )
-
-
-class RunCustomAgentForEachItemStepInput(BaseRunCustomAgentForEachStepInput):
-    loop_type: Literal["forEachItemsInArray"] = Field(
-        default="forEachItemsInArray",
-        description="Identifies an array-based custom-agent loop.",
-    )
-    array_input_variable: str = Field(
-        description="Workflow array variable iterated by the step."
-    )
-    item_output_variable: str = Field(
-        description="Workflow variable receiving the current array item."
-    )
-
-
-class RunCustomAgentForEachRowStepInput(BaseRunCustomAgentForEachStepInput):
-    loop_type: Literal["forEachRowInDataTable"] = Field(
-        default="forEachRowInDataTable",
-        description="Identifies a data-table-based custom-agent loop.",
-    )
-    data_table_input_variable: str = Field(
-        description="Workflow data-table variable iterated by the step."
-    )
-    row_output_variable: str = Field(
-        description="Workflow variable receiving the current data-table row."
-    )
-
-
-type RunCustomAgentForEachStepInput = Annotated[
-    RunCustomAgentForEachItemStepInput | RunCustomAgentForEachRowStepInput,
-    Field(discriminator="loop_type"),
-]
-
-
 class BaseGuiStepSpanData(SpanData):
     type: str = Field(description="Discriminator for the executed GUI step type.")
     name: str | None = Field(
@@ -1567,28 +1475,6 @@ class RunCustomAgentStepData(BaseGuiStepSpanData):
     )
 
 
-class RunCustomAgentsInParallelStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.run_custom_agents_in_parallel"] = Field(
-        default="gui_step.run_custom_agents_in_parallel",
-        description="Identifies a GUI parallel custom-agent step.",
-    )
-    input: RunCustomAgentsInParallelStepInput | None = Field(
-        default=None,
-        description="Effective parallel custom-agent inputs used by the step.",
-    )
-
-
-class RunCustomAgentForEachStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.run_custom_agent_for_each"] = Field(
-        default="gui_step.run_custom_agent_for_each",
-        description="Identifies a GUI custom-agent-for-each step.",
-    )
-    input: RunCustomAgentForEachStepInput | None = Field(
-        default=None,
-        description="Effective custom-agent-for-each input used by the step.",
-    )
-
-
 class OutputStepData(BaseGuiStepSpanData):
     type: Literal["gui_step.output"] = Field(
         default="gui_step.output",
@@ -1661,8 +1547,6 @@ type GuiStepSpanData = Annotated[
     | WriteExcelSheetStepData
     | WriteGoogleSheetStepData
     | RunCustomAgentStepData
-    | RunCustomAgentsInParallelStepData
-    | RunCustomAgentForEachStepData
     | OutputStepData
     | CriticAgentStepData,
     Field(discriminator="type"),
@@ -1857,14 +1741,12 @@ __all__ = [
     "BaseEmailActionStepInput",
     "BaseForStepInput",
     "BaseGuiStepSpanData",
-    "BaseRunCustomAgentForEachStepInput",
     "BreakStepInput",
     "BreakStepData",
     "CatchBranchInput",
     "CatchSpanData",
     "CloseTabStepInput",
     "CloseTabStepData",
-    "CollectedOutputVariableMappingInput",
     "ConditionalBranchInput",
     "ContinueStepInput",
     "ContinueStepData",
@@ -1928,7 +1810,6 @@ __all__ = [
     "OutputStepData",
     "OutputVariableMappingInput",
     "OutputVariableStepInput",
-    "ParallelCustomAgentInput",
     "PressKeysStepInput",
     "PressKeysStepData",
     "PrintStepInput",
@@ -1948,14 +1829,8 @@ __all__ = [
     "ReadLocalFilesystemStepData",
     "RunBashScriptStepInput",
     "RunBashScriptStepData",
-    "RunCustomAgentForEachItemStepInput",
-    "RunCustomAgentForEachRowStepInput",
-    "RunCustomAgentForEachStepInput",
-    "RunCustomAgentForEachStepData",
     "RunCustomAgentStepInput",
     "RunCustomAgentStepData",
-    "RunCustomAgentsInParallelStepInput",
-    "RunCustomAgentsInParallelStepData",
     "SavePdfFileStepInput",
     "SavePdfFileStepData",
     "SendEmailStepInput",
