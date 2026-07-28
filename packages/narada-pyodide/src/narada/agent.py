@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -59,6 +60,7 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
 )
+from narada_core.tracing.conversion import build_response_trace
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
 
@@ -71,6 +73,7 @@ from narada.environment import (
 from . import _trace
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 class Agent(Generic[_StructuredOutput]):
@@ -220,13 +223,29 @@ class Agent(Generic[_StructuredOutput]):
         if workflow_trace is not None and parent_request_id is None:
             _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
+        usage = AgentUsage.model_validate(remote_dispatch_response["usage"])
+        try:
+            trace = build_response_trace(
+                request_id=remote_dispatch_response["requestId"],
+                response_status=remote_dispatch_response["status"],
+                usage_actions=usage.actions,
+                usage_credits=usage.credits,
+                agent_kind=self.kind,
+                action_trace=action_trace,
+                workflow_trace=workflow_trace,
+            )
+        except Exception:
+            logger.warning("Failed to build response trace", exc_info=True)
+            trace = None
+
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
             output=response_content.get("output"),
             structured_output=response_content.get("structuredOutput"),
-            usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
+            usage=usage,
+            trace=trace,
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,

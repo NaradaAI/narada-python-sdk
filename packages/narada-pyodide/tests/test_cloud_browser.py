@@ -549,7 +549,15 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent(
 async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workflow_trace = {"step_type": "workflow", "children": []}
+    workflow_trace = {
+        "workflowId": "workflow-123",
+        "workflowName": "Demo workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 1_000,
+        "endTs": 2_000,
+        "children": [],
+    }
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "child-request-123"}),
@@ -585,6 +593,8 @@ async def test_agent_run_exposes_workflow_trace_alias(
     response = await narada_pkg.Agent(environment=env).run("return a trace")
 
     assert response.workflow_trace == workflow_trace
+    assert response.trace is not None
+    assert response.trace[1].span_data.workflow_id == "workflow-123"
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
     sub_workflow_events = [
         json.loads(event)
@@ -594,6 +604,59 @@ async def test_agent_run_exposes_workflow_trace_alias(
     assert sub_workflow_events == [
         {"kind": "subWorkflow", "workflowTrace": workflow_trace}
     ]
+
+
+@pytest.mark.asyncio
+async def test_trace_conversion_failure_does_not_fail_pyodide_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "completedAt": "2026-01-01T00:00:01.000Z",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "actionTrace": [
+                            {
+                                "action": "Opened the dashboard",
+                                "url": "https://example.test",
+                                "startTs": "2026-01-01T00:00:00.000Z",
+                                "endTs": "2026-01-01T00:00:01.000Z",
+                                "durationMs": 1000,
+                            }
+                        ],
+                    },
+                    "usage": {"actions": 1, "credits": 1},
+                    "hitlInputMetadata": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    def fail_conversion(**kwargs: object) -> None:
+        raise ValueError("unsupported legacy trace")
+
+    monkeypatch.setattr(
+        sys.modules["narada.agent"],
+        "build_response_trace",
+        fail_conversion,
+    )
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    response = await narada_pkg.Agent(environment=env).run("run the task")
+
+    assert response.status == "success"
+    assert response.trace is None
+    assert response.action_trace is not None
 
 
 @pytest.mark.asyncio
@@ -674,6 +737,18 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
     assert response.critic_result is not None
     assert response.critic_result.workflow_trace == critic_workflow_trace
     assert response.workflow_trace == combined_workflow_trace
+    assert response.trace is not None
+    workflow_spans = [
+        record
+        for record in response.trace
+        if getattr(record, "object", None) == "trace.span"
+        and getattr(record.span_data, "type", None) == "workflow"
+    ]
+    assert [span.span_data.workflow_id for span in workflow_spans] == [
+        "main-workflow",
+        "critic-workflow",
+    ]
+    assert workflow_spans[1].parent_id == workflow_spans[0].span_id
     sub_workflow_events = [
         json.loads(event)
         for event in emitted_events

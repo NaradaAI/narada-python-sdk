@@ -54,6 +54,15 @@ class _RemoteDispatchFakeClientSession:
                 "response": {
                     "text": f"ok-{self._poll_count}",
                     "output": {"type": "text", "content": f"ok-{self._poll_count}"},
+                    "actionTrace": [
+                        {
+                            "action": "Opened the dashboard",
+                            "url": "https://example.test/dashboard",
+                            "startTs": "2026-01-01T00:00:00.000Z",
+                            "endTs": "2026-01-01T00:00:01.000Z",
+                            "durationMs": 1000,
+                        }
+                    ],
                 },
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
@@ -96,6 +105,13 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
     assert env.initialize_count == 1
     assert first.request_id == "req-1"
     assert second.request_id == "req-2"
+    assert first.trace is not None
+    assert [record.object for record in first.trace] == [
+        "trace",
+        "trace.span",
+        "trace.span",
+    ]
+    assert first.trace[0].trace_id != second.trace[0].trace_id
     assert [body["prompt"] for body in fake_session.dispatched_bodies] == [
         "/Operator first",
         "/Operator second",
@@ -159,3 +175,27 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_trace_conversion_failure_does_not_fail_agent_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.agent as agent_module
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    def fail_conversion(**kwargs: Any) -> None:
+        raise ValueError("unsupported legacy trace")
+
+    monkeypatch.setattr(agent_module, "build_response_trace", fail_conversion)
+
+    response = await Agent(environment=_CountingEnvironment()).run("run the task")
+
+    assert response.status == "success"
+    assert response.trace is None
+    assert response.action_trace is not None

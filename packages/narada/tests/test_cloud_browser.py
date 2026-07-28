@@ -804,7 +804,15 @@ async def test_cloud_browser_environment_uses_domcontentloaded_for_retry_navigat
 async def test_agent_run_exposes_workflow_trace_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workflow_trace = {"step_type": "workflow", "children": []}
+    workflow_trace = {
+        "workflowId": "workflow-123",
+        "workflowName": "Demo workflow",
+        "runtime": "gui",
+        "status": "success",
+        "startTs": 1_000,
+        "endTs": 2_000,
+        "children": [],
+    }
     env = RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         cloud_browser_session_id="session-123",
@@ -832,6 +840,8 @@ async def test_agent_run_exposes_workflow_trace_alias(
     response = await Agent(environment=env).run("return a trace")
 
     assert response.workflow_trace == workflow_trace
+    assert response.trace is not None
+    assert response.trace[1].span_data.workflow_id == "workflow-123"
     assert response.model_dump(by_alias=True)["workflowTrace"] == workflow_trace
 
 
@@ -902,3 +912,15 @@ async def test_agent_run_appends_critic_workflow_trace(
         **workflow_trace,
         "children": [{"kind": "sub_workflow", "trace": critic_workflow_trace}],
     }
+    assert response.trace is not None
+    workflow_spans = [
+        record
+        for record in response.trace
+        if getattr(record, "object", None) == "trace.span"
+        and getattr(record.span_data, "type", None) == "workflow"
+    ]
+    assert [span.span_data.workflow_id for span in workflow_spans] == [
+        "main-workflow",
+        "critic-workflow",
+    ]
+    assert workflow_spans[1].parent_id == workflow_spans[0].span_id

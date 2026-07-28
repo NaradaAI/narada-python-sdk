@@ -16,6 +16,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.tracing import model as tracing_model
+from narada_core.tracing.response_trace import Span, Trace
 
 # There is no `AgentRequest` because the `agent` action delegates to the `dispatch_request` method
 # under the hood.
@@ -65,6 +66,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
         Field(discriminator="type"),
     ]
     usage: AgentUsage
+    trace: list[Trace | Span[Any]] | None = None
     action_trace: tracing_model.ActionTrace | None = None
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
