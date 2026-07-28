@@ -26,56 +26,56 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 GUI_STEP_TYPES = {
     "gui_step.agent",
-    "gui_step.agenticMouseAction",
-    "gui_step.agenticSelector",
+    "gui_step.agentic_mouse_action",
+    "gui_step.agentic_selector",
     "gui_step.break",
-    "gui_step.closeTab",
+    "gui_step.close_tab",
     "gui_step.continue",
-    "gui_step.criticAgent",
-    "gui_step.dataTableExportAsCsv",
-    "gui_step.dataTableInsertRow",
-    "gui_step.dataTableUpdateCellValue",
-    "gui_step.desktopAgenticSelector",
-    "gui_step.emailAction",
+    "gui_step.critic_agent",
+    "gui_step.data_table_export_as_csv",
+    "gui_step.data_table_insert_row",
+    "gui_step.data_table_update_cell_value",
+    "gui_step.desktop_agentic_selector",
+    "gui_step.email_action",
     "gui_step.end",
-    "gui_step.executeJavaScriptOnPage",
+    "gui_step.execute_javascript_on_page",
     "gui_step.for",
-    "gui_step.getFullHtml",
-    "gui_step.getScreenshot",
-    "gui_step.getSimplifiedHtml",
-    "gui_step.getUrl",
-    "gui_step.goToUrl",
-    "gui_step.httpRequest",
+    "gui_step.get_full_html",
+    "gui_step.get_screenshot",
+    "gui_step.get_simplified_html",
+    "gui_step.get_url",
+    "gui_step.go_to_url",
+    "gui_step.http_request",
     "gui_step.if",
-    "gui_step.logVariablesToFile",
-    "gui_step.naradaCodeProjectExecutable",
-    "gui_step.objectExportAsJson",
-    "gui_step.objectSetProperties",
-    "gui_step.openDesktopApplication",
+    "gui_step.log_variables_to_file",
+    "gui_step.narada_code_project_executable",
+    "gui_step.object_export_as_json",
+    "gui_step.object_set_properties",
+    "gui_step.open_desktop_application",
     "gui_step.output",
-    "gui_step.pressKeys",
+    "gui_step.press_keys",
     "gui_step.print",
-    "gui_step.promptForUserInput",
+    "gui_step.prompt_for_user_input",
     "gui_step.python",
-    "gui_step.readCsv",
-    "gui_step.readExcelSheet",
-    "gui_step.readGoogleSheet",
-    "gui_step.readLocalFilesystem",
-    "gui_step.runBashScript",
-    "gui_step.runCustomAgent",
-    "gui_step.savePdfFile",
-    "gui_step.setVariable",
-    "gui_step.slackAction",
+    "gui_step.read_csv",
+    "gui_step.read_excel_sheet",
+    "gui_step.read_google_sheet",
+    "gui_step.read_local_filesystem",
+    "gui_step.run_bash_script",
+    "gui_step.run_custom_agent",
+    "gui_step.save_pdf_file",
+    "gui_step.set_variable",
+    "gui_step.slack_action",
     "gui_step.start",
     "gui_step.throw",
-    "gui_step.tryCatch",
-    "gui_step.userApproval",
+    "gui_step.try_catch",
+    "gui_step.user_approval",
     "gui_step.wait",
-    "gui_step.waitForElement",
+    "gui_step.wait_for_element",
     "gui_step.while",
-    "gui_step.writeExcelSheet",
-    "gui_step.writeGoogleSheet",
-    "gui_step.writeLocalFilesystem",
+    "gui_step.write_excel_sheet",
+    "gui_step.write_google_sheet",
+    "gui_step.write_local_filesystem",
 }
 
 
@@ -195,7 +195,7 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
             "span_id": "span_http",
             "trace_id": "trace_123",
             "span_data": {
-                "type": "gui_step.httpRequest",
+                "type": "gui_step.http_request",
                 "step_id": "step_123",
                 "status": "success",
                 "status_code": 200,
@@ -267,17 +267,17 @@ def test_span_types_use_their_source_statuses() -> None:
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
-        status="timeout",
+        status="input-required",
     )
     iteration = IterationSpanData(iteration_index=0)
     gui_step = AgentStepData(
         step_id="step_123",
-        status="endTree",
+        status="end_tree",
     )
 
     assert workflow.status == "input-required"
-    assert agent.status == "timeout"
-    assert gui_step.status == "endTree"
+    assert agent.status == "input-required"
+    assert gui_step.status == "end_tree"
     assert "status" not in type(iteration).model_fields
 
     with pytest.raises(ValidationError):
@@ -309,13 +309,12 @@ def test_status_literals_match_runtime_contracts() -> None:
         "success",
         "error",
         "aborted",
-        "endTree",
+        "end_tree",
     }
     assert set(TypeAdapter(response_trace.AgentSpanStatus).json_schema()["enum"]) == {
         "success",
         "error",
         "input-required",
-        "timeout",
     }
 
 
@@ -377,8 +376,8 @@ def test_canonical_gui_step_names_are_public() -> None:
     )
     python = PythonStepData(step_id="step_789", status="success")
 
-    assert go_to_url.type == "gui_step.goToUrl"
-    assert project.type == "gui_step.naradaCodeProjectExecutable"
+    assert go_to_url.type == "gui_step.go_to_url"
+    assert project.type == "gui_step.narada_code_project_executable"
     assert python.type == "gui_step.python"
 
 

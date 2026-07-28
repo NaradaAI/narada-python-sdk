@@ -19,12 +19,11 @@ type WorkflowSpanStatus = Literal[
     "error",
     "expired",
 ]
-type GuiStepSpanStatus = Literal["success", "error", "aborted", "endTree"]
+type GuiStepSpanStatus = Literal["success", "error", "aborted", "end_tree"]
 type AgentSpanStatus = Literal[
     "success",
     "error",
     "input-required",
-    "timeout",
 ]
 type AgentType = Literal[
     "operator",
@@ -130,8 +129,8 @@ class AgentStepData(BaseGuiStepSpanData):
 
 
 class AgenticMouseActionStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.agenticMouseAction"] = Field(
-        default="gui_step.agenticMouseAction",
+    type: Literal["gui_step.agentic_mouse_action"] = Field(
+        default="gui_step.agentic_mouse_action",
         description="Identifies a GUI agentic mouse action step.",
     )
     strategy: Literal["direct", "operator_fallback"] = Field(
@@ -147,8 +146,8 @@ class AgenticMouseActionStepData(BaseGuiStepSpanData):
 
 
 class AgenticSelectorStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.agenticSelector"] = Field(
-        default="gui_step.agenticSelector",
+    type: Literal["gui_step.agentic_selector"] = Field(
+        default="gui_step.agentic_selector",
         description="Identifies a GUI agentic selector step.",
     )
     strategy: Literal["selector", "operator_fallback"] = Field(
@@ -157,8 +156,8 @@ class AgenticSelectorStepData(BaseGuiStepSpanData):
 
 
 class RunBashScriptStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.runBashScript"] = Field(
-        default="gui_step.runBashScript",
+    type: Literal["gui_step.run_bash_script"] = Field(
+        default="gui_step.run_bash_script",
         description="Identifies a GUI run-Bash-script step.",
     )
 
@@ -171,8 +170,8 @@ class BreakStepData(BaseGuiStepSpanData):
 
 
 class CloseTabStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.closeTab"] = Field(
-        default="gui_step.closeTab",
+    type: Literal["gui_step.close_tab"] = Field(
+        default="gui_step.close_tab",
         description="Identifies a GUI close-tab step.",
     )
 
@@ -185,57 +184,57 @@ class ContinueStepData(BaseGuiStepSpanData):
 
 
 class DataTableExportAsCsvStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.dataTableExportAsCsv"] = Field(
-        default="gui_step.dataTableExportAsCsv",
+    type: Literal["gui_step.data_table_export_as_csv"] = Field(
+        default="gui_step.data_table_export_as_csv",
         description="Identifies a GUI data-table CSV export step.",
     )
 
 
 class DataTableInsertRowStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.dataTableInsertRow"] = Field(
-        default="gui_step.dataTableInsertRow",
+    type: Literal["gui_step.data_table_insert_row"] = Field(
+        default="gui_step.data_table_insert_row",
         description="Identifies a GUI data-table row insertion step.",
     )
 
 
 class DataTableUpdateCellValueStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.dataTableUpdateCellValue"] = Field(
-        default="gui_step.dataTableUpdateCellValue",
+    type: Literal["gui_step.data_table_update_cell_value"] = Field(
+        default="gui_step.data_table_update_cell_value",
         description="Identifies a GUI data-table cell update step.",
     )
 
 
 class DesktopAgenticSelectorStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.desktopAgenticSelector"] = Field(
-        default="gui_step.desktopAgenticSelector",
+    type: Literal["gui_step.desktop_agentic_selector"] = Field(
+        default="gui_step.desktop_agentic_selector",
         description="Identifies a GUI desktop agentic selector step.",
     )
 
 
 class ExecuteJavaScriptOnPageStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.executeJavaScriptOnPage"] = Field(
-        default="gui_step.executeJavaScriptOnPage",
+    type: Literal["gui_step.execute_javascript_on_page"] = Field(
+        default="gui_step.execute_javascript_on_page",
         description="Identifies a GUI in-page JavaScript execution step.",
     )
 
 
 class OpenDesktopApplicationStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.openDesktopApplication"] = Field(
-        default="gui_step.openDesktopApplication",
+    type: Literal["gui_step.open_desktop_application"] = Field(
+        default="gui_step.open_desktop_application",
         description="Identifies a GUI open-desktop-application step.",
     )
 
 
 class ReadLocalFilesystemStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.readLocalFilesystem"] = Field(
-        default="gui_step.readLocalFilesystem",
+    type: Literal["gui_step.read_local_filesystem"] = Field(
+        default="gui_step.read_local_filesystem",
         description="Identifies a GUI local-filesystem read step.",
     )
 
 
 class WriteLocalFilesystemStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.writeLocalFilesystem"] = Field(
-        default="gui_step.writeLocalFilesystem",
+    type: Literal["gui_step.write_local_filesystem"] = Field(
+        default="gui_step.write_local_filesystem",
         description="Identifies a GUI local-filesystem write step.",
     )
 
@@ -266,36 +265,36 @@ class ForStepData(BaseGuiStepSpanData):
 
 
 class SavePdfFileStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.savePdfFile"] = Field(
-        default="gui_step.savePdfFile",
+    type: Literal["gui_step.save_pdf_file"] = Field(
+        default="gui_step.save_pdf_file",
         description="Identifies a GUI save-PDF-file step.",
     )
 
 
 class GetFullHtmlStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.getFullHtml"] = Field(
-        default="gui_step.getFullHtml",
+    type: Literal["gui_step.get_full_html"] = Field(
+        default="gui_step.get_full_html",
         description="Identifies a GUI full-HTML retrieval step.",
     )
 
 
 class GetScreenshotStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.getScreenshot"] = Field(
-        default="gui_step.getScreenshot",
+    type: Literal["gui_step.get_screenshot"] = Field(
+        default="gui_step.get_screenshot",
         description="Identifies a GUI screenshot step.",
     )
 
 
 class GetSimplifiedHtmlStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.getSimplifiedHtml"] = Field(
-        default="gui_step.getSimplifiedHtml",
+    type: Literal["gui_step.get_simplified_html"] = Field(
+        default="gui_step.get_simplified_html",
         description="Identifies a GUI simplified-HTML retrieval step.",
     )
 
 
 class GetUrlStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.getUrl"] = Field(
-        default="gui_step.getUrl",
+    type: Literal["gui_step.get_url"] = Field(
+        default="gui_step.get_url",
         description="Identifies a GUI get-URL step.",
     )
     url: str | None = Field(
@@ -305,8 +304,8 @@ class GetUrlStepData(BaseGuiStepSpanData):
 
 
 class GoToUrlStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.goToUrl"] = Field(
-        default="gui_step.goToUrl",
+    type: Literal["gui_step.go_to_url"] = Field(
+        default="gui_step.go_to_url",
         description="Identifies a GUI go-to-URL step.",
     )
     final_url: str | None = Field(
@@ -316,8 +315,8 @@ class GoToUrlStepData(BaseGuiStepSpanData):
 
 
 class HttpRequestStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.httpRequest"] = Field(
-        default="gui_step.httpRequest",
+    type: Literal["gui_step.http_request"] = Field(
+        default="gui_step.http_request",
         description="Identifies a GUI HTTP-request step.",
     )
     status_code: NonNegativeInt | None = Field(
@@ -341,29 +340,29 @@ class IfStepData(BaseGuiStepSpanData):
 
 
 class LogVariablesToFileStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.logVariablesToFile"] = Field(
-        default="gui_step.logVariablesToFile",
+    type: Literal["gui_step.log_variables_to_file"] = Field(
+        default="gui_step.log_variables_to_file",
         description="Identifies a GUI variable-log file step.",
     )
 
 
 class ObjectExportAsJsonStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.objectExportAsJson"] = Field(
-        default="gui_step.objectExportAsJson",
+    type: Literal["gui_step.object_export_as_json"] = Field(
+        default="gui_step.object_export_as_json",
         description="Identifies a GUI object JSON export step.",
     )
 
 
 class ObjectSetPropertiesStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.objectSetProperties"] = Field(
-        default="gui_step.objectSetProperties",
+    type: Literal["gui_step.object_set_properties"] = Field(
+        default="gui_step.object_set_properties",
         description="Identifies a GUI object-property update step.",
     )
 
 
 class PressKeysStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.pressKeys"] = Field(
-        default="gui_step.pressKeys",
+    type: Literal["gui_step.press_keys"] = Field(
+        default="gui_step.press_keys",
         description="Identifies a GUI key-press step.",
     )
 
@@ -380,8 +379,8 @@ class PrintStepData(BaseGuiStepSpanData):
 
 
 class NaradaCodeProjectExecutableStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.naradaCodeProjectExecutable"] = Field(
-        default="gui_step.naradaCodeProjectExecutable",
+    type: Literal["gui_step.narada_code_project_executable"] = Field(
+        default="gui_step.narada_code_project_executable",
         description="Identifies a GUI Narada Code project-executable step.",
     )
 
@@ -394,29 +393,29 @@ class PythonStepData(BaseGuiStepSpanData):
 
 
 class ReadCsvStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.readCsv"] = Field(
-        default="gui_step.readCsv",
+    type: Literal["gui_step.read_csv"] = Field(
+        default="gui_step.read_csv",
         description="Identifies a GUI CSV-read step.",
     )
 
 
 class ReadExcelSheetStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.readExcelSheet"] = Field(
-        default="gui_step.readExcelSheet",
+    type: Literal["gui_step.read_excel_sheet"] = Field(
+        default="gui_step.read_excel_sheet",
         description="Identifies a GUI Excel-sheet read step.",
     )
 
 
 class ReadGoogleSheetStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.readGoogleSheet"] = Field(
-        default="gui_step.readGoogleSheet",
+    type: Literal["gui_step.read_google_sheet"] = Field(
+        default="gui_step.read_google_sheet",
         description="Identifies a GUI Google-Sheet read step.",
     )
 
 
 class EmailActionStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.emailAction"] = Field(
-        default="gui_step.emailAction",
+    type: Literal["gui_step.email_action"] = Field(
+        default="gui_step.email_action",
         description="Identifies a GUI email action step.",
     )
     provider_status: str | None = Field(
@@ -426,8 +425,8 @@ class EmailActionStepData(BaseGuiStepSpanData):
 
 
 class SlackActionStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.slackAction"] = Field(
-        default="gui_step.slackAction",
+    type: Literal["gui_step.slack_action"] = Field(
+        default="gui_step.slack_action",
         description="Identifies a GUI Slack action step.",
     )
     provider_status: str | None = Field(
@@ -437,15 +436,15 @@ class SlackActionStepData(BaseGuiStepSpanData):
 
 
 class SetVariableStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.setVariable"] = Field(
-        default="gui_step.setVariable",
+    type: Literal["gui_step.set_variable"] = Field(
+        default="gui_step.set_variable",
         description="Identifies a GUI set-variable step.",
     )
 
 
 class PromptForUserInputStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.promptForUserInput"] = Field(
-        default="gui_step.promptForUserInput",
+    type: Literal["gui_step.prompt_for_user_input"] = Field(
+        default="gui_step.prompt_for_user_input",
         description="Identifies a GUI user-input prompt step.",
     )
 
@@ -465,8 +464,8 @@ class ThrowStepData(BaseGuiStepSpanData):
 
 
 class TryCatchStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.tryCatch"] = Field(
-        default="gui_step.tryCatch",
+    type: Literal["gui_step.try_catch"] = Field(
+        default="gui_step.try_catch",
         description="Identifies a GUI try/catch step.",
     )
     caught_condition: str | None = Field(
@@ -479,8 +478,8 @@ class TryCatchStepData(BaseGuiStepSpanData):
 
 
 class UserApprovalStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.userApproval"] = Field(
-        default="gui_step.userApproval",
+    type: Literal["gui_step.user_approval"] = Field(
+        default="gui_step.user_approval",
         description="Identifies a GUI user-approval step.",
     )
 
@@ -493,8 +492,8 @@ class WaitStepData(BaseGuiStepSpanData):
 
 
 class WaitForElementStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.waitForElement"] = Field(
-        default="gui_step.waitForElement",
+    type: Literal["gui_step.wait_for_element"] = Field(
+        default="gui_step.wait_for_element",
         description="Identifies a GUI wait-for-element step.",
     )
 
@@ -510,22 +509,22 @@ class WhileStepData(BaseGuiStepSpanData):
 
 
 class WriteExcelSheetStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.writeExcelSheet"] = Field(
-        default="gui_step.writeExcelSheet",
+    type: Literal["gui_step.write_excel_sheet"] = Field(
+        default="gui_step.write_excel_sheet",
         description="Identifies a GUI Excel-sheet write step.",
     )
 
 
 class WriteGoogleSheetStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.writeGoogleSheet"] = Field(
-        default="gui_step.writeGoogleSheet",
+    type: Literal["gui_step.write_google_sheet"] = Field(
+        default="gui_step.write_google_sheet",
         description="Identifies a GUI Google-Sheet write step.",
     )
 
 
 class RunCustomAgentStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.runCustomAgent"] = Field(
-        default="gui_step.runCustomAgent",
+    type: Literal["gui_step.run_custom_agent"] = Field(
+        default="gui_step.run_custom_agent",
         description=(
             "Identifies a GUI custom-agent step. A successful execution parents "
             "the workflow span for the invoked workflow."
@@ -545,8 +544,8 @@ class OutputStepData(BaseGuiStepSpanData):
 
 
 class CriticAgentStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.criticAgent"] = Field(
-        default="gui_step.criticAgent",
+    type: Literal["gui_step.critic_agent"] = Field(
+        default="gui_step.critic_agent",
         description="Identifies a GUI critic-agent step.",
     )
 
