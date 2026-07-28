@@ -672,10 +672,6 @@ class AgentSpanData(SpanData):
     agent_type: AgentType = Field(
         description="Narada agent type selected for this execution."
     )
-    output_variables: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Structured output variables produced by the agent run.",
-    )
     response: Any | None = Field(
         default=None,
         description=(

@@ -153,7 +153,6 @@ def test_agent_span_contains_only_execution_results() -> None:
         "type": "agent",
         "name": "Operator",
         "agent_type": "operator",
-        "output_variables": {},
         "response": None,
         "status": "success",
         "request_id": None,
@@ -168,19 +167,18 @@ def test_usage_data_contains_billable_action_and_credit_totals() -> None:
     assert set(UsageData.model_json_schema()["properties"]) == {"actions", "credits"}
 
 
-def test_agent_span_serializes_runtime_output_variables() -> None:
+def test_agent_span_serializes_response_without_workflow_output_variables() -> None:
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
-        output_variables={"renewal_date": "2027-01-01"},
         response={"status": "approved"},
         status="success",
     )
 
     serialized = agent.model_dump(mode="json")
 
-    assert serialized["output_variables"] == {"renewal_date": "2027-01-01"}
     assert serialized["response"] == {"status": "approved"}
+    assert "output_variables" not in serialized
     assert {
         "additional_tools",
         "attachments",
