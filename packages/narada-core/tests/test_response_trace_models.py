@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-from narada_core.tracing import response_trace
+from narada_core.tracing import response_trace, step_inputs
 from narada_core.tracing.response_trace import (
     AgentSpanData,
     AgentStepData,
@@ -86,6 +86,13 @@ GUI_STEP_TYPES = {
 def _discriminator_values(annotation: object) -> set[str]:
     schema = TypeAdapter(annotation).json_schema()
     return set(schema["discriminator"]["mapping"])
+
+
+def test_gui_step_inputs_are_defined_in_their_own_module() -> None:
+    assert issubclass(AgentStepData, step_inputs.AgentStepInput)
+    assert issubclass(ForStepData, step_inputs.ForStepInput)
+    assert issubclass(HttpRequestStepData, step_inputs.HttpRequestStepInput)
+    assert issubclass(EmailActionStepData, step_inputs.EmailActionStepInput)
 
 
 def test_trace_uses_openai_python_object_fields() -> None:
