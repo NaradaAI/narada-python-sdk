@@ -273,7 +273,7 @@ def test_every_gui_step_flattens_inputs_and_has_common_outputs() -> None:
 def test_end_step_preserves_conditional_runtime_configuration() -> None:
     end_step = EndStepData(
         step_id="step_end",
-        status="end_tree",
+        status="error",
         terminate_tree=True,
         result_status="error",
         message="Unable to complete the workflow",
@@ -344,14 +344,14 @@ def test_span_types_use_their_source_statuses() -> None:
     iteration = IterationSpanData(iteration_index=0)
     gui_step = AgentStepData(
         step_id="step_123",
-        status="end_tree",
+        status="success",
         agent_type="operator",
         query="Complete the task",
     )
 
     assert workflow.status == "input-required"
     assert agent.status == "input-required"
-    assert gui_step.status == "end_tree"
+    assert gui_step.status == "success"
     assert "status" not in type(iteration).model_fields
 
     with pytest.raises(ValidationError):
@@ -366,6 +366,14 @@ def test_span_types_use_their_source_statuses() -> None:
             name="Operator",
             agent_type="operator",
             status="aborted",  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(ValidationError):
+        AgentStepData(
+            step_id="step_123",
+            status="end_tree",  # type: ignore[arg-type]
+            agent_type="operator",
+            query="Complete the task",
         )
 
 
@@ -383,7 +391,6 @@ def test_status_literals_match_runtime_contracts() -> None:
         "success",
         "error",
         "aborted",
-        "end_tree",
     }
     assert set(TypeAdapter(response_trace.AgentSpanStatus).json_schema()["enum"]) == {
         "success",

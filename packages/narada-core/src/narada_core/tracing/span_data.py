@@ -80,7 +80,7 @@ type WorkflowSpanStatus = Literal[
     "error",
     "expired",
 ]
-type GuiStepSpanStatus = Literal["success", "error", "aborted", "end_tree"]
+type GuiStepSpanStatus = Literal["success", "error", "aborted"]
 type AgentSpanStatus = Literal[
     "success",
     "error",
