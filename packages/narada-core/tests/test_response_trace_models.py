@@ -4,10 +4,16 @@ import pytest
 from narada_core.tracing import response_trace
 from narada_core.tracing.response_trace import (
     AgentSpanData,
+    AgentStepData,
     ControlFlowSpanData,
+    GoToUrlStepData,
     GuiStepSpanData,
     HttpRequestStepData,
+    IfStepData,
     IterationSpanData,
+    NaradaCodeProjectExecutableStepData,
+    PythonStepData,
+    RunCustomAgentStepData,
     Span,
     SpanDataUnion,
     SpanError,
@@ -33,24 +39,24 @@ GUI_STEP_TYPES = {
     "gui_step.email_action",
     "gui_step.end",
     "gui_step.execute_javascript_on_page",
-    "gui_step.execute_python",
     "gui_step.for",
     "gui_step.get_full_html",
     "gui_step.get_screenshot",
     "gui_step.get_simplified_html",
     "gui_step.get_url",
+    "gui_step.go_to_url",
     "gui_step.http_request",
     "gui_step.if",
     "gui_step.log_variables_to_file",
-    "gui_step.navigate",
+    "gui_step.narada_code_project_executable",
     "gui_step.object_export_as_json",
     "gui_step.object_set_properties",
     "gui_step.open_desktop_application",
     "gui_step.output",
     "gui_step.press_keys",
     "gui_step.print",
-    "gui_step.project_executable",
     "gui_step.prompt_for_user_input",
+    "gui_step.python",
     "gui_step.read_csv",
     "gui_step.read_excel_sheet",
     "gui_step.read_google_sheet",
@@ -78,22 +84,21 @@ def _discriminator_values(annotation: object) -> set[str]:
     return set(schema["discriminator"]["mapping"])
 
 
-def test_trace_serializes_with_openai_envelope() -> None:
+def test_trace_uses_openai_python_object_fields() -> None:
     trace = Trace(trace_id="trace_123", name="Process renewals")
 
     assert trace.model_dump(mode="json") == {
         "object": "trace",
-        "id": "trace_123",
-        "workflow_name": "Process renewals",
+        "trace_id": "trace_123",
+        "name": "Process renewals",
         "group_id": None,
         "metadata": None,
     }
     assert trace.trace_id == "trace_123"
     assert trace.name == "Process renewals"
-    assert trace.model_dump(mode="json", by_alias=False)["trace_id"] == "trace_123"
 
 
-def test_span_serializes_with_openai_envelope() -> None:
+def test_span_uses_openai_python_object_fields() -> None:
     span = Span(
         span_id="span_workflow",
         trace_id="trace_123",
@@ -108,7 +113,7 @@ def test_span_serializes_with_openai_envelope() -> None:
 
     assert span.model_dump(mode="json") == {
         "object": "trace.span",
-        "id": "span_workflow",
+        "span_id": "span_workflow",
         "trace_id": "trace_123",
         "parent_id": None,
         "started_at": "2026-07-24T18:00:00+00:00",
@@ -124,7 +129,6 @@ def test_span_serializes_with_openai_envelope() -> None:
         "error": None,
     }
     assert span.span_id == "span_workflow"
-    assert span.model_dump(mode="json", by_alias=False)["span_id"] == "span_workflow"
 
 
 def test_span_error_preserves_openai_nullable_data_field() -> None:
@@ -181,14 +185,14 @@ def test_agent_span_serializes_runtime_output_variables() -> None:
         "reasoning_effort",
         "input_summary",
         "output_summary",
-        "page_url",
+        "starting_url",
     }.isdisjoint(serialized)
 
 
 def test_span_data_unions_parse_concrete_subtypes() -> None:
     gui_span = Span[SpanDataUnion].model_validate(
         {
-            "id": "span_http",
+            "span_id": "span_http",
             "trace_id": "trace_123",
             "span_data": {
                 "type": "gui_step.http_request",
@@ -228,14 +232,14 @@ def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
         [
             {
                 "object": "trace",
-                "id": "trace_123",
-                "workflow_name": "Demo",
+                "trace_id": "trace_123",
+                "name": "Demo",
                 "group_id": None,
                 "metadata": None,
             },
             {
                 "object": "trace.span",
-                "id": "span_123",
+                "span_id": "span_123",
                 "trace_id": "trace_123",
                 "span_data": {
                     "type": "workflow",
@@ -263,12 +267,17 @@ def test_span_types_use_their_source_statuses() -> None:
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
-        status="timeout",
+        status="input-required",
     )
     iteration = IterationSpanData(iteration_index=0)
+    gui_step = AgentStepData(
+        step_id="step_123",
+        status="end_tree",
+    )
 
     assert workflow.status == "input-required"
-    assert agent.status == "timeout"
+    assert agent.status == "input-required"
+    assert gui_step.status == "end_tree"
     assert "status" not in type(iteration).model_fields
 
     with pytest.raises(ValidationError):
@@ -278,20 +287,127 @@ def test_span_types_use_their_source_statuses() -> None:
             status="running",  # type: ignore[arg-type]
         )
 
-
-def test_try_catch_execution_flags_are_required_booleans() -> None:
     with pytest.raises(ValidationError):
-        TryCatchStepData(step_id="step_123", status="success")
+        AgentSpanData(
+            name="Operator",
+            agent_type="operator",
+            status="aborted",  # type: ignore[arg-type]
+        )
 
+
+def test_status_literals_match_runtime_contracts() -> None:
+    assert set(
+        TypeAdapter(response_trace.WorkflowSpanStatus).json_schema()["enum"]
+    ) == {
+        "pending",
+        "input-required",
+        "success",
+        "error",
+        "expired",
+    }
+    assert set(TypeAdapter(response_trace.GuiStepSpanStatus).json_schema()["enum"]) == {
+        "success",
+        "error",
+        "aborted",
+        "end_tree",
+    }
+    assert set(TypeAdapter(response_trace.AgentSpanStatus).json_schema()["enum"]) == {
+        "success",
+        "error",
+        "input-required",
+    }
+
+
+def test_if_and_try_catch_preserve_authored_conditions() -> None:
+    branch = IfStepData(
+        step_id="if_123",
+        status="success",
+        selected_condition="${renewalDate} < '2027-01-01'",
+    )
     trace = TryCatchStepData(
         step_id="step_123",
         status="success",
-        caught_error=False,
-        executed_catch=False,
-        executed_finally=True,
+        caught_condition="${errorCode} == 409",
     )
 
-    assert trace.executed_finally is True
+    assert branch.selected_condition == "${renewalDate} < '2027-01-01'"
+    assert trace.caught_condition == "${errorCode} == 409"
+    assert (
+        TryCatchStepData(step_id="step_123", status="success").caught_condition is None
+    )
+
+
+def test_agent_types_match_agent_studio_runtime_values() -> None:
+    agent_types = {
+        "operator",
+        "generalist",
+        "coreAgent",
+        "jira",
+        "googleDrive",
+        "gmail",
+        "googleCalendar",
+        "concur",
+    }
+    assert (
+        set(TypeAdapter(response_trace.AgentType).json_schema()["enum"]) == agent_types
+    )
+
+    for agent_type in agent_types:
+        agent = AgentSpanData(
+            name=agent_type,
+            agent_type=agent_type,  # type: ignore[arg-type]
+            status="success",
+        )
+        assert agent.agent_type == agent_type
+
+    with pytest.raises(ValidationError):
+        AgentSpanData(
+            name="Custom Agent",
+            agent_type="custom",  # type: ignore[arg-type]
+            status="success",
+        )
+
+
+def test_canonical_gui_step_names_are_public() -> None:
+    go_to_url = GoToUrlStepData(
+        step_id="step_123",
+        status="success",
+        starting_url="https://example.test/start",
+    )
+    project = NaradaCodeProjectExecutableStepData(
+        step_id="step_456",
+        status="success",
+    )
+    python = PythonStepData(step_id="step_789", status="success")
+
+    assert go_to_url.type == "gui_step.go_to_url"
+    assert go_to_url.starting_url == "https://example.test/start"
+    assert "final_url" not in GoToUrlStepData.model_fields
+    assert project.type == "gui_step.narada_code_project_executable"
+    assert python.type == "gui_step.python"
+
+
+def test_successful_run_custom_agent_step_can_parent_a_workflow_span() -> None:
+    gui_step = Span(
+        span_id="span_run_custom_agent",
+        trace_id="trace_123",
+        span_data=RunCustomAgentStepData(
+            step_id="step_123",
+            status="success",
+        ),
+    )
+    child_workflow = Span(
+        span_id="span_child_workflow",
+        trace_id="trace_123",
+        parent_id=gui_step.span_id,
+        span_data=WorkflowSpanData(
+            workflow_name="Child workflow",
+            workflow_id="workflow_child",
+            status="success",
+        ),
+    )
+
+    assert child_workflow.parent_id == gui_step.span_id
 
 
 def test_every_public_model_field_has_a_description() -> None:

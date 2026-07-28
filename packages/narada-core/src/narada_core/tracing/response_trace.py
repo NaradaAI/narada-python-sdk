@@ -5,7 +5,6 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     NonNegativeFloat,
     NonNegativeInt,
@@ -24,28 +23,29 @@ type GuiStepSpanStatus = Literal["success", "error", "aborted", "end_tree"]
 type AgentSpanStatus = Literal[
     "success",
     "error",
-    "aborted",
     "input-required",
-    "timeout",
 ]
 type AgentType = Literal[
-    "operator", "core", "productivity", "custom", "critic", "other"
+    "operator",
+    "generalist",
+    "coreAgent",
+    "jira",
+    "googleDrive",
+    "gmail",
+    "googleCalendar",
+    "concur",
 ]
 
 
 class Trace(BaseModel):
-    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
-
     object: Literal["trace"] = Field(
         default="trace",
         description="Discriminator identifying this record as a trace.",
     )
     trace_id: str = Field(
-        alias="id",
         description="Unique identifier for the trace.",
     )
     name: str = Field(
-        alias="workflow_name",
         description="Human-readable name of the logical workflow.",
     )
     group_id: str | None = Field(
@@ -115,7 +115,7 @@ class BaseGuiStepSpanData(SpanData):
         default=None,
         description="User-facing description produced while the step executed.",
     )
-    page_url: str | None = Field(
+    starting_url: str | None = Field(
         default=None,
         description="Browser page URL captured immediately before the step started.",
     )
@@ -303,14 +303,10 @@ class GetUrlStepData(BaseGuiStepSpanData):
     )
 
 
-class NavigateStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.navigate"] = Field(
-        default="gui_step.navigate",
-        description="Identifies a GUI navigation step.",
-    )
-    final_url: str | None = Field(
-        default=None,
-        description="Browser URL observed after navigation completed.",
+class GoToUrlStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.go_to_url"] = Field(
+        default="gui_step.go_to_url",
+        description="Identifies a GUI go-to-URL step.",
     )
 
 
@@ -330,15 +326,11 @@ class IfStepData(BaseGuiStepSpanData):
         default="gui_step.if",
         description="Identifies a GUI conditional step.",
     )
-    selected_branch_role: Literal["then", "else_if", "else"] | None = Field(
-        default=None,
-        description="Role of the branch selected during execution.",
-    )
-    selected_branch_index: NonNegativeInt | None = Field(
+    selected_condition: str | None = Field(
         default=None,
         description=(
-            "Zero-based index of the selected branch among branches with the "
-            "reported role. It is absent when no branch ran."
+            "Authored condition for the selected branch, with variable references "
+            "left unevaluated. It is null when an else branch ran or no branch ran."
         ),
     )
 
@@ -382,16 +374,16 @@ class PrintStepData(BaseGuiStepSpanData):
     )
 
 
-class ProjectExecutableStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.project_executable"] = Field(
-        default="gui_step.project_executable",
-        description="Identifies a GUI project-executable step.",
+class NaradaCodeProjectExecutableStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.narada_code_project_executable"] = Field(
+        default="gui_step.narada_code_project_executable",
+        description="Identifies a GUI Narada Code project-executable step.",
     )
 
 
-class ExecutePythonStepData(BaseGuiStepSpanData):
-    type: Literal["gui_step.execute_python"] = Field(
-        default="gui_step.execute_python",
+class PythonStepData(BaseGuiStepSpanData):
+    type: Literal["gui_step.python"] = Field(
+        default="gui_step.python",
         description="Identifies a GUI Python execution step.",
     )
 
@@ -472,11 +464,13 @@ class TryCatchStepData(BaseGuiStepSpanData):
         default="gui_step.try_catch",
         description="Identifies a GUI try/catch step.",
     )
-    caught_error: bool = Field(
-        description="Whether the try section produced an error that was caught."
+    caught_condition: str | None = Field(
+        default=None,
+        description=(
+            "Authored condition for the first matching catch branch, with variable "
+            "references left unevaluated. It is null when no error was caught."
+        ),
     )
-    executed_catch: bool = Field(description="Whether the catch section executed.")
-    executed_finally: bool = Field(description="Whether the finally section executed.")
 
 
 class UserApprovalStepData(BaseGuiStepSpanData):
@@ -527,7 +521,10 @@ class WriteGoogleSheetStepData(BaseGuiStepSpanData):
 class RunCustomAgentStepData(BaseGuiStepSpanData):
     type: Literal["gui_step.run_custom_agent"] = Field(
         default="gui_step.run_custom_agent",
-        description="Identifies a GUI custom-agent step.",
+        description=(
+            "Identifies a GUI custom-agent step. A successful execution parents "
+            "the workflow span for the invoked workflow."
+        ),
     )
 
 
@@ -572,7 +569,7 @@ type GuiStepSpanData = Annotated[
     | GetScreenshotStepData
     | GetSimplifiedHtmlStepData
     | GetUrlStepData
-    | NavigateStepData
+    | GoToUrlStepData
     | HttpRequestStepData
     | IfStepData
     | LogVariablesToFileStepData
@@ -580,8 +577,8 @@ type GuiStepSpanData = Annotated[
     | ObjectSetPropertiesStepData
     | PressKeysStepData
     | PrintStepData
-    | ProjectExecutableStepData
-    | ExecutePythonStepData
+    | NaradaCodeProjectExecutableStepData
+    | PythonStepData
     | ReadCsvStepData
     | ReadExcelSheetStepData
     | ReadGoogleSheetStepData
@@ -714,14 +711,19 @@ type SpanDataUnion = Annotated[
 
 
 class Span(BaseModel, Generic[TSpanData]):
-    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
+    """A trace span that preserves the concrete type of its span data.
+
+    The type parameter lets callers retain precise access to subtype-specific
+    fields, for example ``Span[AgentSpanData].span_data.agent_type``. A
+    discriminated union remains available separately for parsing serialized
+    span data whose subtype is not known in advance.
+    """
 
     object: Literal["trace.span"] = Field(
         default="trace.span",
         description="Discriminator identifying this record as a span.",
     )
     span_id: str = Field(
-        alias="id",
         description="Unique identifier for the span.",
     )
     trace_id: str = Field(description="Identifier of the trace containing this span.")
@@ -793,28 +795,28 @@ __all__ = [
     "EmailActionStepData",
     "EndStepData",
     "ExecuteJavaScriptOnPageStepData",
-    "ExecutePythonStepData",
     "FinallySpanData",
     "ForStepData",
     "GetFullHtmlStepData",
     "GetScreenshotStepData",
     "GetSimplifiedHtmlStepData",
     "GetUrlStepData",
+    "GoToUrlStepData",
     "GuiStepSpanData",
     "GuiStepSpanStatus",
     "HttpRequestStepData",
     "IfStepData",
     "IterationSpanData",
     "LogVariablesToFileStepData",
-    "NavigateStepData",
+    "NaradaCodeProjectExecutableStepData",
     "ObjectExportAsJsonStepData",
     "ObjectSetPropertiesStepData",
     "OpenDesktopApplicationStepData",
     "OutputStepData",
     "PressKeysStepData",
     "PrintStepData",
-    "ProjectExecutableStepData",
     "PromptForUserInputStepData",
+    "PythonStepData",
     "ReadCsvStepData",
     "ReadExcelSheetStepData",
     "ReadGoogleSheetStepData",
