@@ -284,6 +284,12 @@ def test_span_generic_is_bounded_to_supported_span_data() -> None:
     assert response_trace.TSpanData.__bound__ is SpanDataUnion
 
 
+def test_trace_models_are_split_by_responsibility() -> None:
+    assert Trace.__module__ == "narada_core.tracing.traces"
+    assert Span.__module__ == "narada_core.tracing.spans"
+    assert AgentSpanData.__module__ == "narada_core.tracing.span_data"
+
+
 def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
     adapter = TypeAdapter(list[Trace | Span[Any]])
 
