@@ -80,6 +80,3 @@ class Span(BaseModel, Generic[TSpanData]):
         ):
             raise ValueError("ended_at must be greater than or equal to started_at")
         return self
-
-
-__all__ = ["Span", "SpanError"]

@@ -1,8 +1,8 @@
 from typing import Any
 
+import narada_core.tracing as tracing
 import pytest
-from narada_core.tracing import response_trace, step_span_inputs
-from narada_core.tracing.response_trace import (
+from narada_core.tracing import (
     AgentSpanData,
     AgentStepData,
     ControlFlowSpanData,
@@ -24,7 +24,12 @@ from narada_core.tracing.response_trace import (
     Trace,
     TryCatchStepData,
     UsageData,
+    WhileStepData,
     WorkflowSpanData,
+    span_data,
+    spans,
+    step_span_inputs,
+    traces,
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -89,6 +94,8 @@ def _discriminator_values(annotation: object) -> set[str]:
 
 
 def test_gui_step_span_inputs_are_defined_in_their_own_module() -> None:
+    assert _discriminator_values(step_span_inputs.GuiStepSpanInput) == GUI_STEP_TYPES
+    assert span_data.TGuiStepSpanInput.__bound__ is step_span_inputs.GuiStepSpanInput
     assert AgentStepData.model_fields["input"].annotation == (
         step_span_inputs.AgentStepSpanInput | None
     )
@@ -219,6 +226,7 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
                 "step_id": "step_123",
                 "status": "success",
                 "input": {
+                    "type": "gui_step.http_request",
                     "url": "https://example.test/orders",
                     "method": "GET",
                     "headers": {},
@@ -297,6 +305,7 @@ def test_end_step_preserves_conditional_configuration_as_input() -> None:
     serialized = end_step.model_dump(mode="json")
 
     assert serialized["input"] == {
+        "type": "gui_step.end",
         "terminate_tree": True,
         "result_status": "error",
         "message": "Unable to complete the workflow",
@@ -304,13 +313,20 @@ def test_end_step_preserves_conditional_configuration_as_input() -> None:
 
 
 def test_span_generic_is_bounded_to_supported_span_data() -> None:
-    assert response_trace.TSpanData.__bound__ is SpanDataUnion
+    assert tracing.TSpanData.__bound__ is SpanDataUnion
 
 
 def test_trace_models_are_split_by_responsibility() -> None:
     assert Trace.__module__ == "narada_core.tracing.traces"
     assert Span.__module__ == "narada_core.tracing.spans"
     assert AgentSpanData.__module__ == "narada_core.tracing.span_data"
+
+
+def test_only_tracing_package_defines_public_exports() -> None:
+    assert tracing.__all__
+    assert not hasattr(span_data, "__all__")
+    assert not hasattr(spans, "__all__")
+    assert not hasattr(traces, "__all__")
 
 
 def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
@@ -398,21 +414,19 @@ def test_span_types_use_their_source_statuses() -> None:
 
 
 def test_status_literals_match_runtime_contracts() -> None:
-    assert set(
-        TypeAdapter(response_trace.WorkflowSpanStatus).json_schema()["enum"]
-    ) == {
+    assert set(TypeAdapter(tracing.WorkflowSpanStatus).json_schema()["enum"]) == {
         "pending",
         "input-required",
         "success",
         "error",
         "expired",
     }
-    assert set(TypeAdapter(response_trace.GuiStepSpanStatus).json_schema()["enum"]) == {
+    assert set(TypeAdapter(tracing.GuiStepSpanStatus).json_schema()["enum"]) == {
         "success",
         "error",
         "aborted",
     }
-    assert set(TypeAdapter(response_trace.AgentSpanStatus).json_schema()["enum"]) == {
+    assert set(TypeAdapter(tracing.AgentSpanStatus).json_schema()["enum"]) == {
         "success",
         "error",
         "input-required",
@@ -466,9 +480,7 @@ def test_agent_types_match_agent_studio_runtime_values() -> None:
         "googleCalendar",
         "concur",
     }
-    assert (
-        set(TypeAdapter(response_trace.AgentType).json_schema()["enum"]) == agent_types
-    )
+    assert set(TypeAdapter(tracing.AgentType).json_schema()["enum"]) == agent_types
 
     for agent_type in agent_types:
         agent = AgentSpanData(
@@ -517,7 +529,8 @@ def test_canonical_gui_step_names_are_public() -> None:
     assert go_to_url.input is not None
     assert go_to_url.input.url == "https://example.test/destination"
     assert go_to_url.model_dump(mode="json")["input"] == {
-        "url": "https://example.test/destination"
+        "type": "gui_step.go_to_url",
+        "url": "https://example.test/destination",
     }
     assert go_to_url.output_variables == {}
     assert "final_url" not in GoToUrlStepData.model_fields
@@ -577,7 +590,7 @@ def test_agent_step_owns_workflow_outputs_and_agent_span_owns_response() -> None
     assert "output_variables" not in AgentSpanData.model_fields
 
 
-def test_nested_step_inputs_preserve_runtime_contracts() -> None:
+def test_nested_step_inputs_preserve_authored_configuration() -> None:
     loop = ForStepData(
         step_id="for_123",
         status="success",
@@ -585,7 +598,6 @@ def test_nested_step_inputs_preserve_runtime_contracts() -> None:
             loop_type="nTimes",
             iterations="${number_of_orders}",
         ),
-        total_iterations=3,
     )
     email = EmailActionStepData(
         step_id="email_123",
@@ -604,7 +616,8 @@ def test_nested_step_inputs_preserve_runtime_contracts() -> None:
     assert loop.input is not None
     assert loop.input.loop_type == "nTimes"
     assert loop.input.iterations == "${number_of_orders}"
-    assert loop.total_iterations == 3
+    assert "total_iterations" not in ForStepData.model_fields
+    assert "total_iterations" not in WhileStepData.model_fields
     assert email.input is not None
     assert email.input.action == "send"
     assert email.input.subject == "Approval needed"
@@ -612,8 +625,8 @@ def test_nested_step_inputs_preserve_runtime_contracts() -> None:
 
 
 def test_every_public_model_field_has_a_description() -> None:
-    for name in response_trace.__all__:
-        value = getattr(response_trace, name)
+    for name in tracing.__all__:
+        value = getattr(tracing, name)
         if not isinstance(value, type) or not issubclass(value, BaseModel):
             continue
         for field_name, field in value.model_fields.items():

@@ -16,9 +16,7 @@ from narada_core.tracing.step_span_inputs import (
     AgentStepSpanInput,
     AgentType,
     BreakStepSpanInput,
-    CatchBranchInput,
     CloseTabStepSpanInput,
-    ConditionalBranchInput,
     ContinueStepSpanInput,
     CriticAgentStepSpanInput,
     DataTableExportAsCsvStepSpanInput,
@@ -34,22 +32,18 @@ from narada_core.tracing.step_span_inputs import (
     GetSimplifiedHtmlStepSpanInput,
     GetUrlStepSpanInput,
     GoToUrlStepSpanInput,
-    HttpRequestAuthInput,
-    HttpRequestMultipartInput,
+    GuiStepSpanInput,
     HttpRequestStepSpanInput,
     IfStepSpanInput,
     LogVariablesToFileStepSpanInput,
     NaradaCodeProjectExecutableStepSpanInput,
     ObjectExportAsJsonStepSpanInput,
-    ObjectPropertyAssignmentInput,
     ObjectSetPropertiesStepSpanInput,
     OpenDesktopApplicationStepSpanInput,
     OutputStepSpanInput,
-    OutputVariableMappingInput,
     PressKeysStepSpanInput,
     PrintStepSpanInput,
     PromptForUserInputStepSpanInput,
-    PromptForUserInputVariable,
     PythonStepSpanInput,
     ReadCsvStepSpanInput,
     ReadExcelSheetStepSpanInput,
@@ -64,7 +58,6 @@ from narada_core.tracing.step_span_inputs import (
     ThrowStepSpanInput,
     TryCatchStepSpanInput,
     UserApprovalStepSpanInput,
-    VariableMappingInput,
     WaitForElementStepSpanInput,
     WaitStepSpanInput,
     WhileStepSpanInput,
@@ -92,7 +85,7 @@ class SpanData(BaseModel):
     type: str = Field(description="Discriminator for the span-specific payload.")
 
 
-TGuiStepSpanInput = TypeVar("TGuiStepSpanInput", bound=BaseModel)
+TGuiStepSpanInput = TypeVar("TGuiStepSpanInput", bound=GuiStepSpanInput)
 
 
 class WorkflowSpanData(SpanData):
@@ -307,9 +300,6 @@ class ForStepData(BaseGuiStepSpanData[ForStepSpanInput]):
     type: Literal["gui_step.for"] = Field(
         default="gui_step.for",
         description="Identifies a GUI for-loop step.",
-    )
-    total_iterations: NonNegativeInt = Field(
-        description="Number of loop iterations that started during this execution."
     )
 
 
@@ -532,9 +522,6 @@ class WhileStepData(BaseGuiStepSpanData[WhileStepSpanInput]):
         default="gui_step.while",
         description="Identifies a GUI while-loop step.",
     )
-    total_iterations: NonNegativeInt = Field(
-        description="Number of loop iterations that started during this execution."
-    )
 
 
 class WriteExcelSheetStepData(BaseGuiStepSpanData[WriteExcelSheetStepSpanInput]):
@@ -739,85 +726,4 @@ type SpanDataUnion = Annotated[
     | AgentSpanData
     | AgentActionSpanData,
     Field(discriminator="type"),
-]
-
-
-__all__ = [
-    "AgentActionSpanData",
-    "AgenticMouseActionStepData",
-    "AgenticSelectorStepData",
-    "AgentSpanData",
-    "AgentSpanStatus",
-    "AgentType",
-    "AgentStepData",
-    "BaseControlFlowSpanData",
-    "BaseGuiStepSpanData",
-    "BreakStepData",
-    "CatchBranchInput",
-    "CatchSpanData",
-    "CloseTabStepData",
-    "ConditionalBranchInput",
-    "ContinueStepData",
-    "ControlFlowSpanData",
-    "CriticAgentStepData",
-    "DataTableExportAsCsvStepData",
-    "DataTableInsertRowStepData",
-    "DataTableUpdateCellValueStepData",
-    "DesktopAgenticSelectorStepData",
-    "EmailActionStepData",
-    "EndStepData",
-    "ExecuteJavaScriptOnPageStepData",
-    "FinallySpanData",
-    "ForStepData",
-    "GetFullHtmlStepData",
-    "GetScreenshotStepData",
-    "GetSimplifiedHtmlStepData",
-    "GetUrlStepData",
-    "GoToUrlStepData",
-    "GuiStepSpanData",
-    "GuiStepSpanStatus",
-    "HttpRequestAuthInput",
-    "HttpRequestMultipartInput",
-    "HttpRequestStepData",
-    "IfStepData",
-    "IterationSpanData",
-    "LogVariablesToFileStepData",
-    "NaradaCodeProjectExecutableStepData",
-    "ObjectExportAsJsonStepData",
-    "ObjectPropertyAssignmentInput",
-    "ObjectSetPropertiesStepData",
-    "OpenDesktopApplicationStepData",
-    "OutputStepData",
-    "OutputVariableMappingInput",
-    "PressKeysStepData",
-    "PrintStepData",
-    "PromptForUserInputVariable",
-    "PromptForUserInputStepData",
-    "PythonStepData",
-    "ReadCsvStepData",
-    "ReadExcelSheetStepData",
-    "ReadGoogleSheetStepData",
-    "ReadLocalFilesystemStepData",
-    "RunBashScriptStepData",
-    "RunCustomAgentStepData",
-    "SavePdfFileStepData",
-    "SetVariableStepData",
-    "SlackActionStepData",
-    "SpanData",
-    "SpanDataUnion",
-    "StartStepData",
-    "ThrowStepData",
-    "TryCatchStepData",
-    "TrySpanData",
-    "UsageData",
-    "UserApprovalStepData",
-    "VariableMappingInput",
-    "WaitForElementStepData",
-    "WaitStepData",
-    "WhileStepData",
-    "WorkflowSpanData",
-    "WorkflowSpanStatus",
-    "WriteExcelSheetStepData",
-    "WriteGoogleSheetStepData",
-    "WriteLocalFilesystemStepData",
 ]

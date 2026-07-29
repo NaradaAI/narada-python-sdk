@@ -24,6 +24,3 @@ class Trace(BaseModel):
         default=None,
         description="Optional user-provided metadata associated with the trace.",
     )
-
-
-__all__ = ["Trace"]
