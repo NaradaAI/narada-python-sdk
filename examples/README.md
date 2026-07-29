@@ -73,3 +73,13 @@ Low-level, deterministic browser actions with an AI fallback — useful when you
 | [`03_read_element_text_and_properties.py`](06_page_actions/03_read_element_text_and_properties.py) | Read text content and DOM properties from elements. |
 | [`04_replay_recorded_mouse_actions.py`](06_page_actions/04_replay_recorded_mouse_actions.py) | Replay recorded clicks, fills, and scrolls at viewport coordinates, with an AI fallback. |
 | [`05_send_keyboard_events.py`](06_page_actions/05_send_keyboard_events.py) | Send raw keyboard events, including modifier combinations. |
+
+## 07 — Response traces
+
+These examples print the flat `Trace` and `Span` records emitted directly by the
+frontend execution sites.
+
+| Example | What it shows |
+| --- | --- |
+| [`01_operator_trace.py`](07_response_traces/01_operator_trace.py) | Run the built-in Operator and inspect its agent and browser-action spans. |
+| [`02_agent_studio_trace.py`](07_response_traces/02_agent_studio_trace.py) | Run the demo Agent Studio greeter and print the direct trace records returned by that deployment. |
