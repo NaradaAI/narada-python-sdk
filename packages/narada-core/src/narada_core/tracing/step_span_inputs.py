@@ -1,3 +1,5 @@
+"""Trace-safe input snapshots for GUI step spans."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -16,7 +18,7 @@ type AgentType = Literal[
 ]
 
 
-class CriticAgentStepInput(BaseModel):
+class CriticAgentStepSpanInput(BaseModel):
     prompt: str = Field(description="Prompt configured for the critic agent.")
     attachments: list[str] = Field(
         default_factory=list,
@@ -54,7 +56,7 @@ class CriticAgentStepInput(BaseModel):
     )
 
 
-class AgentStepInput(BaseModel):
+class AgentStepSpanInput(BaseModel):
     agent_type: AgentType = Field(description="Agent type selected in the GUI step.")
     query: str = Field(description="Effective query sent to the agent.")
     attachments: list[str] = Field(
@@ -89,13 +91,13 @@ class AgentStepInput(BaseModel):
         default=None,
         description="Reasoning mode selected for the GUI agent step.",
     )
-    critic: CriticAgentStepInput | None = Field(
+    critic: CriticAgentStepSpanInput | None = Field(
         default=None,
         description="Critic configuration attached to the agent step, when present.",
     )
 
 
-class AgenticMouseActionStepInput(BaseModel):
+class AgenticMouseActionStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded mouse action.",
@@ -140,7 +142,7 @@ class AgenticMouseActionStepInput(BaseModel):
     )
 
 
-class AgenticSelectorStepInput(BaseModel):
+class AgenticSelectorStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded element.",
@@ -187,29 +189,29 @@ class AgenticSelectorStepInput(BaseModel):
     )
 
 
-class RunBashScriptStepInput(BaseModel):
+class RunBashScriptStepSpanInput(BaseModel):
     code: str = Field(description="Effective Bash source executed by the step.")
 
 
-class BreakStepInput(BaseModel):
+class BreakStepSpanInput(BaseModel):
     pass
 
 
-class CloseTabStepInput(BaseModel):
+class CloseTabStepSpanInput(BaseModel):
     pass
 
 
-class ContinueStepInput(BaseModel):
+class ContinueStepSpanInput(BaseModel):
     pass
 
 
-class DataTableExportAsCsvStepInput(BaseModel):
+class DataTableExportAsCsvStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable exported by the step."
     )
 
 
-class DataTableInsertRowStepInput(BaseModel):
+class DataTableInsertRowStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable updated by the step."
     )
@@ -221,7 +223,7 @@ class DataTableInsertRowStepInput(BaseModel):
     )
 
 
-class DataTableUpdateCellValueStepInput(BaseModel):
+class DataTableUpdateCellValueStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable updated by the step."
     )
@@ -232,7 +234,7 @@ class DataTableUpdateCellValueStepInput(BaseModel):
     cell_value: str = Field(description="Effective value written to the selected cell.")
 
 
-class DesktopAgenticSelectorStepInput(BaseModel):
+class DesktopAgenticSelectorStepSpanInput(BaseModel):
     window_title: str = Field(
         description="Effective desktop window title targeted by the step."
     )
@@ -244,7 +246,7 @@ class DesktopAgenticSelectorStepInput(BaseModel):
     )
 
 
-class ExecuteJavaScriptOnPageStepInput(BaseModel):
+class ExecuteJavaScriptOnPageStepSpanInput(BaseModel):
     code: str = Field(description="Effective JavaScript source executed on the page.")
     output_variable_names: list[str] = Field(
         default_factory=list,
@@ -252,13 +254,13 @@ class ExecuteJavaScriptOnPageStepInput(BaseModel):
     )
 
 
-class OpenDesktopApplicationStepInput(BaseModel):
+class OpenDesktopApplicationStepSpanInput(BaseModel):
     executable_path: str = Field(
         description="Effective executable path opened by the step."
     )
 
 
-class ReadLocalFilesystemStepInput(BaseModel):
+class ReadLocalFilesystemStepSpanInput(BaseModel):
     source_path: str = Field(
         description="Effective local filesystem path read by the step."
     )
@@ -267,7 +269,7 @@ class ReadLocalFilesystemStepInput(BaseModel):
     )
 
 
-class WriteLocalFilesystemStepInput(BaseModel):
+class WriteLocalFilesystemStepSpanInput(BaseModel):
     destination_folder_path: str = Field(
         description="Effective destination folder used by the step."
     )
@@ -276,7 +278,7 @@ class WriteLocalFilesystemStepInput(BaseModel):
     )
 
 
-class EndStepInput(BaseModel):
+class EndStepSpanInput(BaseModel):
     terminate_tree: bool = Field(
         default=False,
         description="Whether the step terminates the complete workflow tree.",
@@ -291,7 +293,7 @@ class EndStepInput(BaseModel):
     )
 
 
-class ForStepInput(BaseModel):
+class ForStepSpanInput(BaseModel):
     loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"] = (
         Field(description="Configured loop mode.")
     )
@@ -321,33 +323,33 @@ class ForStepInput(BaseModel):
     )
 
 
-class OutputVariableStepInput(BaseModel):
+class OutputVariableStepSpanInput(BaseModel):
     output_variable: str = Field(
         description="Workflow variable selected to receive the step result."
     )
 
 
-class SavePdfFileStepInput(OutputVariableStepInput):
+class SavePdfFileStepSpanInput(OutputVariableStepSpanInput):
     pass
 
 
-class GetFullHtmlStepInput(OutputVariableStepInput):
+class GetFullHtmlStepSpanInput(OutputVariableStepSpanInput):
     pass
 
 
-class GetScreenshotStepInput(OutputVariableStepInput):
+class GetScreenshotStepSpanInput(OutputVariableStepSpanInput):
     pass
 
 
-class GetSimplifiedHtmlStepInput(OutputVariableStepInput):
+class GetSimplifiedHtmlStepSpanInput(OutputVariableStepSpanInput):
     pass
 
 
-class GetUrlStepInput(OutputVariableStepInput):
+class GetUrlStepSpanInput(OutputVariableStepSpanInput):
     pass
 
 
-class GoToUrlStepInput(BaseModel):
+class GoToUrlStepSpanInput(BaseModel):
     url: str = Field(description="Effective destination URL used by the step.")
 
 
@@ -376,7 +378,7 @@ class HttpRequestMultipartInput(BaseModel):
     )
 
 
-class HttpRequestStepInput(BaseModel):
+class HttpRequestStepSpanInput(BaseModel):
     url: str = Field(description="Effective URL requested by the step.")
     method: Literal["GET", "POST", "PUT", "DELETE", "PATCH"] = Field(
         description="HTTP method used by the request."
@@ -417,7 +419,7 @@ class ConditionalBranchInput(BaseModel):
     )
 
 
-class IfStepInput(BaseModel):
+class IfStepSpanInput(BaseModel):
     condition: dict[str, Any] = Field(
         description="Authored condition controlling the then branch."
     )
@@ -435,14 +437,14 @@ class IfStepInput(BaseModel):
     )
 
 
-class LogVariablesToFileStepInput(BaseModel):
+class LogVariablesToFileStepSpanInput(BaseModel):
     file_name: str = Field(description="Effective name of the generated log file.")
     variables_to_log: list[str] = Field(
         description="Workflow variables selected for the log file."
     )
 
 
-class ObjectExportAsJsonStepInput(BaseModel):
+class ObjectExportAsJsonStepSpanInput(BaseModel):
     object_input_variable: str = Field(
         description="Workflow object variable exported as JSON."
     )
@@ -453,7 +455,7 @@ class ObjectPropertyAssignmentInput(BaseModel):
     value: str = Field(description="Effective value assigned to the object property.")
 
 
-class ObjectSetPropertiesStepInput(BaseModel):
+class ObjectSetPropertiesStepSpanInput(BaseModel):
     object_output_variable: str = Field(
         description="Workflow object variable updated by the step."
     )
@@ -462,17 +464,17 @@ class ObjectSetPropertiesStepInput(BaseModel):
     )
 
 
-class PressKeysStepInput(BaseModel):
+class PressKeysStepSpanInput(BaseModel):
     recorded_keys: list[dict[str, Any]] = Field(
         description="Recorded key events replayed by the step."
     )
 
 
-class PrintStepInput(BaseModel):
+class PrintStepSpanInput(BaseModel):
     message: str = Field(description="Effective message emitted by the step.")
 
 
-class NaradaCodeProjectExecutableStepInput(BaseModel):
+class NaradaCodeProjectExecutableStepSpanInput(BaseModel):
     narada_code_project_id: str = Field(
         description="Stable identifier of the Narada Code project."
     )
@@ -484,18 +486,18 @@ class NaradaCodeProjectExecutableStepInput(BaseModel):
     )
 
 
-class PythonStepInput(BaseModel):
+class PythonStepSpanInput(BaseModel):
     code: str = Field(description="Effective Python source executed by the step.")
 
 
-class ReadCsvStepInput(BaseModel):
+class ReadCsvStepSpanInput(BaseModel):
     content: str = Field(description="Effective CSV content parsed by the step.")
     output_variable: str = Field(
         description="Workflow variable selected to receive the parsed data table."
     )
 
 
-class ReadExcelSheetStepInput(BaseModel):
+class ReadExcelSheetStepSpanInput(BaseModel):
     workbook_url: str = Field(description="Effective Excel workbook URL.")
     range: str = Field(description="Effective Excel range read by the step.")
     microsoft_account_email: str = Field(
@@ -509,7 +511,7 @@ class ReadExcelSheetStepInput(BaseModel):
     )
 
 
-class ReadGoogleSheetStepInput(BaseModel):
+class ReadGoogleSheetStepSpanInput(BaseModel):
     spreadsheet_url: str = Field(description="Effective Google spreadsheet URL.")
     range: str = Field(description="Effective Google Sheets range read by the step.")
     has_headers: bool = Field(
@@ -520,7 +522,7 @@ class ReadGoogleSheetStepInput(BaseModel):
     )
 
 
-class EmailActionStepInput(BaseModel):
+class EmailActionStepSpanInput(BaseModel):
     action: Literal["send", "getMany", "markRead", "markUnread", "getById"] = Field(
         description="Email operation performed by the step."
     )
@@ -575,7 +577,7 @@ class EmailActionStepInput(BaseModel):
     )
 
 
-class SlackActionStepInput(BaseModel):
+class SlackActionStepSpanInput(BaseModel):
     connector: str = Field(description="Stable reference for the selected connector.")
     target: str = Field(description="Effective Slack target.")
     message: str = Field(description="Effective Slack message.")
@@ -585,7 +587,7 @@ class SlackActionStepInput(BaseModel):
     )
 
 
-class SetVariableStepInput(BaseModel):
+class SetVariableStepSpanInput(BaseModel):
     output_variable: str = Field(description="Workflow variable updated by the step.")
     new_value: Any = Field(description="Effective value assigned to the variable.")
 
@@ -595,7 +597,7 @@ class PromptForUserInputVariable(BaseModel):
     required: bool = Field(description="Whether the user must provide the variable.")
 
 
-class PromptForUserInputStepInput(BaseModel):
+class PromptForUserInputStepSpanInput(BaseModel):
     prompt_message: str | None = Field(
         default=None,
         description="Effective prompt presented to the user.",
@@ -605,11 +607,11 @@ class PromptForUserInputStepInput(BaseModel):
     )
 
 
-class StartStepInput(BaseModel):
+class StartStepSpanInput(BaseModel):
     pass
 
 
-class ThrowStepInput(BaseModel):
+class ThrowStepSpanInput(BaseModel):
     message: str = Field(description="Effective error message thrown by the step.")
 
 
@@ -624,7 +626,7 @@ class CatchBranchInput(BaseModel):
     )
 
 
-class TryCatchStepInput(BaseModel):
+class TryCatchStepSpanInput(BaseModel):
     try_branch_name: str | None = Field(
         default=None,
         description="Optional user-facing name of the try branch.",
@@ -638,7 +640,7 @@ class TryCatchStepInput(BaseModel):
     )
 
 
-class UserApprovalStepInput(BaseModel):
+class UserApprovalStepSpanInput(BaseModel):
     prompt_message: str = Field(description="Effective approval prompt.")
     approve_label: str = Field(description="Label displayed for approval.")
     reject_label: str = Field(description="Label displayed for rejection.")
@@ -647,11 +649,11 @@ class UserApprovalStepInput(BaseModel):
     )
 
 
-class WaitStepInput(BaseModel):
+class WaitStepSpanInput(BaseModel):
     duration: str | float = Field(description="Effective wait duration.")
 
 
-class WaitForElementStepInput(BaseModel):
+class WaitForElementStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded element.",
@@ -674,7 +676,7 @@ class WaitForElementStepInput(BaseModel):
     )
 
 
-class WhileStepInput(BaseModel):
+class WhileStepSpanInput(BaseModel):
     condition: dict[str, Any] = Field(
         description="Authored condition evaluated before each iteration."
     )
@@ -688,7 +690,7 @@ class WhileStepInput(BaseModel):
     )
 
 
-class WriteExcelSheetStepInput(BaseModel):
+class WriteExcelSheetStepSpanInput(BaseModel):
     workbook_url: str = Field(description="Effective Excel workbook URL.")
     range: str = Field(description="Effective Excel range written by the step.")
     microsoft_account_email: str = Field(
@@ -702,7 +704,7 @@ class WriteExcelSheetStepInput(BaseModel):
     )
 
 
-class WriteGoogleSheetStepInput(BaseModel):
+class WriteGoogleSheetStepSpanInput(BaseModel):
     spreadsheet_url: str = Field(description="Effective Google spreadsheet URL.")
     range: str = Field(description="Effective Google Sheets range written by the step.")
     data_table_input_variable: str = Field(
@@ -725,7 +727,7 @@ class OutputVariableMappingInput(BaseModel):
     )
 
 
-class RunCustomAgentStepInput(BaseModel):
+class RunCustomAgentStepSpanInput(BaseModel):
     workflow_id: str = Field(
         description="Stable identifier of the invoked custom workflow."
     )
@@ -742,7 +744,7 @@ class RunCustomAgentStepInput(BaseModel):
     )
 
 
-class OutputStepInput(BaseModel):
+class OutputStepSpanInput(BaseModel):
     variables_to_output: list[str] = Field(
         description="Workflow variables selected as workflow outputs."
     )

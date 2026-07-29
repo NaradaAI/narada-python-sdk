@@ -11,6 +11,6 @@ def test_trace_models_are_publicly_exported() -> None:
     assert narada.tracing.AgentStepData is not None
     assert narada.tracing.GoToUrlStepData is not None
     assert narada.tracing.HttpRequestStepData is not None
-    assert not hasattr(narada.tracing, "AgentStepInput")
-    assert not hasattr(narada.tracing, "GoToUrlStepInput")
-    assert not hasattr(narada.tracing, "HttpRequestStepInput")
+    assert not hasattr(narada.tracing, "AgentStepSpanInput")
+    assert not hasattr(narada.tracing, "GoToUrlStepSpanInput")
+    assert not hasattr(narada.tracing, "HttpRequestStepSpanInput")
