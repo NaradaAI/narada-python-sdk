@@ -83,3 +83,4 @@ frontend execution sites.
 | --- | --- |
 | [`01_operator_trace.py`](07_response_traces/01_operator_trace.py) | Run the built-in Operator and inspect its agent and browser-action spans. |
 | [`02_agent_studio_trace.py`](07_response_traces/02_agent_studio_trace.py) | Run the demo Agent Studio greeter and print the direct trace records returned by that deployment. |
+| [`03_operator_and_workflow_trace.ipynb`](07_response_traces/03_operator_and_workflow_trace.ipynb) | Launch the local development browser, run both Operator and an Agent Studio workflow, validate their direct trace records, and render the flat spans as trees. |
