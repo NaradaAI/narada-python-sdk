@@ -680,6 +680,7 @@ class AgentSpanData(SpanData):
     agent_type: AgentType = Field(
         description="Narada agent type selected for this execution."
     )
+    prompt: str = Field(description="Prompt supplied as input to the agent execution.")
     response: Any | None = Field(
         default=None,
         description=(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, NonNegativeInt
 
@@ -18,12 +18,7 @@ type AgentType = Literal[
 ]
 
 
-class BaseGuiStepSpanInput(BaseModel):
-    type: str = Field(description="Discriminator for the GUI step input snapshot.")
-
-
-class CriticAgentStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.critic_agent"] = "gui_step.critic_agent"
+class CriticAgentStepSpanInput(BaseModel):
     prompt: str = Field(description="Prompt configured for the critic agent.")
     attachments: list[str] = Field(
         default_factory=list,
@@ -61,8 +56,7 @@ class CriticAgentStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class AgentStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.agent"] = "gui_step.agent"
+class AgentStepSpanInput(BaseModel):
     agent_type: AgentType = Field(description="Agent type selected in the GUI step.")
     query: str = Field(description="Effective query sent to the agent.")
     attachments: list[str] = Field(
@@ -103,8 +97,7 @@ class AgentStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class AgenticMouseActionStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.agentic_mouse_action"] = "gui_step.agentic_mouse_action"
+class AgenticMouseActionStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded mouse action.",
@@ -149,8 +142,7 @@ class AgenticMouseActionStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class AgenticSelectorStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.agentic_selector"] = "gui_step.agentic_selector"
+class AgenticSelectorStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded element.",
@@ -197,37 +189,29 @@ class AgenticSelectorStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class RunBashScriptStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.run_bash_script"] = "gui_step.run_bash_script"
+class RunBashScriptStepSpanInput(BaseModel):
     code: str = Field(description="Effective Bash source executed by the step.")
 
 
-class BreakStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.break"] = "gui_step.break"
+class BreakStepSpanInput(BaseModel):
     pass
 
 
-class CloseTabStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.close_tab"] = "gui_step.close_tab"
+class CloseTabStepSpanInput(BaseModel):
     pass
 
 
-class ContinueStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.continue"] = "gui_step.continue"
+class ContinueStepSpanInput(BaseModel):
     pass
 
 
-class DataTableExportAsCsvStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.data_table_export_as_csv"] = (
-        "gui_step.data_table_export_as_csv"
-    )
+class DataTableExportAsCsvStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable exported by the step."
     )
 
 
-class DataTableInsertRowStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.data_table_insert_row"] = "gui_step.data_table_insert_row"
+class DataTableInsertRowStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable updated by the step."
     )
@@ -239,10 +223,7 @@ class DataTableInsertRowStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class DataTableUpdateCellValueStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.data_table_update_cell_value"] = (
-        "gui_step.data_table_update_cell_value"
-    )
+class DataTableUpdateCellValueStepSpanInput(BaseModel):
     data_table_input_variable: str = Field(
         description="Workflow data-table variable updated by the step."
     )
@@ -253,10 +234,7 @@ class DataTableUpdateCellValueStepSpanInput(BaseGuiStepSpanInput):
     cell_value: str = Field(description="Effective value written to the selected cell.")
 
 
-class DesktopAgenticSelectorStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.desktop_agentic_selector"] = (
-        "gui_step.desktop_agentic_selector"
-    )
+class DesktopAgenticSelectorStepSpanInput(BaseModel):
     window_title: str = Field(
         description="Effective desktop window title targeted by the step."
     )
@@ -268,10 +246,7 @@ class DesktopAgenticSelectorStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class ExecuteJavaScriptOnPageStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.execute_javascript_on_page"] = (
-        "gui_step.execute_javascript_on_page"
-    )
+class ExecuteJavaScriptOnPageStepSpanInput(BaseModel):
     code: str = Field(description="Effective JavaScript source executed on the page.")
     output_variable_names: list[str] = Field(
         default_factory=list,
@@ -279,17 +254,13 @@ class ExecuteJavaScriptOnPageStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class OpenDesktopApplicationStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.open_desktop_application"] = (
-        "gui_step.open_desktop_application"
-    )
+class OpenDesktopApplicationStepSpanInput(BaseModel):
     executable_path: str = Field(
         description="Effective executable path opened by the step."
     )
 
 
-class ReadLocalFilesystemStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.read_local_filesystem"] = "gui_step.read_local_filesystem"
+class ReadLocalFilesystemStepSpanInput(BaseModel):
     source_path: str = Field(
         description="Effective local filesystem path read by the step."
     )
@@ -298,8 +269,7 @@ class ReadLocalFilesystemStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class WriteLocalFilesystemStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.write_local_filesystem"] = "gui_step.write_local_filesystem"
+class WriteLocalFilesystemStepSpanInput(BaseModel):
     destination_folder_path: str = Field(
         description="Effective destination folder used by the step."
     )
@@ -308,8 +278,7 @@ class WriteLocalFilesystemStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class EndStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.end"] = "gui_step.end"
+class EndStepSpanInput(BaseModel):
     terminate_tree: bool = Field(
         default=False,
         description="Whether the step terminates the complete workflow tree.",
@@ -324,8 +293,7 @@ class EndStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class ForStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.for"] = "gui_step.for"
+class ForStepSpanInput(BaseModel):
     loop_type: Literal["nTimes", "forEachRowInDataTable", "forEachItemsInArray"] = (
         Field(description="Configured loop mode.")
     )
@@ -355,39 +323,33 @@ class ForStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class OutputVariableStepSpanInput(BaseGuiStepSpanInput):
+class OutputVariableStepSpanInput(BaseModel):
     output_variable: str = Field(
         description="Workflow variable selected to receive the step result."
     )
 
 
 class SavePdfFileStepSpanInput(OutputVariableStepSpanInput):
-    type: Literal["gui_step.save_pdf_file"] = "gui_step.save_pdf_file"
     pass
 
 
 class GetFullHtmlStepSpanInput(OutputVariableStepSpanInput):
-    type: Literal["gui_step.get_full_html"] = "gui_step.get_full_html"
     pass
 
 
 class GetScreenshotStepSpanInput(OutputVariableStepSpanInput):
-    type: Literal["gui_step.get_screenshot"] = "gui_step.get_screenshot"
     pass
 
 
 class GetSimplifiedHtmlStepSpanInput(OutputVariableStepSpanInput):
-    type: Literal["gui_step.get_simplified_html"] = "gui_step.get_simplified_html"
     pass
 
 
 class GetUrlStepSpanInput(OutputVariableStepSpanInput):
-    type: Literal["gui_step.get_url"] = "gui_step.get_url"
     pass
 
 
-class GoToUrlStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.go_to_url"] = "gui_step.go_to_url"
+class GoToUrlStepSpanInput(BaseModel):
     url: str = Field(description="Effective destination URL used by the step.")
 
 
@@ -416,8 +378,7 @@ class HttpRequestMultipartInput(BaseModel):
     )
 
 
-class HttpRequestStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.http_request"] = "gui_step.http_request"
+class HttpRequestStepSpanInput(BaseModel):
     url: str = Field(description="Effective URL requested by the step.")
     method: Literal["GET", "POST", "PUT", "DELETE", "PATCH"] = Field(
         description="HTTP method used by the request."
@@ -458,8 +419,7 @@ class ConditionalBranchInput(BaseModel):
     )
 
 
-class IfStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.if"] = "gui_step.if"
+class IfStepSpanInput(BaseModel):
     condition: dict[str, Any] = Field(
         description="Authored condition controlling the then branch."
     )
@@ -477,16 +437,14 @@ class IfStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class LogVariablesToFileStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.log_variables_to_file"] = "gui_step.log_variables_to_file"
+class LogVariablesToFileStepSpanInput(BaseModel):
     file_name: str = Field(description="Effective name of the generated log file.")
     variables_to_log: list[str] = Field(
         description="Workflow variables selected for the log file."
     )
 
 
-class ObjectExportAsJsonStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.object_export_as_json"] = "gui_step.object_export_as_json"
+class ObjectExportAsJsonStepSpanInput(BaseModel):
     object_input_variable: str = Field(
         description="Workflow object variable exported as JSON."
     )
@@ -497,8 +455,7 @@ class ObjectPropertyAssignmentInput(BaseModel):
     value: str = Field(description="Effective value assigned to the object property.")
 
 
-class ObjectSetPropertiesStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.object_set_properties"] = "gui_step.object_set_properties"
+class ObjectSetPropertiesStepSpanInput(BaseModel):
     object_output_variable: str = Field(
         description="Workflow object variable updated by the step."
     )
@@ -507,22 +464,17 @@ class ObjectSetPropertiesStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class PressKeysStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.press_keys"] = "gui_step.press_keys"
+class PressKeysStepSpanInput(BaseModel):
     recorded_keys: list[dict[str, Any]] = Field(
         description="Recorded key events replayed by the step."
     )
 
 
-class PrintStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.print"] = "gui_step.print"
+class PrintStepSpanInput(BaseModel):
     message: str = Field(description="Effective message emitted by the step.")
 
 
-class NaradaCodeProjectExecutableStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.narada_code_project_executable"] = (
-        "gui_step.narada_code_project_executable"
-    )
+class NaradaCodeProjectExecutableStepSpanInput(BaseModel):
     narada_code_project_id: str = Field(
         description="Stable identifier of the Narada Code project."
     )
@@ -534,21 +486,18 @@ class NaradaCodeProjectExecutableStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class PythonStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.python"] = "gui_step.python"
+class PythonStepSpanInput(BaseModel):
     code: str = Field(description="Effective Python source executed by the step.")
 
 
-class ReadCsvStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.read_csv"] = "gui_step.read_csv"
+class ReadCsvStepSpanInput(BaseModel):
     content: str = Field(description="Effective CSV content parsed by the step.")
     output_variable: str = Field(
         description="Workflow variable selected to receive the parsed data table."
     )
 
 
-class ReadExcelSheetStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.read_excel_sheet"] = "gui_step.read_excel_sheet"
+class ReadExcelSheetStepSpanInput(BaseModel):
     workbook_url: str = Field(description="Effective Excel workbook URL.")
     range: str = Field(description="Effective Excel range read by the step.")
     microsoft_account_email: str = Field(
@@ -562,8 +511,7 @@ class ReadExcelSheetStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class ReadGoogleSheetStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.read_google_sheet"] = "gui_step.read_google_sheet"
+class ReadGoogleSheetStepSpanInput(BaseModel):
     spreadsheet_url: str = Field(description="Effective Google spreadsheet URL.")
     range: str = Field(description="Effective Google Sheets range read by the step.")
     has_headers: bool = Field(
@@ -574,8 +522,7 @@ class ReadGoogleSheetStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class EmailActionStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.email_action"] = "gui_step.email_action"
+class EmailActionStepSpanInput(BaseModel):
     action: Literal["send", "getMany", "markRead", "markUnread", "getById"] = Field(
         description="Email operation performed by the step."
     )
@@ -630,8 +577,7 @@ class EmailActionStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class SlackActionStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.slack_action"] = "gui_step.slack_action"
+class SlackActionStepSpanInput(BaseModel):
     connector: str = Field(description="Stable reference for the selected connector.")
     target: str = Field(description="Effective Slack target.")
     message: str = Field(description="Effective Slack message.")
@@ -641,8 +587,7 @@ class SlackActionStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class SetVariableStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.set_variable"] = "gui_step.set_variable"
+class SetVariableStepSpanInput(BaseModel):
     output_variable: str = Field(description="Workflow variable updated by the step.")
     new_value: Any = Field(description="Effective value assigned to the variable.")
 
@@ -652,8 +597,7 @@ class PromptForUserInputVariable(BaseModel):
     required: bool = Field(description="Whether the user must provide the variable.")
 
 
-class PromptForUserInputStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.prompt_for_user_input"] = "gui_step.prompt_for_user_input"
+class PromptForUserInputStepSpanInput(BaseModel):
     prompt_message: str | None = Field(
         default=None,
         description="Effective prompt presented to the user.",
@@ -663,13 +607,11 @@ class PromptForUserInputStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class StartStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.start"] = "gui_step.start"
+class StartStepSpanInput(BaseModel):
     pass
 
 
-class ThrowStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.throw"] = "gui_step.throw"
+class ThrowStepSpanInput(BaseModel):
     message: str = Field(description="Effective error message thrown by the step.")
 
 
@@ -684,8 +626,7 @@ class CatchBranchInput(BaseModel):
     )
 
 
-class TryCatchStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.try_catch"] = "gui_step.try_catch"
+class TryCatchStepSpanInput(BaseModel):
     try_branch_name: str | None = Field(
         default=None,
         description="Optional user-facing name of the try branch.",
@@ -699,8 +640,7 @@ class TryCatchStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class UserApprovalStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.user_approval"] = "gui_step.user_approval"
+class UserApprovalStepSpanInput(BaseModel):
     prompt_message: str = Field(description="Effective approval prompt.")
     approve_label: str = Field(description="Label displayed for approval.")
     reject_label: str = Field(description="Label displayed for rejection.")
@@ -709,13 +649,11 @@ class UserApprovalStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class WaitStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.wait"] = "gui_step.wait"
+class WaitStepSpanInput(BaseModel):
     duration: str | float = Field(description="Effective wait duration.")
 
 
-class WaitForElementStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.wait_for_element"] = "gui_step.wait_for_element"
+class WaitForElementStepSpanInput(BaseModel):
     page_url: str | None = Field(
         default=None,
         description="Page URL displayed from the recorded element.",
@@ -738,8 +676,7 @@ class WaitForElementStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class WhileStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.while"] = "gui_step.while"
+class WhileStepSpanInput(BaseModel):
     condition: dict[str, Any] = Field(
         description="Authored condition evaluated before each iteration."
     )
@@ -753,8 +690,7 @@ class WhileStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class WriteExcelSheetStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.write_excel_sheet"] = "gui_step.write_excel_sheet"
+class WriteExcelSheetStepSpanInput(BaseModel):
     workbook_url: str = Field(description="Effective Excel workbook URL.")
     range: str = Field(description="Effective Excel range written by the step.")
     microsoft_account_email: str = Field(
@@ -768,8 +704,7 @@ class WriteExcelSheetStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class WriteGoogleSheetStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.write_google_sheet"] = "gui_step.write_google_sheet"
+class WriteGoogleSheetStepSpanInput(BaseModel):
     spreadsheet_url: str = Field(description="Effective Google spreadsheet URL.")
     range: str = Field(description="Effective Google Sheets range written by the step.")
     data_table_input_variable: str = Field(
@@ -792,8 +727,7 @@ class OutputVariableMappingInput(BaseModel):
     )
 
 
-class RunCustomAgentStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.run_custom_agent"] = "gui_step.run_custom_agent"
+class RunCustomAgentStepSpanInput(BaseModel):
     workflow_id: str = Field(
         description="Stable identifier of the invoked custom workflow."
     )
@@ -810,14 +744,13 @@ class RunCustomAgentStepSpanInput(BaseGuiStepSpanInput):
     )
 
 
-class OutputStepSpanInput(BaseGuiStepSpanInput):
-    type: Literal["gui_step.output"] = "gui_step.output"
+class OutputStepSpanInput(BaseModel):
     variables_to_output: list[str] = Field(
         description="Workflow variables selected as workflow outputs."
     )
 
 
-type GuiStepSpanInput = Annotated[
+type GuiStepSpanInput = (
     AgentStepSpanInput
     | AgenticMouseActionStepSpanInput
     | AgenticSelectorStepSpanInput
@@ -868,6 +801,5 @@ type GuiStepSpanInput = Annotated[
     | WhileStepSpanInput
     | WriteExcelSheetStepSpanInput
     | WriteGoogleSheetStepSpanInput
-    | WriteLocalFilesystemStepSpanInput,
-    Field(discriminator="type"),
-]
+    | WriteLocalFilesystemStepSpanInput
+)

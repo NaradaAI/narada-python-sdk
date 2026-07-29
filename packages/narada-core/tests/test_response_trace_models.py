@@ -94,8 +94,12 @@ def _discriminator_values(annotation: object) -> set[str]:
 
 
 def test_gui_step_span_inputs_are_defined_in_their_own_module() -> None:
-    assert _discriminator_values(step_span_inputs.GuiStepSpanInput) == GUI_STEP_TYPES
+    input_schema = TypeAdapter(step_span_inputs.GuiStepSpanInput).json_schema()
+
+    assert "discriminator" not in input_schema
     assert span_data.TGuiStepSpanInput.__bound__ is step_span_inputs.GuiStepSpanInput
+    assert "type" not in step_span_inputs.AgentStepSpanInput.model_fields
+    assert "type" not in step_span_inputs.WhileStepSpanInput.model_fields
     assert AgentStepData.model_fields["input"].annotation == (
         step_span_inputs.AgentStepSpanInput | None
     )
@@ -164,13 +168,14 @@ def test_span_error_preserves_openai_nullable_data_field() -> None:
     }
 
 
-def test_agent_span_contains_only_execution_results() -> None:
+def test_agent_span_contains_prompt_and_execution_results() -> None:
     span = Span(
         span_id="span_agent",
         trace_id="trace_123",
         span_data=AgentSpanData(
             name="Operator",
             agent_type="operator",
+            prompt="Approve the pending order",
             status="success",
         ),
     )
@@ -179,6 +184,7 @@ def test_agent_span_contains_only_execution_results() -> None:
         "type": "agent",
         "name": "Operator",
         "agent_type": "operator",
+        "prompt": "Approve the pending order",
         "response": None,
         "status": "success",
         "request_id": None,
@@ -197,6 +203,7 @@ def test_agent_span_serializes_response_without_workflow_output_variables() -> N
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
+        prompt="Approve the pending order",
         response={"status": "approved"},
         status="success",
     )
@@ -226,7 +233,6 @@ def test_span_data_unions_parse_concrete_subtypes() -> None:
                 "step_id": "step_123",
                 "status": "success",
                 "input": {
-                    "type": "gui_step.http_request",
                     "url": "https://example.test/orders",
                     "method": "GET",
                     "headers": {},
@@ -305,7 +311,6 @@ def test_end_step_preserves_conditional_configuration_as_input() -> None:
     serialized = end_step.model_dump(mode="json")
 
     assert serialized["input"] == {
-        "type": "gui_step.end",
         "terminate_tree": True,
         "result_status": "error",
         "message": "Unable to complete the workflow",
@@ -371,6 +376,7 @@ def test_span_types_use_their_source_statuses() -> None:
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
+        prompt="Complete the task",
         status="input-required",
     )
     iteration = IterationSpanData(iteration_index=0)
@@ -399,6 +405,7 @@ def test_span_types_use_their_source_statuses() -> None:
         AgentSpanData(
             name="Operator",
             agent_type="operator",
+            prompt="Complete the task",
             status="aborted",  # type: ignore[arg-type]
         )
 
@@ -486,6 +493,7 @@ def test_agent_types_match_agent_studio_runtime_values() -> None:
         agent = AgentSpanData(
             name=agent_type,
             agent_type=agent_type,  # type: ignore[arg-type]
+            prompt="Complete the task",
             status="success",
         )
         assert agent.agent_type == agent_type
@@ -494,6 +502,7 @@ def test_agent_types_match_agent_studio_runtime_values() -> None:
         AgentSpanData(
             name="Custom Agent",
             agent_type="custom",  # type: ignore[arg-type]
+            prompt="Complete the task",
             status="success",
         )
 
@@ -529,7 +538,6 @@ def test_canonical_gui_step_names_are_public() -> None:
     assert go_to_url.input is not None
     assert go_to_url.input.url == "https://example.test/destination"
     assert go_to_url.model_dump(mode="json")["input"] == {
-        "type": "gui_step.go_to_url",
         "url": "https://example.test/destination",
     }
     assert go_to_url.output_variables == {}
@@ -581,6 +589,7 @@ def test_agent_step_owns_workflow_outputs_and_agent_span_owns_response() -> None
     agent = AgentSpanData(
         name="Operator",
         agent_type="operator",
+        prompt="Approve order 481",
         response="Order 481 was approved.",
         status="success",
     )
