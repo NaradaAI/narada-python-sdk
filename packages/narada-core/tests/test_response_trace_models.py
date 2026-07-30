@@ -137,6 +137,8 @@ def test_span_uses_openai_python_object_fields() -> None:
         span_data=WorkflowSpanData(
             workflow_name="Process renewals",
             workflow_id="workflow_123",
+            chat_input="Process the July renewals",
+            input_variables={"region": "west"},
             status="success",
         ),
     )
@@ -152,6 +154,8 @@ def test_span_uses_openai_python_object_fields() -> None:
             "type": "workflow",
             "workflow_name": "Process renewals",
             "workflow_id": "workflow_123",
+            "chat_input": "Process the July renewals",
+            "input_variables": {"region": "west"},
             "status": "success",
             "request_id": None,
             "output_variables": None,
@@ -282,6 +286,7 @@ def test_every_gui_step_nests_inputs_and_has_common_outputs() -> None:
 
         assert "input" in properties, step_type
         assert "output_variables" in properties, step_type
+        assert "description" not in properties, step_type
 
     assert "url" not in GoToUrlStepData.model_fields
     assert "url" in step_span_inputs.GoToUrlStepSpanInput.model_fields
@@ -295,6 +300,37 @@ def test_every_gui_step_nests_inputs_and_has_common_outputs() -> None:
         "output_variable",
     } <= set(step_span_inputs.HttpRequestStepSpanInput.model_fields)
     assert "method" not in HttpRequestStepData.model_fields
+
+
+def test_workflow_inputs_and_agent_reasoning_are_required_execution_data() -> None:
+    workflow = WorkflowSpanData(
+        workflow_name="Demo",
+        workflow_id="workflow_123",
+        chat_input="Run the demo",
+        input_variables={"region": "west"},
+        status="success",
+    )
+    agent_input = step_span_inputs.AgentStepSpanInput(
+        agent_type="operator",
+        query="Complete the task",
+        reasoning_mode="low",
+    )
+
+    assert workflow.input_variables == {"region": "west"}
+    assert agent_input.reasoning_mode == "low"
+
+    with pytest.raises(ValidationError):
+        WorkflowSpanData(
+            workflow_name="Demo",
+            workflow_id="workflow_123",
+            status="success",
+        )
+
+    with pytest.raises(ValidationError):
+        step_span_inputs.AgentStepSpanInput(
+            agent_type="operator",
+            query="Complete the task",
+        )
 
 
 def test_end_step_preserves_conditional_configuration_as_input() -> None:
@@ -354,6 +390,8 @@ def test_flat_trace_list_uses_openai_trace_and_span_types_directly() -> None:
                     "type": "workflow",
                     "workflow_name": "Demo",
                     "workflow_id": "workflow_123",
+                    "chat_input": "Run the demo",
+                    "input_variables": {},
                     "status": "success",
                 },
             },
@@ -371,6 +409,7 @@ def test_span_types_use_their_source_statuses() -> None:
     workflow = WorkflowSpanData(
         workflow_name="Demo",
         workflow_id="workflow_123",
+        chat_input="Run the demo",
         status="input-required",
     )
     agent = AgentSpanData(
@@ -386,6 +425,7 @@ def test_span_types_use_their_source_statuses() -> None:
         input=step_span_inputs.AgentStepSpanInput(
             agent_type="operator",
             query="Complete the task",
+            reasoning_mode="low",
         ),
     )
 
@@ -398,6 +438,7 @@ def test_span_types_use_their_source_statuses() -> None:
         WorkflowSpanData(
             workflow_name="Demo",
             workflow_id="workflow_123",
+            chat_input="Run the demo",
             status="running",  # type: ignore[arg-type]
         )
 
@@ -416,6 +457,7 @@ def test_span_types_use_their_source_statuses() -> None:
             input=step_span_inputs.AgentStepSpanInput(
                 agent_type="operator",
                 query="Complete the task",
+                reasoning_mode="low",
             ),
         )
 
@@ -568,6 +610,7 @@ def test_successful_run_custom_agent_step_can_parent_a_workflow_span() -> None:
         span_data=WorkflowSpanData(
             workflow_name="Child workflow",
             workflow_id="workflow_child",
+            chat_input="Process this record",
             status="success",
         ),
     )
@@ -582,6 +625,7 @@ def test_agent_step_owns_workflow_outputs_and_agent_span_owns_response() -> None
         input=step_span_inputs.AgentStepSpanInput(
             agent_type="operator",
             query="Approve order 481",
+            reasoning_mode="low",
             output_variable_names=["confirmation"],
         ),
         output_variables={"confirmation": "Order 481 was approved."},
@@ -672,6 +716,7 @@ def test_span_rejects_non_utc_or_reversed_timestamps(
             span_data=WorkflowSpanData(
                 workflow_name="Demo",
                 workflow_id="workflow_123",
+                chat_input="Run the demo",
                 status="success",
             ),
         )
