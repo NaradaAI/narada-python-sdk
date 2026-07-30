@@ -716,9 +716,9 @@ class AgentActionSpanData(SpanData):
         description="Short user-facing name for the action that executed."
     )
     message: str = Field(description="User-facing description of what the agent did.")
-    url: str | None = Field(
+    starting_url: str | None = Field(
         default=None,
-        description="Browser page URL associated with the action, when available.",
+        description="Browser page URL captured when the action started, when available.",
     )
     credits: NonNegativeFloat | None = Field(
         default=None,
