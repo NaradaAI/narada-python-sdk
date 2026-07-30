@@ -722,7 +722,10 @@ class AgentActionSpanData(SpanData):
     )
     credits: NonNegativeFloat | None = Field(
         default=None,
-        description="Credits attributed to this individual action, when available.",
+        description=(
+            "Base tool-call credits attributed to this action, or null when no "
+            "authoritative credit event was received."
+        ),
     )
 
 

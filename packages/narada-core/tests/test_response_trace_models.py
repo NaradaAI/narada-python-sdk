@@ -296,6 +296,39 @@ def test_agent_action_uses_starting_url() -> None:
     assert "url" not in AgentActionSpanData.model_fields
 
 
+def test_agent_action_child_span_serializes_explicit_null_timestamps() -> None:
+    action = Span(
+        span_id="span_click",
+        trace_id="trace_123",
+        parent_id="span_multiple_actions",
+        started_at=None,
+        ended_at=None,
+        span_data=AgentActionSpanData(
+            name="click",
+            message="Clicked Submit",
+            starting_url="https://example.test/form",
+            credits=None,
+        ),
+    )
+
+    assert action.model_dump(mode="json") == {
+        "object": "trace.span",
+        "span_id": "span_click",
+        "trace_id": "trace_123",
+        "parent_id": "span_multiple_actions",
+        "started_at": None,
+        "ended_at": None,
+        "span_data": {
+            "type": "agent_action",
+            "name": "click",
+            "message": "Clicked Submit",
+            "starting_url": "https://example.test/form",
+            "credits": None,
+        },
+        "error": None,
+    }
+
+
 def test_every_gui_step_nests_inputs_and_has_common_outputs() -> None:
     schema = TypeAdapter(GuiStepSpanData).json_schema()
 
