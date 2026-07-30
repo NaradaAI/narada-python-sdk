@@ -3,6 +3,7 @@ from typing import Any
 import narada_core.tracing as tracing
 import pytest
 from narada_core.tracing import (
+    AgentActionSpanData,
     AgentSpanData,
     AgentStepData,
     ControlFlowSpanData,
@@ -275,6 +276,24 @@ def test_taxonomy_discriminators_are_complete() -> None:
         "control_flow.finally",
     }
     assert AgentSpanData.model_json_schema()["properties"]["type"]["const"] == "agent"
+
+
+def test_agent_action_uses_starting_url() -> None:
+    action = AgentActionSpanData(
+        name="click",
+        message="Clicked Submit",
+        starting_url="https://example.test/form",
+        credits=4,
+    )
+
+    assert action.model_dump(mode="json") == {
+        "type": "agent_action",
+        "name": "click",
+        "message": "Clicked Submit",
+        "starting_url": "https://example.test/form",
+        "credits": 4.0,
+    }
+    assert "url" not in AgentActionSpanData.model_fields
 
 
 def test_every_gui_step_nests_inputs_and_has_common_outputs() -> None:
