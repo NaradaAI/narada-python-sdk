@@ -87,9 +87,8 @@ class AgentStepSpanInput(BaseModel):
         default=False,
         description="Whether the agent starts without prior agent chat history.",
     )
-    reasoning_mode: Literal["none", "low", "medium", "high"] | None = Field(
-        default=None,
-        description="Reasoning mode selected for the GUI agent step.",
+    reasoning_mode: Literal["none", "low", "medium", "high"] = Field(
+        description="Effective reasoning mode used by the GUI agent step.",
     )
     critic: CriticAgentStepSpanInput | None = Field(
         default=None,

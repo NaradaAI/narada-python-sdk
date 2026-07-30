@@ -99,6 +99,16 @@ class WorkflowSpanData(SpanData):
     workflow_id: str = Field(
         description="Stable identifier of the workflow definition that executed."
     )
+    chat_input: str = Field(
+        description="Effective chat input supplied to the workflow execution."
+    )
+    input_variables: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Effective initial workflow variable values after explicit inputs "
+            "override authored defaults."
+        ),
+    )
     status: WorkflowSpanStatus = Field(
         description="Execution status stored for the remote workflow dispatch."
     )
@@ -133,10 +143,6 @@ class BaseGuiStepSpanData(SpanData, Generic[TGuiStepSpanInput]):
     )
     status: GuiStepSpanStatus = Field(
         description="Terminal execution status reported for the GUI step."
-    )
-    description: str | None = Field(
-        default=None,
-        description="User-facing description produced while the step executed.",
     )
     starting_url: str | None = Field(
         default=None,
