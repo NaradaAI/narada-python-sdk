@@ -200,6 +200,9 @@ async def _build_auth_headers(
     headers["Authorization"] = f"Bearer {await _narada_get_id_token()}"
     headers["X-Narada-User-ID"] = user_id
     headers["X-Narada-Env"] = env
+    remote_dispatch_api_key_id = os.environ.get(_REMOTE_DISPATCH_API_KEY_ID_ENV_VAR)
+    if remote_dispatch_api_key_id:
+        headers["x-api-key-id"] = remote_dispatch_api_key_id
     return headers
 
 
