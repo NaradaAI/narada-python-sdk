@@ -12,6 +12,7 @@ from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
 )
+from narada_core.models import AgentKind, ReasoningEffort
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -474,6 +475,74 @@ async def test_agent_run_forwards_clear_chat(
 
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
     assert payload["clearChat"] is True
+    assert "reasoningMode" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "reasoning", "expected_prompt"),
+    [
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
+    ],
+)
+async def test_agent_run_forwards_reasoning_for_every_agent_kind(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: AgentKind | str,
+    reasoning: ReasoningEffort,
+    expected_prompt: str,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "hitlInputMetadata": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env, kind=kind).run(
+        "analyze",
+        reasoning=reasoning,
+    )
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["prompt"] == expected_prompt
+    assert payload["reasoningMode"] == reasoning.value
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_reasoning_for_named_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=AsyncMock())
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await narada_pkg.Agent(environment=env, kind="/owner/custom-agent").run(
+            "analyze",
+            reasoning=narada_pkg.ReasoningEffort.HIGH,
+        )
 
 
 @pytest.mark.asyncio
