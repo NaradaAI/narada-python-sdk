@@ -113,6 +113,9 @@ _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 # can report HITL input-required status.
 _REMOTE_DISPATCH_REQUEST_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_REQUEST_ID"
 _REMOTE_DISPATCH_API_KEY_ID_ENV_VAR = "NARADA_REMOTE_DISPATCH_API_KEY_ID"
+_REMOTE_DISPATCH_TARGET_CLIENT_INSTANCE_ID_ENV_VAR = (
+    "NARADA_REMOTE_DISPATCH_TARGET_CLIENT_INSTANCE_ID"
+)
 
 type InputRequiredCallback = Callable[[HitlInputMetadata], Awaitable[None] | None]
 
@@ -297,6 +300,10 @@ class Environment(ABC):
 
     @property
     def _dispatch_browser_window_id(self) -> str | None:
+        return None
+
+    @property
+    def _dispatch_target_client_instance_id(self) -> str | None:
         return None
 
     async def _fetch_sdk_config(self) -> _SdkConfig | None:
@@ -520,6 +527,9 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        target_client_instance_id = self._dispatch_target_client_instance_id
+        if target_client_instance_id is not None:
+            body["targetClientInstanceId"] = target_client_instance_id
         parent_run_ids = self._current_parent_run_ids()
         if parent_run_ids:
             body["parentRunIds"] = parent_run_ids
@@ -899,6 +909,10 @@ class BrowserEnvironment(BaseBrowserEnvironment):
 
     def __str__(self) -> str:
         return f"BrowserEnvironment(browser_window_id={self.browser_window_id})"
+
+    @property
+    def _dispatch_target_client_instance_id(self) -> str | None:
+        return os.environ.get(_REMOTE_DISPATCH_TARGET_CLIENT_INSTANCE_ID_ENV_VAR)
 
     @override
     def _current_parent_run_ids(self) -> list[str] | None:
