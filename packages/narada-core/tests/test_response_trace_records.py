@@ -31,7 +31,7 @@ def test_parse_response_trace_preserves_valid_records_and_skips_invalid(
                     "response": "Done",
                     "status": "success",
                     "request_id": "request_123",
-                    "usage": None,
+                    "credits": 1.0,
                 },
                 "error": None,
             },
@@ -41,6 +41,7 @@ def test_parse_response_trace_preserves_valid_records_and_skips_invalid(
     assert isinstance(records[0], Trace)
     assert isinstance(records[1], Span)
     assert isinstance(records[1].span_data, AgentSpanData)
+    assert records[1].span_data.credits == 1.0
     assert "index 1" in caplog.text
 
 
