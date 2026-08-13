@@ -123,6 +123,15 @@ class WorkflowSpanData(SpanData):
         default=None,
         description="Runtime output variables produced by the workflow, when available.",
     )
+    credits: NonNegativeFloat | None = Field(
+        default=None,
+        description=(
+            "Inclusive credits consumed by this workflow and all descendant "
+            "billable spans. Zero means billing settled with no charge; null "
+            "means billing is unavailable or has not settled. Inclusive values "
+            "must not be summed across a trace tree."
+        ),
+    )
 
 
 class BaseGuiStepSpanData(SpanData, Generic[TGuiStepSpanInput]):
@@ -665,18 +674,6 @@ type ControlFlowSpanData = Annotated[
 ]
 
 
-class UsageData(BaseModel):
-    actions: NonNegativeInt = Field(
-        description=(
-            "Aggregate number of billable agent actions recorded for this run. "
-            "This may differ from the number of returned action spans."
-        )
-    )
-    credits: NonNegativeFloat = Field(
-        description="Aggregate credits consumed by the agent run."
-    )
-
-
 class AgentSpanData(SpanData):
     type: Literal["agent"] = Field(
         default="agent",
@@ -701,9 +698,14 @@ class AgentSpanData(SpanData):
         default=None,
         description="Request identifier associated with the agent run, when available.",
     )
-    usage: UsageData | None = Field(
+    credits: NonNegativeFloat | None = Field(
         default=None,
-        description="Aggregate billable usage recorded for the agent run.",
+        description=(
+            "Inclusive credits consumed by this agent and all descendant "
+            "billable spans. Zero means billing settled with no charge; null "
+            "means billing is unavailable or has not settled. Inclusive values "
+            "must not be summed across a trace tree."
+        ),
     )
 
 
@@ -722,7 +724,13 @@ class AgentActionSpanData(SpanData):
     )
     credits: NonNegativeFloat | None = Field(
         default=None,
-        description="Credits attributed to this individual action, when available.",
+        description=(
+            "Inclusive credits consumed by this action and all descendant "
+            "billable spans. Zero means billing settled with no charge; null "
+            "means billing is unavailable, has not settled, or this is an "
+            "untimed structural action. Inclusive values must not be summed "
+            "across a trace tree."
+        ),
     )
 
 

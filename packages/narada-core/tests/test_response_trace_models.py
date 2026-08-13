@@ -24,7 +24,6 @@ from narada_core.tracing import (
     SpanError,
     Trace,
     TryCatchStepData,
-    UsageData,
     WhileStepData,
     WorkflowSpanData,
     span_data,
@@ -160,6 +159,7 @@ def test_span_uses_openai_python_object_fields() -> None:
             "status": "success",
             "request_id": None,
             "output_variables": None,
+            "credits": None,
         },
         "error": None,
     }
@@ -193,15 +193,35 @@ def test_agent_span_contains_prompt_and_execution_results() -> None:
         "response": None,
         "status": "success",
         "request_id": None,
-        "usage": None,
+        "credits": None,
     }
 
 
-def test_usage_data_contains_billable_action_and_credit_totals() -> None:
-    usage = UsageData(actions=2, credits=1)
+def test_billable_span_credits_distinguish_unsettled_free_and_positive() -> None:
+    workflow = WorkflowSpanData(
+        workflow_name="Approval",
+        workflow_id="workflow_123",
+        chat_input="Approve the order",
+        status="success",
+        credits=0,
+    )
+    agent = AgentSpanData(
+        name="Operator",
+        agent_type="operator",
+        prompt="Approve the order",
+        status="success",
+        credits=4,
+    )
 
-    assert usage.model_dump(mode="json") == {"actions": 2, "credits": 1.0}
-    assert set(UsageData.model_json_schema()["properties"]) == {"actions", "credits"}
+    assert workflow.model_dump(mode="json")["credits"] == 0.0
+    assert agent.model_dump(mode="json")["credits"] == 4.0
+    assert (
+        AgentActionSpanData(
+            name="click",
+            message="Clicked Approve",
+        ).model_dump(mode="json")["credits"]
+        is None
+    )
 
 
 def test_agent_span_serializes_response_without_workflow_output_variables() -> None:
