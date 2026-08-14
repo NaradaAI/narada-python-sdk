@@ -716,9 +716,6 @@ class AgentActionSpanData(SpanData):
         default="agent_action",
         description="Identifies one user-facing action performed by an agent.",
     )
-    name: str = Field(
-        description="Short user-facing name for the action that executed."
-    )
     message: str = Field(description="User-facing description of what the agent did.")
     starting_url: str | None = Field(
         default=None,
