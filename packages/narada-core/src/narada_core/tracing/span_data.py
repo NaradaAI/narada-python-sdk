@@ -376,7 +376,8 @@ class IfStepData(BaseGuiStepSpanData[IfStepSpanInput]):
         default=None,
         description=(
             "Authored condition for the selected branch, with variable references "
-            "left unevaluated. It is null when an else branch ran or no branch ran."
+            "left unevaluated. The literal value 'else' identifies the else branch; "
+            "null means no branch selection was recorded."
         ),
     )
 
@@ -506,7 +507,8 @@ class TryCatchStepData(BaseGuiStepSpanData[TryCatchStepSpanInput]):
         default=None,
         description=(
             "Authored condition for the first matching catch branch, with variable "
-            "references left unevaluated. It is null when no error was caught."
+            "references left unevaluated. The literal value 'default' identifies an "
+            "unconditional catch; null means no error was caught."
         ),
     )
 
