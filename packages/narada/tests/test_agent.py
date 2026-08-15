@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from narada import Agent, AgentKind, Environment, ReasoningEffort
+from narada import Agent, AgentKind, AgentModelTier, Environment, ReasoningEffort
 
 
 class _FakeResponse:
@@ -159,3 +159,38 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_forwards_mini_model_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(
+        environment=_CountingEnvironment(),
+        model_tier=AgentModelTier.MINI,
+    ).run("fast task")
+
+    assert fake_session.dispatched_bodies[0]["modelTier"] == "mini"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_omits_default_model_tier_for_backward_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(environment=_CountingEnvironment()).run("default task")
+
+    assert "modelTier" not in fake_session.dispatched_bodies[0]

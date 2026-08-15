@@ -23,6 +23,13 @@ class AgentKind(Enum):
                 return "/coreAgent "
 
 
+class AgentModelTier(StrEnum):
+    """Selects the product model tier for a Narada agent invocation."""
+
+    DEFAULT = "default"
+    MINI = "mini"
+
+
 class ReasoningEffort(StrEnum):
     """Controls how much reasoning a built-in Narada agent uses before responding."""
 

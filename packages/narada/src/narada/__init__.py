@@ -14,6 +14,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentModelTier,
     CriticConfig,
     File,
     ReasoningEffort,
@@ -40,6 +41,7 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "AgentModelTier",
     "BaseBrowserEnvironment",
     "BrowserConfig",
     "BrowserEnvironment",

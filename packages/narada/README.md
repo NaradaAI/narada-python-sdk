@@ -39,13 +39,14 @@ agent to download a file for you from arxiv:
 ```python
 import asyncio
 
-from narada import Agent, BrowserEnvironment
+from narada import Agent, AgentModelTier, BrowserEnvironment
 
 
 async def main() -> None:
     # Create the browser environment. It initializes lazily on the first action.
     env = BrowserEnvironment()
     agent = Agent(environment=env)
+    mini_agent = Agent(environment=env, model_tier=AgentModelTier.MINI)
 
     try:
         # Run a task in this browser environment.
@@ -56,6 +57,10 @@ async def main() -> None:
         )
 
         print("Response:", response.model_dump_json(indent=2))
+
+        # Use the product's lower-cost, faster model tier when appropriate.
+        mini_response = await mini_agent.run(prompt="Summarize the completed task.")
+        print("Mini response:", mini_response.model_dump_json(indent=2))
     finally:
         await env.close()
 

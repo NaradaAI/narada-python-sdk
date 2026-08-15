@@ -51,6 +51,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentModelTier,
     CriticConfig,
     File,
     McpServer,
@@ -77,9 +78,11 @@ class Agent(Generic[_StructuredOutput]):
         *,
         environment: Environment,
         kind: AgentKind | str = AgentKind.OPERATOR,
+        model_tier: AgentModelTier = AgentModelTier.DEFAULT,
     ) -> None:
         self.environment = environment
         self.kind = kind
+        self.model_tier = model_tier
 
     @overload
     async def run(
@@ -166,6 +169,7 @@ class Agent(Generic[_StructuredOutput]):
 
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
+            model_tier=self.model_tier,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
@@ -229,6 +233,7 @@ class Agent(Generic[_StructuredOutput]):
         *,
         prompt: str,
         agent: AgentKind | str | None = None,
+        model_tier: AgentModelTier = AgentModelTier.DEFAULT,
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -253,6 +258,7 @@ class Agent(Generic[_StructuredOutput]):
         return await self.environment._dispatch_request(
             prompt=prompt,
             agent=dispatch_agent,
+            model_tier=model_tier,
             reasoning=reasoning,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
