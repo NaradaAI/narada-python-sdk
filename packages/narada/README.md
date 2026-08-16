@@ -58,7 +58,7 @@ async def main() -> None:
 
         print("Response:", response.model_dump_json(indent=2))
 
-        # Use the product's lower-cost, faster model tier when appropriate.
+        # Use the product's lower-cost tier when appropriate.
         mini_response = await mini_agent.run(prompt="Summarize the completed task.")
         print("Mini response:", mini_response.model_dump_json(indent=2))
     finally:
