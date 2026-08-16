@@ -39,14 +39,14 @@ agent to download a file for you from arxiv:
 ```python
 import asyncio
 
-from narada import Agent, AgentModelTier, BrowserEnvironment
+from narada import Agent, AgentKind, BrowserEnvironment
 
 
 async def main() -> None:
     # Create the browser environment. It initializes lazily on the first action.
     env = BrowserEnvironment()
     agent = Agent(environment=env)
-    mini_agent = Agent(environment=env, model_tier=AgentModelTier.MINI)
+    mini_agent = Agent(environment=env, kind=AgentKind.OPERATOR_MINI)
 
     try:
         # Run a task in this browser environment.
@@ -69,8 +69,8 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-`model_tier` applies to built-in `AgentKind` invocations. Named Agent Studio workflows own model
-tiers in their persisted Agent steps and reject a top-level Mini override.
+`AgentKind.OPERATOR_MINI` selects the lower-cost Operator Mini product agent. Named Agent Studio
+workflows continue to use their persisted Agent steps.
 
 This would then result in the following trajectory:
 

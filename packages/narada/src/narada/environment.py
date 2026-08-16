@@ -57,7 +57,6 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
-    AgentModelTier,
     File,
     McpServer,
     ReasoningEffort,
@@ -847,7 +846,6 @@ class Environment(ABC):
         *,
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
-        model_tier: AgentModelTier = AgentModelTier.DEFAULT,
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -875,7 +873,6 @@ class Environment(ABC):
         *,
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
-        model_tier: AgentModelTier = AgentModelTier.DEFAULT,
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -902,7 +899,6 @@ class Environment(ABC):
         *,
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
-        model_tier: AgentModelTier = AgentModelTier.DEFAULT,
         reasoning: ReasoningEffort | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
@@ -989,8 +985,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
-        if model_tier is not AgentModelTier.DEFAULT:
-            body["modelTier"] = model_tier.value
+        if isinstance(agent, AgentKind) and (model_tier := agent._model_tier()):
+            body["modelTier"] = model_tier
 
         try:
             seen_input_ids: set[str] = set()

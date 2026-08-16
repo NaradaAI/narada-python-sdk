@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from narada import Agent, AgentKind, AgentModelTier, Environment, ReasoningEffort
+from narada import Agent, AgentKind, Environment, ReasoningEffort
 
 
 class _FakeResponse:
@@ -109,6 +109,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
     ],
 )
@@ -143,18 +144,6 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_run_rejects_model_tier_for_named_agent() -> None:
-    agent = Agent(
-        environment=_CountingEnvironment(),
-        kind="/owner/custom-agent",
-        model_tier=AgentModelTier.MINI,
-    )
-
-    with pytest.raises(ValueError, match="named Agent Studio agents own model tiers"):
-        await agent.run("analyze")
-
-
-@pytest.mark.asyncio
 async def test_agent_run_forwards_clear_chat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -186,9 +175,10 @@ async def test_agent_run_forwards_mini_model_tier(
 
     await Agent(
         environment=_CountingEnvironment(),
-        model_tier=AgentModelTier.MINI,
+        kind=AgentKind.OPERATOR_MINI,
     ).run("fast task")
 
+    assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
     assert fake_session.dispatched_bodies[0]["modelTier"] == "mini"
 
 

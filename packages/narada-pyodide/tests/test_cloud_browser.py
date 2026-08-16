@@ -12,7 +12,7 @@ from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
 )
-from narada_core.models import AgentKind, AgentModelTier, ReasoningEffort
+from narada_core.models import AgentKind, ReasoningEffort
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -509,29 +509,12 @@ async def test_agent_run_forwards_mini_model_tier(
     )
     await narada_pkg.Agent(
         environment=env,
-        model_tier=narada_pkg.AgentModelTier.MINI,
+        kind=narada_pkg.AgentKind.OPERATOR_MINI,
     ).run("fast task")
 
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["prompt"] == "/OperatorMini fast task"
     assert payload["modelTier"] == "mini"
-
-
-@pytest.mark.asyncio
-async def test_agent_run_rejects_model_tier_for_named_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pyfetch = AsyncMock()
-    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-    agent = narada_pkg.Agent(
-        environment=object(),
-        kind="/owner/custom-agent",
-        model_tier=AgentModelTier.MINI,
-    )
-
-    with pytest.raises(ValueError, match="named Agent Studio agents own model tiers"):
-        await agent.run("analyze")
-
-    pyfetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -540,6 +523,7 @@ async def test_agent_run_rejects_model_tier_for_named_agent(
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
     ],
 )

@@ -12,6 +12,7 @@ class AgentKind(Enum):
     PRODUCTIVITY = 1
     OPERATOR = 2
     CORE_AGENT = 3
+    OPERATOR_MINI = 4
 
     def prompt_prefix(self) -> str:
         match self:
@@ -21,13 +22,12 @@ class AgentKind(Enum):
                 return "/Operator "
             case AgentKind.CORE_AGENT:
                 return "/coreAgent "
+            case AgentKind.OPERATOR_MINI:
+                return "/OperatorMini "
 
-
-class AgentModelTier(StrEnum):
-    """Selects the product model tier for a Narada agent invocation."""
-
-    DEFAULT = "default"
-    MINI = "mini"
+    def _model_tier(self) -> Literal["mini"] | None:
+        """Return the internal request tier implied by this product agent kind."""
+        return "mini" if self is AgentKind.OPERATOR_MINI else None
 
 
 class ReasoningEffort(StrEnum):
