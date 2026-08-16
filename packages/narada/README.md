@@ -69,6 +69,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+`model_tier` applies to built-in `AgentKind` invocations. Named Agent Studio workflows own model
+tiers in their persisted Agent steps and reject a top-level Mini override.
+
 This would then result in the following trajectory:
 
 <p align="center">

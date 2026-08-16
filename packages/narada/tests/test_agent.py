@@ -143,6 +143,18 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_run_rejects_model_tier_for_named_agent() -> None:
+    agent = Agent(
+        environment=_CountingEnvironment(),
+        kind="/owner/custom-agent",
+        model_tier=AgentModelTier.MINI,
+    )
+
+    with pytest.raises(ValueError, match="named Agent Studio agents own model tiers"):
+        await agent.run("analyze")
+
+
+@pytest.mark.asyncio
 async def test_agent_run_forwards_clear_chat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

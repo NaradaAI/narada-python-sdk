@@ -168,6 +168,13 @@ class Agent(Generic[_StructuredOutput]):
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
             )
+        if self.model_tier != AgentModelTier.DEFAULT and not isinstance(
+            self.kind, AgentKind
+        ):
+            raise ValueError(
+                "`model_tier` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own model tiers per workflow step"
+            )
 
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
