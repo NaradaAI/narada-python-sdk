@@ -525,6 +525,7 @@ async def test_agent_run_sends_operator_mini_command_without_transport_tier(
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
         (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
+        (AgentKind.CORE_AGENT_MINI, ReasoningEffort.MEDIUM, "/CoreAgentMini analyze"),
     ],
 )
 async def test_agent_run_forwards_reasoning_for_every_agent_kind(

@@ -172,6 +172,8 @@ def _trace_agent_type(agent: AgentKind | str) -> str:
             return "operatorMini"
         case AgentKind.CORE_AGENT:
             return "coreAgent"
+        case AgentKind.CORE_AGENT_MINI:
+            return "coreAgentMini"
         case _:
             return str(agent)
 
