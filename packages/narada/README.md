@@ -39,13 +39,14 @@ agent to download a file for you from arxiv:
 ```python
 import asyncio
 
-from narada import Agent, BrowserEnvironment
+from narada import Agent, AgentKind, BrowserEnvironment
 
 
 async def main() -> None:
     # Create the browser environment. It initializes lazily on the first action.
     env = BrowserEnvironment()
     agent = Agent(environment=env)
+    mini_agent = Agent(environment=env, kind=AgentKind.OPERATOR_MINI)
 
     try:
         # Run a task in this browser environment.
@@ -56,6 +57,10 @@ async def main() -> None:
         )
 
         print("Response:", response.model_dump_json(indent=2))
+
+        # Use the product's lower-cost tier when appropriate.
+        mini_response = await mini_agent.run(prompt="Summarize the completed task.")
+        print("Mini response:", mini_response.model_dump_json(indent=2))
     finally:
         await env.close()
 
@@ -63,6 +68,9 @@ async def main() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+`AgentKind.OPERATOR_MINI` selects the lower-cost Operator Mini product agent. Named Agent Studio
+workflows continue to use their persisted Agent steps.
 
 This would then result in the following trajectory:
 
