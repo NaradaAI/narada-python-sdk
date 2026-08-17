@@ -69,8 +69,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-`AgentKind.OPERATOR_MINI` selects the lower-cost Operator Mini product agent. Named Agent Studio
-workflows continue to use their persisted Agent steps.
+`AgentKind.OPERATOR_MINI` and `AgentKind.CORE_AGENT_MINI` select the lower-cost Mini variants of
+their respective product agents. Named Agent Studio workflows continue to use their persisted Agent
+steps.
 
 This would then result in the following trajectory:
 
