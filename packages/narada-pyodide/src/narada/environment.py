@@ -576,8 +576,6 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
-        if isinstance(agent, AgentKind) and (model_tier := agent._model_tier()):
-            body["modelTier"] = model_tier
 
         try:
             seen_input_ids: set[str] = set()

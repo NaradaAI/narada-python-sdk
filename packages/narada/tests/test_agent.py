@@ -163,7 +163,7 @@ async def test_agent_run_forwards_clear_chat(
 
 
 @pytest.mark.asyncio
-async def test_agent_run_forwards_mini_model_tier(
+async def test_agent_run_sends_operator_mini_command_without_transport_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import narada.environment as environment_module
@@ -179,20 +179,4 @@ async def test_agent_run_forwards_mini_model_tier(
     ).run("fast task")
 
     assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
-    assert fake_session.dispatched_bodies[0]["modelTier"] == "mini"
-
-
-@pytest.mark.asyncio
-async def test_agent_run_omits_default_model_tier_for_backward_compatibility(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import narada.environment as environment_module
-
-    fake_session = _RemoteDispatchFakeClientSession()
-    monkeypatch.setattr(
-        environment_module.aiohttp, "ClientSession", lambda: fake_session
-    )
-
-    await Agent(environment=_CountingEnvironment()).run("default task")
-
     assert "modelTier" not in fake_session.dispatched_bodies[0]

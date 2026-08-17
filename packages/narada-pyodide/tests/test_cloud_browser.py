@@ -480,7 +480,7 @@ async def test_agent_run_forwards_clear_chat(
 
 
 @pytest.mark.asyncio
-async def test_agent_run_forwards_mini_model_tier(
+async def test_agent_run_sends_operator_mini_command_without_transport_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyfetch = AsyncMock(
@@ -514,7 +514,7 @@ async def test_agent_run_forwards_mini_model_tier(
 
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
     assert payload["prompt"] == "/OperatorMini fast task"
-    assert payload["modelTier"] == "mini"
+    assert "modelTier" not in payload
 
 
 @pytest.mark.asyncio

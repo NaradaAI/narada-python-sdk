@@ -25,10 +25,6 @@ class AgentKind(Enum):
             case AgentKind.OPERATOR_MINI:
                 return "/OperatorMini "
 
-    def _model_tier(self) -> Literal["mini"] | None:
-        """Return the internal request tier implied by this product agent kind."""
-        return "mini" if self is AgentKind.OPERATOR_MINI else None
-
 
 class ReasoningEffort(StrEnum):
     """Controls how much reasoning a built-in Narada agent uses before responding."""
