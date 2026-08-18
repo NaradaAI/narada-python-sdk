@@ -5,7 +5,6 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 from pydantic import (
     BaseModel,
     Field,
-    NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
 )
@@ -122,15 +121,6 @@ class WorkflowSpanData(SpanData):
     output_variables: dict[str, Any] | None = Field(
         default=None,
         description="Runtime output variables produced by the workflow, when available.",
-    )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this workflow and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable or has not settled. Inclusive values "
-            "must not be summed across a trace tree."
-        ),
     )
 
 
@@ -700,15 +690,6 @@ class AgentSpanData(SpanData):
         default=None,
         description="Request identifier associated with the agent run, when available.",
     )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this agent and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable or has not settled. Inclusive values "
-            "must not be summed across a trace tree."
-        ),
-    )
 
 
 class AgentActionSpanData(SpanData):
@@ -720,16 +701,6 @@ class AgentActionSpanData(SpanData):
     starting_url: str | None = Field(
         default=None,
         description="Browser page URL captured when the action started, when available.",
-    )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this action and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable, has not settled, or this is an "
-            "untimed structural action. Inclusive values must not be summed "
-            "across a trace tree."
-        ),
     )
 
 

@@ -1,7 +1,7 @@
 from typing import Any
 
-import narada_core.tracing as tracing
 import pytest
+from narada_core import tracing
 from narada_core.tracing import (
     AgentActionSpanData,
     AgentSpanData,
@@ -159,7 +159,6 @@ def test_span_uses_openai_python_object_fields() -> None:
             "status": "success",
             "request_id": None,
             "output_variables": None,
-            "credits": None,
         },
         "error": None,
     }
@@ -193,35 +192,7 @@ def test_agent_span_contains_prompt_and_execution_results() -> None:
         "response": None,
         "status": "success",
         "request_id": None,
-        "credits": None,
     }
-
-
-def test_billable_span_credits_distinguish_unsettled_free_and_positive() -> None:
-    workflow = WorkflowSpanData(
-        workflow_name="Approval",
-        workflow_id="workflow_123",
-        chat_input="Approve the order",
-        status="success",
-        credits=0,
-    )
-    agent = AgentSpanData(
-        name="Operator",
-        agent_type="operator",
-        prompt="Approve the order",
-        status="success",
-        credits=4,
-    )
-
-    assert workflow.model_dump(mode="json")["credits"] == 0.0
-    assert agent.model_dump(mode="json")["credits"] == 4.0
-    assert (
-        AgentActionSpanData(
-            name="click",
-            message="Clicked Approve",
-        ).model_dump(mode="json")["credits"]
-        is None
-    )
 
 
 def test_agent_span_serializes_response_without_workflow_output_variables() -> None:
@@ -302,14 +273,12 @@ def test_agent_action_uses_starting_url() -> None:
     action = AgentActionSpanData(
         message="Clicked Submit",
         starting_url="https://example.test/form",
-        credits=4,
     )
 
     assert action.model_dump(mode="json") == {
         "type": "agent_action",
         "message": "Clicked Submit",
         "starting_url": "https://example.test/form",
-        "credits": 4.0,
     }
     assert "url" not in AgentActionSpanData.model_fields
     assert "name" not in AgentActionSpanData.model_fields
@@ -325,7 +294,6 @@ def test_agent_action_child_span_serializes_explicit_null_timestamps() -> None:
         span_data=AgentActionSpanData(
             message="Clicked Submit",
             starting_url="https://example.test/form",
-            credits=None,
         ),
     )
 
@@ -340,7 +308,6 @@ def test_agent_action_child_span_serializes_explicit_null_timestamps() -> None:
             "type": "agent_action",
             "message": "Clicked Submit",
             "starting_url": "https://example.test/form",
-            "credits": None,
         },
         "error": None,
     }
