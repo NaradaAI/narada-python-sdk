@@ -5,7 +5,6 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 from pydantic import (
     BaseModel,
     Field,
-    NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
 )
@@ -122,15 +121,6 @@ class WorkflowSpanData(SpanData):
     output_variables: dict[str, Any] | None = Field(
         default=None,
         description="Runtime output variables produced by the workflow, when available.",
-    )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this workflow and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable or has not settled. Inclusive values "
-            "must not be summed across a trace tree."
-        ),
     )
 
 
@@ -376,7 +366,8 @@ class IfStepData(BaseGuiStepSpanData[IfStepSpanInput]):
         default=None,
         description=(
             "Authored condition for the selected branch, with variable references "
-            "left unevaluated. It is null when an else branch ran or no branch ran."
+            "left unevaluated. The literal value 'else' identifies the else branch; "
+            "null means no branch selection was recorded."
         ),
     )
 
@@ -506,7 +497,8 @@ class TryCatchStepData(BaseGuiStepSpanData[TryCatchStepSpanInput]):
         default=None,
         description=(
             "Authored condition for the first matching catch branch, with variable "
-            "references left unevaluated. It is null when no error was caught."
+            "references left unevaluated. The literal value 'default' identifies an "
+            "unconditional catch; null means no error was caught."
         ),
     )
 
@@ -698,15 +690,6 @@ class AgentSpanData(SpanData):
         default=None,
         description="Request identifier associated with the agent run, when available.",
     )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this agent and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable or has not settled. Inclusive values "
-            "must not be summed across a trace tree."
-        ),
-    )
 
 
 class AgentActionSpanData(SpanData):
@@ -714,23 +697,10 @@ class AgentActionSpanData(SpanData):
         default="agent_action",
         description="Identifies one user-facing action performed by an agent.",
     )
-    name: str = Field(
-        description="Short user-facing name for the action that executed."
-    )
     message: str = Field(description="User-facing description of what the agent did.")
     starting_url: str | None = Field(
         default=None,
         description="Browser page URL captured when the action started, when available.",
-    )
-    credits: NonNegativeFloat | None = Field(
-        default=None,
-        description=(
-            "Inclusive credits consumed by this action and all descendant "
-            "billable spans. Zero means billing settled with no charge; null "
-            "means billing is unavailable, has not settled, or this is an "
-            "untimed structural action. Inclusive values must not be summed "
-            "across a trace tree."
-        ),
     )
 
 

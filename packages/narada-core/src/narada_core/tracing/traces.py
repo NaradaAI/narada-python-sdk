@@ -18,10 +18,7 @@ class Trace(BaseModel):
     )
     group_id: str | None = Field(
         default=None,
-        description=(
-            "Optional caller-supplied identifier used to correlate related traces. "
-            "This is distinct from per-run request identifiers."
-        ),
+        description="Optional caller-supplied identifier used to correlate related traces.",
     )
     metadata: dict[str, Any] | None = Field(
         default=None,
