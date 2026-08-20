@@ -192,6 +192,77 @@ async def test_agentic_mouse_action_returns_verification_status(
 
 
 @pytest.mark.asyncio
+async def test_agentic_selector_returns_verification_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": '{"verified":false}',
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button", "aria_label": "Submit"},
+        fallback_operator_query="Click the submit button",
+        verification_description="A confirmation dialog is visible.",
+        verification_delay_ms=750,
+    )
+
+    assert result.value is None
+    assert result.verified is False
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "click"},
+        "selectors": {
+            "ariaLabel": {"value": "Submit"},
+            "tagName": {"value": "button"},
+        },
+        "fallback_operator_query": "Click the submit button",
+        "verification_description": "A confirmation dialog is visible.",
+        "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_omits_blank_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button"},
+        fallback_operator_query="Click the button",
+        verification_description="   ",
+        verification_delay_ms=750,
+    )
+
+    assert result.verified is None
+    assert "verification_description" not in fake_session.post_bodies[0]["action"]
+    assert "verification_delay_ms" not in fake_session.post_bodies[0]["action"]
+
+
+@pytest.mark.asyncio
 async def test_save_pdf_file_dispatches_extension_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

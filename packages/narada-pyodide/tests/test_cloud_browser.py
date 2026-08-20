@@ -1150,6 +1150,45 @@ async def test_agentic_mouse_action_returns_verification_status(
 
 
 @pytest.mark.asyncio
+async def test_agentic_selector_returns_verification_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"verified":true}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    result = await narada_pkg.Agent(environment=env).agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button", "aria_label": "Submit"},
+        fallback_operator_query="Click the submit button",
+        verification_description="A confirmation dialog is visible.",
+        verification_delay_ms=750,
+    )
+
+    assert result.value is None
+    assert result.verified is True
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "click"},
+        "selectors": {
+            "ariaLabel": {"value": "Submit"},
+            "tagName": {"value": "button"},
+        },
+        "fallback_operator_query": "Click the submit button",
+        "verification_description": "A confirmation dialog is visible.",
+        "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
 async def test_agent_user_approval_respects_explicit_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

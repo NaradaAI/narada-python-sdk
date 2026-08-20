@@ -286,23 +286,31 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
         """Performs an action on an element specified by the given selectors, falling back to using
         the Operator agent if the selectors fail to match a unique element.
+        Returns AgenticSelectorResponse with the value for read actions and the verification status
+        when verification_description is provided.
         """
+        request = AgenticSelectorRequest(
+            action=action,
+            selectors=selectors,
+            fallback_operator_query=fallback_operator_query,
+            verification_description=verification_description,
+            verification_delay_ms=verification_delay_ms,
+        )
         response_model = (
             AgenticSelectorResponse
             if action["type"] in {"get_text", "get_property"}
+            or request.verification_description is not None
             else None
         )
         result = await self._browser_environment()._run_extension_action(
-            AgenticSelectorRequest(
-                action=action,
-                selectors=selectors,
-                fallback_operator_query=fallback_operator_query,
-            ),
+            request,
             response_model=response_model,
             timeout=timeout,
         )
