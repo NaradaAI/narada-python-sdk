@@ -476,6 +476,45 @@ async def test_agent_run_forwards_clear_chat(
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
     assert payload["clearChat"] is True
     assert "reasoningMode" not in payload
+    assert "modelTier" not in payload
+
+
+@pytest.mark.asyncio
+async def test_agent_run_sends_operator_mini_command_without_transport_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "hitlInputMetadata": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(
+        environment=env,
+        kind=narada_pkg.AgentKind.OPERATOR_MINI,
+    ).run("fast task")
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["prompt"] == "/OperatorMini fast task"
+    assert "modelTier" not in payload
 
 
 @pytest.mark.asyncio
@@ -484,7 +523,9 @@ async def test_agent_run_forwards_clear_chat(
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
+        (AgentKind.CORE_AGENT_MINI, ReasoningEffort.MEDIUM, "/CoreAgentMini analyze"),
     ],
 )
 async def test_agent_run_forwards_reasoning_for_every_agent_kind(
@@ -1104,6 +1145,45 @@ async def test_agentic_mouse_action_returns_verification_status(
         "resize_window": True,
         "fallback_operator_query": "click the target",
         "verification_description": "The target was clicked.",
+        "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_returns_verification_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"verified":true}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    result = await narada_pkg.Agent(environment=env).agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button", "aria_label": "Submit"},
+        fallback_operator_query="Click the submit button",
+        verification_description="A confirmation dialog is visible.",
+        verification_delay_ms=750,
+    )
+
+    assert result.value is None
+    assert result.verified is True
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "click"},
+        "selectors": {
+            "ariaLabel": {"value": "Submit"},
+            "tagName": {"value": "button"},
+        },
+        "fallback_operator_query": "Click the submit button",
+        "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
     }
 

@@ -163,7 +163,9 @@ async def test_agent_run_parses_response_trace_records_best_effort(
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
+        (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
+        (AgentKind.CORE_AGENT_MINI, ReasoningEffort.MEDIUM, "/CoreAgentMini analyze"),
     ],
 )
 async def test_agent_run_forwards_reasoning_for_every_agent_kind(
@@ -213,3 +215,23 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_sends_operator_mini_command_without_transport_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(
+        environment=_CountingEnvironment(),
+        kind=AgentKind.OPERATOR_MINI,
+    ).run("fast task")
+
+    assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
+    assert "modelTier" not in fake_session.dispatched_bodies[0]

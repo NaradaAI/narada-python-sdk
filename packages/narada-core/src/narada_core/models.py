@@ -12,6 +12,8 @@ class AgentKind(Enum):
     PRODUCTIVITY = 1
     OPERATOR = 2
     CORE_AGENT = 3
+    OPERATOR_MINI = 4
+    CORE_AGENT_MINI = 5
 
     def prompt_prefix(self) -> str:
         match self:
@@ -21,6 +23,10 @@ class AgentKind(Enum):
                 return "/Operator "
             case AgentKind.CORE_AGENT:
                 return "/coreAgent "
+            case AgentKind.OPERATOR_MINI:
+                return "/OperatorMini "
+            case AgentKind.CORE_AGENT_MINI:
+                return "/CoreAgentMini "
 
 
 class ReasoningEffort(StrEnum):

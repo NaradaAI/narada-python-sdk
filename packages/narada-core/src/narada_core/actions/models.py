@@ -199,19 +199,41 @@ class AgenticSelectorRequest(BaseModel):
     action: AgenticSelectorAction
     selectors: AgenticSelectors
     fallback_operator_query: str
+    verification_description: str | None = None
+    verification_delay_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _normalize_verification_fields(self) -> Self:
+        if self.verification_description is None:
+            self.verification_delay_ms = None
+            return self
+
+        verification_description = self.verification_description.strip()
+        if not verification_description:
+            self.verification_description = None
+            self.verification_delay_ms = None
+            return self
+
+        self.verification_description = verification_description
+        return self
 
     @override
     def model_dump(self) -> dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "action": _dump_agentic_selector_action(self.action),
             "selectors": _dump_agentic_selectors(self.selectors),
             "fallback_operator_query": self.fallback_operator_query,
         }
+        if self.verification_description is not None:
+            result["verification_description"] = self.verification_description
+            result["verification_delay_ms"] = self.verification_delay_ms
+        return result
 
 
 class AgenticSelectorResponse(BaseModel):
-    value: str | None
+    value: str | None = None
+    verified: bool | None = None
 
 
 class AgenticMatchingSelectorsFinderRequest(BaseModel):
