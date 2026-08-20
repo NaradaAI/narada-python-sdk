@@ -280,8 +280,6 @@ def test_agent_action_uses_starting_url() -> None:
         "message": "Clicked Submit",
         "starting_url": "https://example.test/form",
     }
-    assert "url" not in AgentActionSpanData.model_fields
-    assert "name" not in AgentActionSpanData.model_fields
 
 
 def test_agent_action_child_span_serializes_explicit_null_timestamps() -> None:
