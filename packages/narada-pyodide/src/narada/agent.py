@@ -60,6 +60,7 @@ from narada_core.models import (
     UserResourceCredentials,
 )
 from narada_core.tracing.model import parse_action_trace
+from narada_core.tracing.records import parse_response_trace
 from pydantic import BaseModel
 
 from narada.environment import (
@@ -196,6 +197,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
         workflow_trace = response_content.get("workflowTrace")
+        response_trace = parse_response_trace(response_content.get("trace"))
         parent_request_id = self.environment._current_parent_request_id()
 
         critic_result: CriticResult | None = None
@@ -228,6 +230,7 @@ class Agent(Generic[_StructuredOutput]):
             usage=AgentUsage.model_validate(remote_dispatch_response["usage"]),
             action_trace=action_trace,
             workflow_trace=workflow_trace,
+            trace=response_trace,
             critic_result=critic_result,
         )
 

@@ -30,6 +30,7 @@ class _RemoteDispatchFakeClientSession:
     def __init__(self) -> None:
         self.dispatched_bodies: list[dict[str, Any]] = []
         self._poll_count = 0
+        self.response_trace: object | None = None
 
     async def __aenter__(self) -> "_RemoteDispatchFakeClientSession":
         return self
@@ -48,13 +49,16 @@ class _RemoteDispatchFakeClientSession:
             raise AssertionError(f"Unexpected GET URL: {url}")
 
         self._poll_count += 1
+        response: dict[str, Any] = {
+            "text": f"ok-{self._poll_count}",
+            "output": {"type": "text", "content": f"ok-{self._poll_count}"},
+        }
+        if self.response_trace is not None:
+            response["trace"] = self.response_trace
         return _FakeResponse(
             {
                 "status": "success",
-                "response": {
-                    "text": f"ok-{self._poll_count}",
-                    "output": {"type": "text", "content": f"ok-{self._poll_count}"},
-                },
+                "response": response,
                 "usage": {"actions": 1, "credits": 1},
                 "createdAt": "2026-01-01T00:00:00Z",
                 "completedAt": "2026-01-01T00:00:01Z",
@@ -101,6 +105,56 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator second",
     ]
     assert all("reasoningMode" not in body for body in fake_session.dispatched_bodies)
+    assert first.trace == []
+
+
+@pytest.mark.asyncio
+async def test_agent_run_parses_response_trace_records_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+    from narada import AgentSpanData, Span, Trace
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    fake_session.response_trace = [
+        {
+            "object": "trace",
+            "trace_id": "trace_123",
+            "name": "Operator",
+            "group_id": None,
+            "metadata": None,
+        },
+        {"object": "trace.span", "span_id": "invalid"},
+        {
+            "object": "trace.span",
+            "span_id": "span_123",
+            "trace_id": "trace_123",
+            "parent_id": None,
+            "started_at": "2026-07-29T12:00:00.000Z",
+            "ended_at": "2026-07-29T12:00:01.000Z",
+            "span_data": {
+                "type": "agent",
+                "name": "Operator",
+                "agent_type": "operator",
+                "prompt": "Find the Narada homepage",
+                "response": "Done",
+                "status": "success",
+                "request_id": "req-1",
+                "usage": None,
+            },
+            "error": None,
+        },
+    ]
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    response = await Agent(environment=_CountingEnvironment()).run("find homepage")
+
+    assert len(response.trace) == 2
+    assert isinstance(response.trace[0], Trace)
+    assert isinstance(response.trace[1], Span)
+    assert isinstance(response.trace[1].span_data, AgentSpanData)
 
 
 @pytest.mark.asyncio

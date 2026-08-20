@@ -1,5 +1,9 @@
 """Tracing models for narada-core."""
 
+from narada_core.tracing.records import (
+    ResponseTraceRecord,
+    parse_response_trace,
+)
 from narada_core.tracing.span_data import (
     AgentActionSpanData,
     AgenticMouseActionStepData,
@@ -140,6 +144,7 @@ __all__ = [
     "ReadExcelSheetStepData",
     "ReadGoogleSheetStepData",
     "ReadLocalFilesystemStepData",
+    "ResponseTraceRecord",
     "RunBashScriptStepData",
     "RunCustomAgentStepData",
     "SavePdfFileStepData",
@@ -164,4 +169,5 @@ __all__ = [
     "WriteExcelSheetStepData",
     "WriteGoogleSheetStepData",
     "WriteLocalFilesystemStepData",
+    "parse_response_trace",
 ]

@@ -424,6 +424,7 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     actionTrace: NotRequired[ActionTrace]
     executionTraceContext: NotRequired[dict[str, object]]
     workflowTrace: NotRequired[dict[str, Any]]
+    trace: NotRequired[list[dict[str, Any]]]
 
 
 class Usage(TypedDict):
