@@ -601,6 +601,27 @@ async def test_managed_vector_store_catalog_uses_runtime_auth_and_encodes_path(
 
 
 @pytest.mark.asyncio
+async def test_managed_vector_store_catalog_encodes_id_path_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"id": "store/with?reserved#chars"})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    vector_store = await env.vector_stores.get(id="store/with?reserved#chars")
+
+    assert vector_store.id == "store/with?reserved#chars"
+    assert pyfetch.await_args.args[0].endswith(
+        "/agent-studio/vector-stores/store%2Fwith%3Freserved%23chars"
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_run_sends_operator_mini_command_without_transport_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

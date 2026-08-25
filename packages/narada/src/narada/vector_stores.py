@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from narada_core.errors import NaradaError
@@ -28,7 +29,8 @@ class VectorStoreCatalog:
             raise ValueError("Provide exactly one of `id` or `path`")
 
         if id is not None:
-            data = await self._get(f"/agent-studio/vector-stores/{id}")
+            encoded_id = quote(id, safe="")
+            data = await self._get(f"/agent-studio/vector-stores/{encoded_id}")
         else:
             data = await self._get(
                 "/agent-studio/vector-stores/by-path",

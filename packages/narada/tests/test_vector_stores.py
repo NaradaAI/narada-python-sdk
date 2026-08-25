@@ -146,6 +146,31 @@ async def test_managed_vector_store_catalog_requires_exactly_one_selector(
 
 
 @pytest.mark.asyncio
+async def test_managed_vector_store_catalog_encodes_id_path_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.vector_stores as vector_stores_module
+
+    session = _FakeSession([_FakeResponse(payload={"id": "store/with?reserved#chars"})])
+    monkeypatch.setattr(
+        vector_stores_module.aiohttp,
+        "ClientSession",
+        lambda: session,
+    )
+    catalog = VectorStoreCatalog(
+        base_url="https://api.example.test/fast/v2",
+        auth_headers={"x-api-key": "test-key"},
+    )
+
+    vector_store = await catalog.get(id="store/with?reserved#chars")
+
+    assert vector_store.id == "store/with?reserved#chars"
+    assert session.get_calls[0]["url"].endswith(
+        "/agent-studio/vector-stores/store%2Fwith%3Freserved%23chars"
+    )
+
+
+@pytest.mark.asyncio
 async def test_critic_forwards_vector_stores() -> None:
     managed = ManagedVectorStore(id="store-1")
     external = ExternalVectorStore(
