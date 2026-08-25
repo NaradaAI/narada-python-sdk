@@ -51,6 +51,8 @@ uv run python examples/01_getting_started/01_run_your_first_task.py
 | --- | --- |
 | [`01_run_your_agent_studio_agent.py`](04_extending_the_agent/01_run_your_agent_studio_agent.py) | Invoke a custom agent you built in Agent Studio by its path. |
 | [`02_connect_mcp_tools.py`](04_extending_the_agent/02_connect_mcp_tools.py) | Give the agent extra tools from an MCP server for a single run. |
+| [`03_connect_a_vector_store.py`](04_extending_the_agent/03_connect_a_vector_store.py) | List managed vector stores, select one by ID or path, and attach it to an agent run. |
+| [`04_connect_an_external_vector_store.py`](04_extending_the_agent/04_connect_an_external_vector_store.py) | Configure an Amazon Bedrock Knowledge Base from environment variables and attach it to a run. |
 
 ## 05 — Browser setups
 
