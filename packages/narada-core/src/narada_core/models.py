@@ -88,7 +88,6 @@ class ManagedVectorStore(BaseModel):
     name: str | None = None
     path: str | None = None
     description: str | None = None
-    ownerEmail: str | None = None
     fileCount: int | None = None
     updatedAt: datetime | None = None
     isExternal: Literal[False] = False
@@ -114,11 +113,11 @@ class ExternalVectorStore(BaseModel):
     isExternal: Literal[True] = True
 
 
-ConnectedVectorStore = ManagedVectorStore | ExternalVectorStore
+VectorStore = ManagedVectorStore | ExternalVectorStore
 
 
 def _connected_vector_store_to_wire(
-    vector_store: ConnectedVectorStore,
+    vector_store: VectorStore,
 ) -> dict[str, Any]:
     if isinstance(vector_store, ManagedVectorStore):
         return {"id": vector_store.id, "isExternal": False}
@@ -129,7 +128,7 @@ class CriticConfig(TypedDict, total=False):
     prompt: str
     output_schema: type[BaseModel]
     mcp_servers: list[McpServer]
-    vector_stores: list[ConnectedVectorStore]
+    vector_stores: list[VectorStore]
 
 
 class RemoteDispatchChatHistoryItem(TypedDict):

@@ -51,7 +51,6 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
-    ConnectedVectorStore,
     CriticConfig,
     File,
     McpServer,
@@ -59,6 +58,7 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    VectorStore,
 )
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
@@ -100,7 +100,7 @@ class Agent(Generic[_StructuredOutput]):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        vector_stores: list[ConnectedVectorStore] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
@@ -127,7 +127,7 @@ class Agent(Generic[_StructuredOutput]):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        vector_stores: list[ConnectedVectorStore] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
@@ -153,7 +153,7 @@ class Agent(Generic[_StructuredOutput]):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        vector_stores: list[ConnectedVectorStore] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,
@@ -252,7 +252,7 @@ class Agent(Generic[_StructuredOutput]):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
-        vector_stores: list[ConnectedVectorStore] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         callback_url: str | None = None,

@@ -11,7 +11,6 @@ from narada_core.models import (
     AgentKind,
     BedrockConnectionConfig,
     BedrockCredentials,
-    ConnectedVectorStore,
     CriticConfig,
     ExternalVectorStore,
     File,
@@ -19,6 +18,7 @@ from narada_core.models import (
     ReasoningEffort,
     Response,
     ResponseContent,
+    VectorStore,
 )
 
 from narada.agent import Agent
@@ -44,7 +44,7 @@ __all__ = [
     "BaseBrowserEnvironment",
     "BrowserEnvironment",
     "CloudBrowserEnvironment",
-    "ConnectedVectorStore",
+    "VectorStore",
     "CriticConfig",
     "CriticResult",
     "download_file",

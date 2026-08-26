@@ -29,19 +29,23 @@ class VectorStoreCatalog:
         *,
         id: str | None = None,
         path: str | None = None,
-    ) -> ManagedVectorStore:
+    ) -> ManagedVectorStore | None:
         if (id is None) == (path is None):
             raise ValueError("Provide exactly one of `id` or `path`")
 
-        if id is not None:
-            encoded_id = quote(id, safe="")
-            data = await self._get(f"/agent-studio/vector-stores/{encoded_id}")
-        else:
-            data = await self._get(
-                "/agent-studio/vector-stores/by-path",
-                params={"path": path},
-            )
-        return ManagedVectorStore.model_validate(data)
+        try:
+            if id is not None:
+                encoded_id = quote(id, safe="")
+                data = await self._get(f"/agent-studio/vector-stores/{encoded_id}")
+            else:
+                data = await self._get(
+                    "/agent-studio/vector-stores/by-path",
+                    params={"path": path},
+                )
+        except Exception:
+            return None
+
+        return ManagedVectorStore.model_validate(data) if data is not None else None
 
     async def _get(
         self,
