@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
 
@@ -82,10 +83,52 @@ class McpServer(BaseModel):
     selectedTools: list[str] | None = None
 
 
+class ManagedVectorStore(BaseModel):
+    id: str
+    name: str | None = None
+    path: str | None = None
+    description: str | None = None
+    fileCount: int | None = None
+    updatedAt: datetime | None = None
+    isExternal: Literal[False] = False
+
+
+class BedrockCredentials(BaseModel):
+    accessKeyId: str
+    secretAccessKey: str
+    region: str
+
+
+class BedrockConnectionConfig(BaseModel):
+    type: Literal["bedrock"] = "bedrock"
+    credentials: BedrockCredentials
+    knowledgeBaseId: str
+
+
+class ExternalVectorStore(BaseModel):
+    id: str
+    name: str
+    description: str
+    connection: BedrockConnectionConfig
+    isExternal: Literal[True] = True
+
+
+VectorStore = ManagedVectorStore | ExternalVectorStore
+
+
+def _connected_vector_store_to_wire(
+    vector_store: VectorStore,
+) -> dict[str, Any]:
+    if isinstance(vector_store, ManagedVectorStore):
+        return {"id": vector_store.id, "isExternal": False}
+    return vector_store.model_dump(mode="json", exclude_none=True)
+
+
 class CriticConfig(TypedDict, total=False):
     prompt: str
     output_schema: type[BaseModel]
     mcp_servers: list[McpServer]
+    vector_stores: list[VectorStore]
 
 
 class RemoteDispatchChatHistoryItem(TypedDict):

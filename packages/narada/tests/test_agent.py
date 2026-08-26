@@ -3,7 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from narada import Agent, AgentKind, Environment, ReasoningEffort
+from narada import (
+    Agent,
+    AgentKind,
+    BedrockConnectionConfig,
+    BedrockCredentials,
+    Environment,
+    ExternalVectorStore,
+    ManagedVectorStore,
+    ReasoningEffort,
+)
 
 
 class _FakeResponse:
@@ -161,6 +170,60 @@ async def test_agent_run_forwards_clear_chat(
     await agent.run("fresh task", clear_chat=True)
 
     assert fake_session.dispatched_bodies[0]["clearChat"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_run_serializes_managed_and_external_vector_stores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+    managed = ManagedVectorStore(
+        id="store-1",
+        name="Managed metadata is not sent",
+        path="/Knowledge/Policies",
+    )
+    external = ExternalVectorStore(
+        id="bedrock-kb-1",
+        name="External knowledge",
+        description="Product documentation",
+        connection=BedrockConnectionConfig(
+            credentials=BedrockCredentials(
+                accessKeyId="access-key",
+                secretAccessKey="secret-key",
+                region="us-east-1",
+            ),
+            knowledgeBaseId="kb-1",
+        ),
+    )
+
+    await Agent(environment=_CountingEnvironment()).run(
+        "Use the attached knowledge bases",
+        vector_stores=[managed, external],
+    )
+
+    assert fake_session.dispatched_bodies[0]["vectorStores"] == [
+        {"id": "store-1", "isExternal": False},
+        {
+            "id": "bedrock-kb-1",
+            "name": "External knowledge",
+            "description": "Product documentation",
+            "connection": {
+                "type": "bedrock",
+                "credentials": {
+                    "accessKeyId": "access-key",
+                    "secretAccessKey": "secret-key",
+                    "region": "us-east-1",
+                },
+                "knowledgeBaseId": "kb-1",
+            },
+            "isExternal": True,
+        },
+    ]
 
 
 @pytest.mark.asyncio

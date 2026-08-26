@@ -9,11 +9,16 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    BedrockConnectionConfig,
+    BedrockCredentials,
     CriticConfig,
+    ExternalVectorStore,
     File,
+    ManagedVectorStore,
     ReasoningEffort,
     Response,
     ResponseContent,
+    VectorStore,
 )
 
 from narada.agent import Agent
@@ -34,15 +39,20 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "BedrockConnectionConfig",
+    "BedrockCredentials",
     "BaseBrowserEnvironment",
     "BrowserEnvironment",
     "CloudBrowserEnvironment",
+    "VectorStore",
     "CriticConfig",
     "CriticResult",
     "download_file",
     "Environment",
+    "ExternalVectorStore",
     "File",
     "LambdaEnvironment",
+    "ManagedVectorStore",
     "NaradaError",
     "NaradaTimeoutError",
     "PressKeyEventItem",

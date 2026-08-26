@@ -47,6 +47,7 @@ async def run_critic(
             "validationVariableName": _VALIDATION_VAR,
         },
         mcp_servers=critic.get("mcp_servers"),
+        vector_stores=critic.get("vector_stores"),
         time_zone=time_zone,
         timeout=timeout,
     )

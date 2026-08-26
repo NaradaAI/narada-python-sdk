@@ -63,6 +63,8 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    VectorStore,
+    _connected_vector_store_to_wire,
     _RemoteDispatchPollResponse,
     _SdkConfig,
 )
@@ -82,6 +84,7 @@ from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
 from narada.utils import assert_not_none
+from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -628,6 +631,8 @@ class _BrowserInitializationHelper:
 
 
 class Environment(ABC):
+    vector_stores: VectorStoreCatalog
+
     _auth_headers: dict[str, str]
     _base_url: str
     _initialized: bool
@@ -647,6 +652,10 @@ class Environment(ABC):
             self._auth_headers = {"x-api-key": api_key}
         self._base_url = base_url or os.getenv(
             "NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"
+        )
+        self.vector_stores = VectorStoreCatalog(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
         )
         self._console = Console()
         self._initialized = False
@@ -857,6 +866,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -884,6 +894,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -910,6 +921,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -968,6 +980,11 @@ class Environment(ABC):
         if mcp_servers is not None:
             body["mcpServers"] = [
                 server.model_dump(mode="json") for server in mcp_servers
+            ]
+        if vector_stores is not None:
+            body["vectorStores"] = [
+                _connected_vector_store_to_wire(vector_store)
+                for vector_store in vector_stores
             ]
         if secret_variables is not None:
             body["secretVariables"] = secret_variables
@@ -2650,7 +2667,8 @@ class LambdaEnvironment(Environment):
                             f"Failed to create lambda environment: {resp.status} {error_text}\n"
                             f"Endpoint URL: {endpoint_url}"
                         )
-                        err.status_code = resp.status  # type: ignore[attr-defined]
+                        # type: ignore[attr-defined]
+                        err.status_code = resp.status
                         err.detail = error.detail  # type: ignore[attr-defined]
                         raise err
                     raise RuntimeError(

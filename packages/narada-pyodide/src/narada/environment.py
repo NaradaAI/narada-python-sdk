@@ -50,6 +50,8 @@ from narada_core.models import (
     RemoteDispatchChatHistoryItem,
     Response,
     UserResourceCredentials,
+    VectorStore,
+    _connected_vector_store_to_wire,
     _RemoteDispatchPollResponse,
     _SdkConfig,
 )
@@ -60,6 +62,7 @@ from pyodide.http import pyfetch
 
 from . import _trace
 from .retry import pyfetch_with_retries
+from .vector_stores import VectorStoreCatalog
 from .version import __version__
 
 # Magic variable injected by the frontend runtime that stores the IDs of the current runnables
@@ -220,6 +223,8 @@ class SessionDownloadItem:
 
 
 class Environment(ABC):
+    vector_stores: VectorStoreCatalog
+
     _api_key: str | None
     _base_url: str
     _user_id: str | None
@@ -249,6 +254,10 @@ class Environment(ABC):
         )
         self._user_id = user_id
         self._env = env
+        self.vector_stores = VectorStoreCatalog(
+            base_url=self._base_url,
+            get_auth_headers=self._get_auth_headers,
+        )
         self._initialized = False
         self._init_lock = None
 
@@ -436,6 +445,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -463,6 +473,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -489,6 +500,7 @@ class Environment(ABC):
         time_zone: str = "America/Los_Angeles",
         user_resource_credentials: UserResourceCredentials | None = None,
         mcp_servers: list[McpServer] | None = None,
+        vector_stores: list[VectorStore] | None = None,
         secret_variables: dict[str, str] | None = None,
         input_variables: Mapping[str, Any] | None = None,
         critic_context: dict[str, Any] | None = None,
@@ -561,6 +573,11 @@ class Environment(ABC):
         if mcp_servers is not None:
             body["mcpServers"] = [
                 server.model_dump(mode="json") for server in mcp_servers
+            ]
+        if vector_stores is not None:
+            body["vectorStores"] = [
+                _connected_vector_store_to_wire(vector_store)
+                for vector_store in vector_stores
             ]
         if secret_variables is not None:
             body["secretVariables"] = secret_variables

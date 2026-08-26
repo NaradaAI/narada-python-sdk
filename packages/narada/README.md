@@ -109,7 +109,24 @@ This version introduces a non-backward-compatible, agent-centered API:
 - **Data Extraction**: Extract information from web pages using AI understanding
 - **Form Interaction**: Fill out forms and interact with web elements
 - **File Operations**: Download files and handle web-based documents
+- **Vector Stores**: Discover managed Agent Studio stores or attach an Amazon Bedrock Knowledge Base
 - **Multi-window Management**: Coordinate tasks across multiple browser instances
+
+## Vector Stores
+
+Attach a managed Agent Studio vector store to an agent run without copying its provider-side ID:
+
+```python
+env = BrowserEnvironment()
+store = await env.vector_stores.get(path="/Knowledge/Product documentation")
+response = await Agent(environment=env, kind=AgentKind.PRODUCTIVITY).run(
+    "Answer from the attached knowledge base and cite source filenames.",
+    vector_stores=[store],
+)
+```
+
+See the managed and external examples in
+[`examples/04_extending_the_agent/`](examples/04_extending_the_agent/).
 
 ## License
 
