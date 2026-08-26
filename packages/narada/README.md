@@ -116,9 +116,14 @@ This version introduces a non-backward-compatible, agent-centered API:
 
 Attach a managed Agent Studio vector store to an agent run without copying its provider-side ID:
 
+Managed vector-store paths are canonical and owner-qualified, using the format
+`/owner@email.com/path/to/store`.
+
 ```python
 env = BrowserEnvironment()
-store = await env.vector_stores.get(path="/Knowledge/Product documentation")
+store = await env.vector_stores.get(
+    path="/owner@example.com/Knowledge/Product documentation"
+)
 response = await Agent(environment=env, kind=AgentKind.PRODUCTIVITY).run(
     "Answer from the attached knowledge base and cite source filenames.",
     vector_stores=[store],

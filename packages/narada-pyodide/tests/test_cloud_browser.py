@@ -561,7 +561,7 @@ async def test_managed_vector_store_catalog_uses_runtime_auth_and_encodes_path(
                     {
                         "id": "store-1",
                         "name": "Policies",
-                        "path": "/Knowledge/Policies",
+                        "path": "/owner@example.com/Knowledge/Policies",
                         "fileCount": 2,
                         "updatedAt": "2026-08-25T12:00:00Z",
                     }
@@ -571,7 +571,7 @@ async def test_managed_vector_store_catalog_uses_runtime_auth_and_encodes_path(
                 json_data={
                     "id": "store-1",
                     "name": "Policies",
-                    "path": "/Knowledge/Policies",
+                    "path": "/owner@example.com/Knowledge/Policies",
                 }
             ),
         ]
@@ -583,11 +583,11 @@ async def test_managed_vector_store_catalog_uses_runtime_auth_and_encodes_path(
     )
 
     listed = await env.vector_stores.list()
-    by_path = await env.vector_stores.get(path="/Knowledge/Policies")
+    by_path = await env.vector_stores.get(path="/owner@example.com/Knowledge/Policies")
 
     assert listed[0].id == "store-1"
     assert listed[0].fileCount == 2
-    assert by_path.path == "/Knowledge/Policies"
+    assert by_path.path == "/owner@example.com/Knowledge/Policies"
     assert pyfetch.await_args_list[0].args[0].endswith("/agent-studio/vector-stores")
     assert pyfetch.await_args_list[0].kwargs["headers"] == {
         "Content-Type": "application/json",
@@ -596,8 +596,67 @@ async def test_managed_vector_store_catalog_uses_runtime_auth_and_encodes_path(
     assert (
         pyfetch.await_args_list[1]
         .args[0]
-        .endswith("/agent-studio/vector-stores/by-path?path=%2FKnowledge%2FPolicies")
+        .endswith(
+            "/agent-studio/vector-stores/by-path?"
+            "path=%2Fowner%40example.com%2FKnowledge%2FPolicies"
+        )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selector",
+    [
+        {"id": "missing-store"},
+        {"path": "/owner@example.com/Knowledge/Missing policies"},
+    ],
+)
+async def test_managed_vector_store_catalog_returns_none_for_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: dict[str, str],
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            ok=False,
+            status=404,
+            text_data="Vector store not found",
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    vector_store = await env.vector_stores.get(**selector)
+
+    assert vector_store is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [403, 409, 422, 500])
+async def test_managed_vector_store_catalog_raises_non_not_found_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            ok=False,
+            status=status,
+            text_data="Vector store request failed",
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    with pytest.raises(
+        narada_pkg.NaradaError,
+        match=f"Vector store request failed: {status}",
+    ):
+        await env.vector_stores.get(path="/owner@example.com/Knowledge/Policies")
 
 
 @pytest.mark.asyncio
