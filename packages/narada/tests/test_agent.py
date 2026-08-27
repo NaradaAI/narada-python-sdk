@@ -185,7 +185,7 @@ async def test_agent_run_serializes_managed_and_external_vector_stores(
     managed = ManagedVectorStore(
         id="store-1",
         name="Managed metadata is not sent",
-        path="/Knowledge/Policies",
+        path="/owner@example.com/Knowledge/Policies",
     )
     external = ExternalVectorStore(
         id="bedrock-kb-1",

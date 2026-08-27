@@ -9,7 +9,11 @@ from pyodide.http import pyfetch
 
 
 class VectorStoreCatalog:
-    """Read-only access to managed vector stores available in Agent Studio."""
+    """Read-only access to managed vector stores available in Agent Studio.
+
+    Managed vector-store paths use the canonical ``/owner@email.com/path/to/store``
+    format.
+    """
 
     def __init__(
         self,
@@ -30,20 +34,22 @@ class VectorStoreCatalog:
         id: str | None = None,
         path: str | None = None,
     ) -> ManagedVectorStore | None:
+        """Get a managed vector store by ID or canonical owner-qualified path."""
         if (id is None) == (path is None):
             raise ValueError("Provide exactly one of `id` or `path`")
 
-        try:
-            if id is not None:
-                encoded_id = quote(id, safe="")
-                data = await self._get(f"/agent-studio/vector-stores/{encoded_id}")
-            else:
-                data = await self._get(
-                    "/agent-studio/vector-stores/by-path",
-                    params={"path": path},
-                )
-        except Exception:
-            return None
+        if id is not None:
+            encoded_id = quote(id, safe="")
+            data = await self._get(
+                f"/agent-studio/vector-stores/{encoded_id}",
+                allow_not_found=True,
+            )
+        else:
+            data = await self._get(
+                "/agent-studio/vector-stores/by-path",
+                params={"path": path},
+                allow_not_found=True,
+            )
 
         return ManagedVectorStore.model_validate(data) if data is not None else None
 
@@ -52,6 +58,7 @@ class VectorStoreCatalog:
         path: str,
         *,
         params: dict[str, str | None] | None = None,
+        allow_not_found: bool = False,
     ) -> Any:
         query = ""
         if params is not None:
@@ -60,6 +67,8 @@ class VectorStoreCatalog:
             f"{self._base_url}{path}{query}",
             headers=await self._get_auth_headers(),
         )
+        if allow_not_found and response.status == 404:
+            return None
         if not response.ok:
             raise NaradaError(
                 f"Vector store request failed: {response.status} {await response.text()}"

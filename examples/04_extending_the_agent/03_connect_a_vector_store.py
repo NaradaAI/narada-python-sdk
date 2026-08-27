@@ -8,7 +8,7 @@ async def main() -> None:
 
     try:
         vector_store = await env.vector_stores.get(
-            path="/Knowledge/Product documentation"
+            path="/owner@example.com/Knowledge/Product documentation"
         )
         response = await Agent(
             environment=env,

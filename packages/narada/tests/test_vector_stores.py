@@ -9,6 +9,7 @@ from narada import (
     BedrockCredentials,
     ExternalVectorStore,
     ManagedVectorStore,
+    NaradaError,
 )
 from narada.vector_stores import VectorStoreCatalog
 from narada_core.actions.critic import run_critic
@@ -70,7 +71,7 @@ async def test_managed_vector_store_catalog_lists_and_resolves_by_id_and_path(
                 {
                     "id": "store-1",
                     "name": "Policies",
-                    "path": "/Knowledge/Policies",
+                    "path": "/owner@example.com/Knowledge/Policies",
                     "description": "Company policies",
                     "ownerEmail": "owner@example.com",
                     "fileCount": 2,
@@ -83,7 +84,7 @@ async def test_managed_vector_store_catalog_lists_and_resolves_by_id_and_path(
             payload={
                 "id": "store-1",
                 "name": "Policies",
-                "path": "/Knowledge/Policies",
+                "path": "/owner@example.com/Knowledge/Policies",
             }
         ),
     ]
@@ -100,21 +101,20 @@ async def test_managed_vector_store_catalog_lists_and_resolves_by_id_and_path(
 
     listed = await catalog.list()
     by_id = await catalog.get(id="store-1")
-    by_path = await catalog.get(path="/Knowledge/Policies")
+    by_path = await catalog.get(path="/owner@example.com/Knowledge/Policies")
 
     assert listed == [
         ManagedVectorStore(
             id="store-1",
             name="Policies",
-            path="/Knowledge/Policies",
+            path="/owner@example.com/Knowledge/Policies",
             description="Company policies",
-            ownerEmail="owner@example.com",
             fileCount=2,
             updatedAt="2026-08-25T12:00:00Z",
         )
     ]
     assert by_id.id == "store-1"
-    assert by_path.path == "/Knowledge/Policies"
+    assert by_path.path == "/owner@example.com/Knowledge/Policies"
     assert session.get_calls == [
         {
             "url": "https://api.example.test/fast/v2/agent-studio/vector-stores",
@@ -129,13 +129,16 @@ async def test_managed_vector_store_catalog_lists_and_resolves_by_id_and_path(
         {
             "url": "https://api.example.test/fast/v2/agent-studio/vector-stores/by-path",
             "headers": {"x-api-key": "test-key"},
-            "params": {"path": "/Knowledge/Policies"},
+            "params": {"path": "/owner@example.com/Knowledge/Policies"},
         },
     ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("selector", [{}, {"id": "store-1", "path": "/Policies"}])
+@pytest.mark.parametrize(
+    "selector",
+    [{}, {"id": "store-1", "path": "/owner@example.com/Policies"}],
+)
 async def test_managed_vector_store_catalog_requires_exactly_one_selector(
     selector: dict[str, str],
 ) -> None:
@@ -143,6 +146,63 @@ async def test_managed_vector_store_catalog_requires_exactly_one_selector(
 
     with pytest.raises(ValueError, match="exactly one"):
         await catalog.get(**selector)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selector",
+    [
+        {"id": "missing-store"},
+        {"path": "/owner@example.com/Knowledge/Missing policies"},
+    ],
+)
+async def test_managed_vector_store_catalog_returns_none_for_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: dict[str, str],
+) -> None:
+    import narada.vector_stores as vector_stores_module
+
+    session = _FakeSession(
+        [_FakeResponse(ok=False, status=404, text="Vector store not found")]
+    )
+    monkeypatch.setattr(
+        vector_stores_module.aiohttp,
+        "ClientSession",
+        lambda: session,
+    )
+    catalog = VectorStoreCatalog(
+        base_url="https://api.example.test/fast/v2",
+        auth_headers={"x-api-key": "test-key"},
+    )
+
+    vector_store = await catalog.get(**selector)
+
+    assert vector_store is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [403, 409, 422, 500])
+async def test_managed_vector_store_catalog_raises_non_not_found_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    import narada.vector_stores as vector_stores_module
+
+    session = _FakeSession(
+        [_FakeResponse(ok=False, status=status, text="Vector store request failed")]
+    )
+    monkeypatch.setattr(
+        vector_stores_module.aiohttp,
+        "ClientSession",
+        lambda: session,
+    )
+    catalog = VectorStoreCatalog(
+        base_url="https://api.example.test/fast/v2",
+        auth_headers={"x-api-key": "test-key"},
+    )
+
+    with pytest.raises(NaradaError, match=f"Vector store request failed: {status}"):
+        await catalog.get(path="/owner@example.com/Knowledge/Policies")
 
 
 @pytest.mark.asyncio
