@@ -21,6 +21,7 @@ from narada_core.models import (
     VectorStore,
 )
 
+from narada import file_variable
 from narada.agent import Agent
 from narada.environment import (
     BaseBrowserEnvironment,
@@ -51,6 +52,7 @@ __all__ = [
     "Environment",
     "ExternalVectorStore",
     "File",
+    "file_variable",
     "LambdaEnvironment",
     "ManagedVectorStore",
     "NaradaError",
