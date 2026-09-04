@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from narada_core.actions.models import (
@@ -61,6 +62,17 @@ def _clear_modules() -> None:
             sys.modules.pop(name, None)
     for name in ("js", "pyodide", "pyodide.http", "pyodide.ffi"):
         sys.modules.pop(name, None)
+
+
+def _assert_hitl_action(
+    action: dict[str, object], expected_without_step_id: dict[str, object]
+) -> None:
+    step_id = action.get("step_id")
+    assert isinstance(step_id, str)
+    parsed_step_id = UUID(step_id)
+    assert parsed_step_id.version == 4
+    assert parsed_step_id.hex == step_id
+    assert action == {**expected_without_step_id, "step_id": step_id}
 
 
 def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMock):
@@ -1275,7 +1287,6 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     )
     agent = narada_pkg.Agent(environment=env)
     values = await agent.prompt_for_user_input(
-        step_id="input-step",
         variables=[
             PromptForUserInputVariable(name="name", type="string", required=True),
         ],
@@ -1284,6 +1295,21 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
     assert values == {"name": "Narada"}
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    _assert_hitl_action(
+        payload["action"],
+        {
+            "name": "prompt_for_user_input",
+            "variables": [
+                {
+                    "name": "name",
+                    "type": "string",
+                    "required": True,
+                    "enum_values": None,
+                }
+            ],
+            "prompt_message": None,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -1311,7 +1337,6 @@ async def test_agent_prompt_for_user_file_dispatches_extension_action(
         api_key="test-api-key",
     )
     result = await narada_pkg.Agent(environment=env).prompt_for_user_file(
-        step_id="file-step",
         variable_name="invoice_file",
         prompt_message="Upload the invoice",
     )
@@ -1319,12 +1344,14 @@ async def test_agent_prompt_for_user_file_dispatches_extension_action(
     assert result == file_value
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
-    assert payload["action"] == {
-        "name": "prompt_for_user_file",
-        "step_id": "file-step",
-        "variable_name": "invoice_file",
-        "prompt_message": "Upload the invoice",
-    }
+    _assert_hitl_action(
+        payload["action"],
+        {
+            "name": "prompt_for_user_file",
+            "variable_name": "invoice_file",
+            "prompt_message": "Upload the invoice",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -1446,7 +1473,6 @@ async def test_agent_user_approval_respects_explicit_timeout(
         api_key="test-api-key",
     )
     approved = await narada_pkg.Agent(environment=env).user_approval(
-        step_id="approval-step",
         prompt_message="Proceed?",
         approve_label="Approve",
         reject_label="Reject",
@@ -1456,6 +1482,15 @@ async def test_agent_user_approval_respects_explicit_timeout(
     assert approved is True
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["timeout"] == 600
+    _assert_hitl_action(
+        payload["action"],
+        {
+            "name": "user_approval",
+            "prompt_message": "Proceed?",
+            "approve_label": "Approve",
+            "reject_label": "Reject",
+        },
+    )
 
 
 @pytest.mark.asyncio

@@ -468,7 +468,6 @@ class Agent(Generic[_StructuredOutput]):
     async def prompt_for_user_input(
         self,
         *,
-        step_id: str,
         variables: list[PromptForUserInputVariable],
         prompt_message: str | None = None,
         timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
@@ -476,7 +475,7 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             PromptForUserInputRequest(
-                step_id=step_id, prompt_message=prompt_message, variables=variables
+                prompt_message=prompt_message, variables=variables
             ),
             PromptForUserInputResponse,
             timeout=timeout,
@@ -486,7 +485,6 @@ class Agent(Generic[_StructuredOutput]):
     async def prompt_for_user_file(
         self,
         *,
-        step_id: str,
         variable_name: str,
         prompt_message: str | None = None,
         timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
@@ -494,7 +492,6 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user for a file in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             PromptForUserFileRequest(
-                step_id=step_id,
                 variable_name=variable_name,
                 prompt_message=prompt_message,
             ),
@@ -506,7 +503,6 @@ class Agent(Generic[_StructuredOutput]):
     async def user_approval(
         self,
         *,
-        step_id: str,
         prompt_message: str,
         approve_label: str,
         reject_label: str,
@@ -515,7 +511,6 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user to approve or reject in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             UserApprovalRequest(
-                step_id=step_id,
                 prompt_message=prompt_message,
                 approve_label=approve_label,
                 reject_label=reject_label,
