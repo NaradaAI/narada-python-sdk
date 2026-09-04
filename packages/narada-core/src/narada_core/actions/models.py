@@ -12,6 +12,7 @@ from typing import (
     cast,
     override,
 )
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +27,10 @@ _StructuredOutputT = TypeVar("_StructuredOutputT")
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
+
+
+def _generate_hitl_step_id() -> str:
+    return uuid4().hex
 
 
 class AgentUsage(BaseModel):
@@ -489,7 +494,7 @@ class PromptForUserInputVariable(BaseModel):
 
 class PromptForUserInputRequest(BaseModel):
     name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     variables: list[PromptForUserInputVariable]
     prompt_message: str | None = None
 
@@ -498,9 +503,20 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class PromptForUserFileRequest(BaseModel):
+    name: Literal["prompt_for_user_file"] = "prompt_for_user_file"
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
+    variable_name: str
+    prompt_message: str | None = None
+
+
+class PromptForUserFileResponse(BaseModel):
+    file: dict[str, Any]
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     prompt_message: str
     approve_label: str
     reject_label: str
@@ -532,7 +548,7 @@ class PressKeyRequest(BaseModel):
 
 
 HitlInputAction = Annotated[
-    PromptForUserInputRequest | UserApprovalRequest,
+    PromptForUserFileRequest | PromptForUserInputRequest | UserApprovalRequest,
     Field(discriminator="name"),
 ]
 
@@ -556,6 +572,7 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PressKeyRequest
     | PrintMessageRequest
+    | PromptForUserFileRequest
     | PromptForUserInputRequest
     | ReadExcelSheetRequest
     | ReadGoogleSheetRequest
