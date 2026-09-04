@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 import pytest
 from narada import Agent, RemoteBrowserEnvironment
@@ -46,6 +47,17 @@ class _FakeSession:
         return _FakeResponse(next(self._responses))
 
 
+def _assert_hitl_action(
+    action: dict[str, Any], expected_without_step_id: dict[str, Any]
+) -> None:
+    step_id = action.get("step_id")
+    assert isinstance(step_id, str)
+    parsed_step_id = UUID(step_id)
+    assert parsed_step_id.version == 4
+    assert parsed_step_id.hex == step_id
+    assert action == {**expected_without_step_id, "step_id": step_id}
+
+
 @pytest.mark.asyncio
 async def test_prompt_for_user_input_uses_hitl_default_timeout(
     monkeypatch: pytest.MonkeyPatch,
@@ -68,7 +80,6 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
     )
 
     values = await agent.prompt_for_user_input(
-        step_id="input-step",
         variables=[
             PromptForUserInputVariable(name="name", type="string", required=True),
         ],
@@ -76,6 +87,21 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
 
     assert values == {"name": "Narada"}
     assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "prompt_for_user_input",
+            "variables": [
+                {
+                    "name": "name",
+                    "type": "string",
+                    "required": True,
+                    "enum_values": None,
+                }
+            ],
+            "prompt_message": None,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -106,19 +132,20 @@ async def test_prompt_for_user_file_dispatches_extension_action(
     )
 
     result = await agent.prompt_for_user_file(
-        step_id="file-step",
         variable_name="invoice_file",
         prompt_message="Upload the invoice",
     )
 
     assert result == file_value
     assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
-    assert fake_session.post_bodies[0]["action"] == {
-        "name": "prompt_for_user_file",
-        "step_id": "file-step",
-        "variable_name": "invoice_file",
-        "prompt_message": "Upload the invoice",
-    }
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "prompt_for_user_file",
+            "variable_name": "invoice_file",
+            "prompt_message": "Upload the invoice",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -143,7 +170,6 @@ async def test_user_approval_respects_explicit_timeout(
     )
 
     approved = await agent.user_approval(
-        step_id="approval-step",
         prompt_message="Proceed?",
         approve_label="Approve",
         reject_label="Reject",
@@ -152,6 +178,15 @@ async def test_user_approval_respects_explicit_timeout(
 
     assert approved is True
     assert fake_session.post_bodies[0]["timeout"] == 600
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "user_approval",
+            "prompt_message": "Proceed?",
+            "approve_label": "Approve",
+            "reject_label": "Reject",
+        },
+    )
 
 
 @pytest.mark.asyncio
