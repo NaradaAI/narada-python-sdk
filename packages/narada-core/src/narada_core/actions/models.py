@@ -498,6 +498,17 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class PromptForUserFileRequest(BaseModel):
+    name: Literal["prompt_for_user_file"] = "prompt_for_user_file"
+    step_id: str
+    variable_name: str
+    prompt_message: str | None = None
+
+
+class PromptForUserFileResponse(BaseModel):
+    file: dict[str, Any]
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
     step_id: str
@@ -532,7 +543,7 @@ class PressKeyRequest(BaseModel):
 
 
 HitlInputAction = Annotated[
-    PromptForUserInputRequest | UserApprovalRequest,
+    PromptForUserFileRequest | PromptForUserInputRequest | UserApprovalRequest,
     Field(discriminator="name"),
 ]
 
@@ -556,6 +567,7 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PressKeyRequest
     | PrintMessageRequest
+    | PromptForUserFileRequest
     | PromptForUserInputRequest
     | ReadExcelSheetRequest
     | ReadGoogleSheetRequest

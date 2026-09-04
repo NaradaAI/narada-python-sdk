@@ -1287,6 +1287,47 @@ async def test_agent_prompt_for_user_input_uses_hitl_default_timeout(
 
 
 @pytest.mark.asyncio
+async def test_agent_prompt_for_user_file_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_value = {
+        "source": "inMemoryFile",
+        "filename": "invoice.pdf",
+        "mimeType": "application/pdf",
+        "base64": "JVBERi0=",
+    }
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": json.dumps({"file": file_value}),
+            }
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    result = await narada_pkg.Agent(environment=env).prompt_for_user_file(
+        step_id="file-step",
+        variable_name="invoice_file",
+        prompt_message="Upload the invoice",
+    )
+
+    assert result == file_value
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    assert payload["action"] == {
+        "name": "prompt_for_user_file",
+        "step_id": "file-step",
+        "variable_name": "invoice_file",
+        "prompt_message": "Upload the invoice",
+    }
+
+
+@pytest.mark.asyncio
 async def test_agentic_mouse_action_preserves_resize_window_false(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

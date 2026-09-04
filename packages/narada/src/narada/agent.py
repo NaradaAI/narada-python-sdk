@@ -32,6 +32,8 @@ from narada_core.actions.models import (
     PressKeyEventItem,
     PressKeyRequest,
     PrintMessageRequest,
+    PromptForUserFileRequest,
+    PromptForUserFileResponse,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -469,6 +471,26 @@ class Agent(Generic[_StructuredOutput]):
             timeout=timeout,
         )
         return result.values_by_name
+
+    async def prompt_for_user_file(
+        self,
+        *,
+        step_id: str,
+        variable_name: str,
+        prompt_message: str | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Prompts the user for a file in the extension UI."""
+        result = await self._browser_environment()._run_extension_action(
+            PromptForUserFileRequest(
+                step_id=step_id,
+                variable_name=variable_name,
+                prompt_message=prompt_message,
+            ),
+            PromptForUserFileResponse,
+            timeout=timeout,
+        )
+        return result.file
 
     async def user_approval(
         self,

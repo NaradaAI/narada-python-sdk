@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from http import HTTPStatus
 from typing import Any
 
@@ -75,6 +76,49 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
 
     assert values == {"name": "Narada"}
     assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_prompt_for_user_file_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_value = {
+        "source": "inMemoryFile",
+        "filename": "invoice.pdf",
+        "mimeType": "application/pdf",
+        "base64": "JVBERi0=",
+    }
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": json.dumps({"file": file_value}),
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.prompt_for_user_file(
+        step_id="file-step",
+        variable_name="invoice_file",
+        prompt_message="Upload the invoice",
+    )
+
+    assert result == file_value
+    assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "prompt_for_user_file",
+        "step_id": "file-step",
+        "variable_name": "invoice_file",
+        "prompt_message": "Upload the invoice",
+    }
 
 
 @pytest.mark.asyncio
