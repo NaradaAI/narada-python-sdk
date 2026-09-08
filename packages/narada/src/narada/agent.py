@@ -213,7 +213,6 @@ class Agent(Generic[_StructuredOutput]):
                 dispatch_request=partial(
                     self._dispatch_request,
                     require_execution_trace=require_execution_trace,
-                    evidence_parent_request_id=remote_dispatch_response["requestId"],
                 ),
                 original_prompt=prompt,
                 response_content=response_content,
@@ -264,7 +263,6 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
-        evidence_parent_request_id: str | None = None,
         require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
@@ -291,7 +289,6 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             critic_context=critic_context,
-            evidence_parent_request_id=evidence_parent_request_id,
             require_execution_trace=require_execution_trace,
             timeout=timeout,
         )

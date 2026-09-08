@@ -37,11 +37,6 @@ from narada.environment import (
     RemoteBrowserEnvironment,
     SessionDownloadItem,
 )
-from narada.execution_traces import (
-    ExecutionTraceClient,
-    ExecutionTraceDownloadResult,
-    ExecutionTraceError,
-)
 from narada.utils import download_file, render_html
 from narada.version import __version__
 
@@ -61,9 +56,6 @@ __all__ = [
     "CriticResult",
     "download_file",
     "Environment",
-    "ExecutionTraceClient",
-    "ExecutionTraceDownloadResult",
-    "ExecutionTraceError",
     "ExternalVectorStore",
     "File",
     "LambdaEnvironment",
