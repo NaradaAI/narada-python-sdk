@@ -1698,3 +1698,83 @@ async def test_local_browser_environment_extension_action_includes_parent_reques
     post_payload = json.loads(pyfetch.await_args_list[1].kwargs["body"])
     assert post_payload["requestId"] == "parent-request-123"
     assert post_payload["parentRunIds"] == ["run-a"]
+
+
+@pytest.mark.asyncio
+async def test_google_drive_lists_and_downloads_without_browser_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listed_file = {
+        "id": "file-1",
+        "name": "Report.pdf",
+        "mimeType": "application/pdf",
+        "url": "https://drive.google.com/file/d/file-1/view?resourcekey=file-key",
+        "resourceKey": "file-key",
+    }
+    downloaded_file = {
+        "source": "inMemoryFile",
+        "filename": "Report.pdf",
+        "mimeType": "application/pdf",
+        "base64": "JVBERi0=",
+    }
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"files": [listed_file]}),
+            _FakeResponse(json_data=downloaded_file),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.Environment(
+        api_key="test-api-key", base_url="https://api.example.test/fast/v2"
+    )
+
+    files = await env.google_drive.list_files(
+        folder="folder-1", auth={"type": "public"}
+    )
+    downloaded = await env.google_drive.download_file(file=files[0])
+
+    assert files == [listed_file]
+    assert downloaded == downloaded_file
+    assert env._initialized is False
+    list_call, download_call = pyfetch.await_args_list
+    assert list_call.args == (
+        "https://api.example.test/fast/v2/google/drive/list-files",
+    )
+    assert list_call.kwargs["method"] == "POST"
+    assert list_call.kwargs["headers"] == {
+        "x-api-key": "test-api-key",
+        "Content-Type": "application/json",
+    }
+    assert json.loads(list_call.kwargs["body"]) == {
+        "folder": "folder-1",
+        "auth": {"type": "public"},
+    }
+    assert download_call.args == (
+        "https://api.example.test/fast/v2/google/drive/download-file",
+    )
+    assert json.loads(download_call.kwargs["body"]) == {"file": listed_file}
+
+
+@pytest.mark.asyncio
+async def test_google_drive_refreshes_pyodide_auth_and_surfaces_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            ok=False, status=403, text_data="Not publicly shared"
+        )
+    )
+    narada_pkg, env_module = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    monkeypatch.delenv("NARADA_API_KEY", raising=False)
+    env = narada_pkg.Environment(user_id="user-1", env="dev")
+
+    with pytest.raises(
+        narada_pkg.NaradaError, match="Google Drive request failed: 403"
+    ):
+        await env.google_drive.download_file(file="file-1")
+
+    env_module._narada_get_id_token.assert_awaited_once()
+    assert (
+        pyfetch.await_args.kwargs["headers"]["Authorization"]
+        == "Bearer frontend-id-token"
+    )

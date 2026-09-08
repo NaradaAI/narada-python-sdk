@@ -14,6 +14,9 @@ from narada_core.models import (
     CriticConfig,
     ExternalVectorStore,
     File,
+    GoogleDriveAuth,
+    GoogleDriveFile,
+    InMemoryFileVariable,
     ManagedVectorStore,
     ReasoningEffort,
     Response,
@@ -31,6 +34,7 @@ from narada.environment import (
     RemoteBrowserEnvironment,
     SessionDownloadItem,
 )
+from narada.google_drive import GoogleDriveClient
 from narada.utils import download_file, render_html
 from narada.version import __version__
 
@@ -51,6 +55,10 @@ __all__ = [
     "Environment",
     "ExternalVectorStore",
     "File",
+    "GoogleDriveAuth",
+    "GoogleDriveClient",
+    "GoogleDriveFile",
+    "InMemoryFileVariable",
     "LambdaEnvironment",
     "ManagedVectorStore",
     "NaradaError",

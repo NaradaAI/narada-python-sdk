@@ -139,6 +139,16 @@ class PressKeysTrace(BaseModel):
     description: str
 
 
+class ListGoogleDriveFilesTrace(BaseModel):
+    step_type: Literal["listGoogleDriveFiles"]
+    description: str
+
+
+class DownloadGoogleDriveFileTrace(BaseModel):
+    step_type: Literal["downloadGoogleDriveFile"]
+    description: str
+
+
 class ReadGoogleSheetTrace(BaseModel):
     step_type: Literal["readGoogleSheet"]
     url: str
@@ -387,6 +397,8 @@ ApaStepTrace = Annotated[
     | WaitForElementTrace
     | PressKeysTrace
     | ReadCsvTrace
+    | ListGoogleDriveFilesTrace
+    | DownloadGoogleDriveFileTrace
     | ReadGoogleSheetTrace
     | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
