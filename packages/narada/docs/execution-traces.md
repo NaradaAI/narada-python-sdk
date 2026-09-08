@@ -1,9 +1,11 @@
 # Workflow execution traces
 
 `Agent.run(require_execution_trace=True)` asks the server to admit canonical
-trace capture before executing a workflow. The authenticated credential, selected
-organization and retention policy determine admission. Ordinary calls keep their
-current behavior when this option is omitted. It also applies to a critic call.
+trace capture before executing a workflow. Any authenticated caller may opt in;
+existing observability, HIPAA and zero-data-retention settings can prohibit capture.
+The server rejects a required trace before execution when those settings exclude
+the request. Ordinary calls keep their current behavior when the option is omitted.
+It also applies to a critic call.
 
 The SDK uses existing `NARADA_API_KEY`, explicit `api_key`, or `auth_headers`
 authentication. It does not collect keys in chat or add an authorization flow.
@@ -23,10 +25,6 @@ async def main():
     env = RemoteBrowserEnvironment(
         browser_window_id=os.environ["NARADA_BROWSER_WINDOW_ID"],
     )
-    capability = await env.execution_traces.capability()
-    if not capability.allowed:
-        raise RuntimeError(f"Trace capture unavailable: {capability.denial_reason}")
-
     response = await Agent(environment=env).run(
         "Inspect the current page and summarize its visible headings.",
         require_execution_trace=True,
@@ -70,8 +68,8 @@ guarantee that later uploads or downloads succeed.
 
 A local runner may inject `NARADA_RUN_DIR` into its workflow child. The SDK
 validates it when constructing an `Environment`; no decorator, callback setup,
-`sitecustomize`, or monkeypatch is needed. Only the normal SDK credential is
-read by the SDK; plugin-specific key selection belongs to the launcher.
+`sitecustomize`, or monkeypatch is needed. The runner uses the same
+`NARADA_API_KEY` as ordinary SDK usage; no separate plugin credential is required.
 
 The binding must be an absolute directory with a lowercase 32-hex-character
 basename, regular `manifest.json` and `output.log` files, and an `artifacts/`

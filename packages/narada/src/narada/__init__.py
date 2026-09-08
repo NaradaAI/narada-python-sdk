@@ -38,7 +38,6 @@ from narada.environment import (
     SessionDownloadItem,
 )
 from narada.execution_traces import (
-    ExecutionTraceCapability,
     ExecutionTraceClient,
     ExecutionTraceDownloadResult,
     ExecutionTraceError,
@@ -62,7 +61,6 @@ __all__ = [
     "CriticResult",
     "download_file",
     "Environment",
-    "ExecutionTraceCapability",
     "ExecutionTraceClient",
     "ExecutionTraceDownloadResult",
     "ExecutionTraceError",

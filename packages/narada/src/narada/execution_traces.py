@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from narada_core.errors import NaradaError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field
 
 _MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 _MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
@@ -43,14 +43,6 @@ class ExecutionTraceError(NaradaError):
         super().__init__(f"Execution trace retrieval failed: {reason}")
 
 
-class ExecutionTraceCapability(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    allowed: bool
-    denial_reason: str | None = Field(default=None, alias="denialReason")
-    supported_modes: tuple[str, ...] = Field(default=(), alias="supportedModes")
-
-
 class ExecutionTraceDownloadResult(BaseModel):
     """A completed download or a server-reported nonterminal/unavailable state."""
 
@@ -73,10 +65,6 @@ class _TraceDownloadResponse(BaseModel):
 class _TraceIdentity(BaseModel):
     schemaVersion: Literal[1]
     traceId: str = Field(min_length=1)
-
-
-class _CapabilityResponse(BaseModel):
-    executionTrace: ExecutionTraceCapability
 
 
 def _validate_request_id(request_id: str) -> None:
@@ -159,24 +147,6 @@ class ExecutionTraceClient:
     def __init__(self, *, base_url: str, auth_headers: dict[str, str]) -> None:
         self._base_url = base_url.rstrip("/")
         self._auth_headers = dict(auth_headers)
-
-    async def capability(self, *, timeout: float = 30) -> ExecutionTraceCapability:
-        """Read selected-organization capture/retention capability without dispatch."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self._base_url}/sdk/config",
-                    headers=self._auth_headers,
-                    allow_redirects=False,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as response:
-                    self._check_status(response.status)
-                    payload = await response.json()
-            return _CapabilityResponse.model_validate(payload).executionTrace
-        except ExecutionTraceError:
-            raise
-        except (aiohttp.ClientError, TimeoutError, ValidationError, ValueError):
-            raise ExecutionTraceError("capability_unavailable") from None
 
     @staticmethod
     def _check_status(status: int) -> None:
