@@ -82,7 +82,9 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
+from narada._run_evidence import RunEvidence
 from narada.config import BrowserConfig, ProxyConfig
+from narada.execution_traces import ExecutionTraceClient
 from narada.utils import assert_not_none
 from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
@@ -653,6 +655,10 @@ class Environment(ABC):
         self._base_url = base_url or os.getenv(
             "NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"
         )
+        self._run_evidence = RunEvidence.from_environment()
+        self.execution_traces = ExecutionTraceClient(
+            base_url=self._base_url, auth_headers=self._auth_headers
+        )
         self.vector_stores = VectorStoreCatalog(
             base_url=self._base_url,
             auth_headers=self._auth_headers,
@@ -874,6 +880,8 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        evidence_parent_request_id: str | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -902,6 +910,8 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        evidence_parent_request_id: str | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -929,6 +939,8 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        evidence_parent_request_id: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -949,6 +961,8 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        if require_execution_trace or self._run_evidence is not None:
+            body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
@@ -1003,6 +1017,8 @@ class Environment(ABC):
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
 
+        request_id: str | None = None
+        completed = False
         try:
             seen_input_ids: set[str] = set()
             async with aiohttp.ClientSession() as session:
@@ -1014,6 +1030,10 @@ class Environment(ABC):
                 ) as resp:
                     resp.raise_for_status()
                     request_id = (await resp.json())["requestId"]
+                if self._run_evidence is not None:
+                    self._run_evidence.admitted(
+                        request_id, parent_request_id=evidence_parent_request_id
+                    )
 
                 while (now := time.monotonic()) < deadline:
                     async with session.get(
@@ -1036,6 +1056,13 @@ class Environment(ABC):
                         await asyncio.sleep(3)
                         continue
 
+                    completed = True
+                    if self._run_evidence is not None:
+                        await self._run_evidence.completed(
+                            response,
+                            client=self.execution_traces,
+                            parent_request_id=evidence_parent_request_id,
+                        )
                     response_content = response["response"]
                     if response_content is not None:
                         # Populate the `structuredOutput` field. This is a client-side field
@@ -1058,6 +1085,15 @@ class Environment(ABC):
 
         except asyncio.TimeoutError:
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+        finally:
+            if (
+                self._run_evidence is not None
+                and request_id is not None
+                and not completed
+            ):
+                self._run_evidence.interrupted(
+                    request_id, parent_request_id=evidence_parent_request_id
+                )
 
     @overload
     async def _run_extension_action(

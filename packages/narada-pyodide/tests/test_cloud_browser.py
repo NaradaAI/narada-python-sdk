@@ -492,6 +492,47 @@ async def test_agent_run_forwards_clear_chat(
 
 
 @pytest.mark.asyncio
+async def test_agent_run_preserves_trace_context_and_requests_capture(monkeypatch):
+    trace_context = {
+        "schemaVersion": 1,
+        "traceId": "rdtrace-v1-request",
+        "executionTraceS3Key": "user-fixture/recording-rdtrace-v1-request/execution-trace/index.json",
+    }
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                        "executionTraceContext": trace_context,
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "hitlInputMetadata": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="fixture-window", api_key="fixture-key"
+    )
+    result = await narada_pkg.Agent(environment=env).run(
+        "trace the fixture", require_execution_trace=True
+    )
+    assert (
+        json.loads(pyfetch.await_args_list[0].kwargs["body"])["requireExecutionTrace"]
+        is True
+    )
+    assert result.request_id == "request-123"
+    assert result.execution_trace_context == trace_context
+    assert "narada._run_evidence" not in sys.modules
+
+
+@pytest.mark.asyncio
 async def test_agent_run_serializes_managed_and_external_vector_stores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

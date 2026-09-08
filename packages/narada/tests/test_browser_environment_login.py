@@ -1135,6 +1135,13 @@ async def test_launch_browser_restarts_once_after_autoload_failure(
     config = BrowserConfig(interactive=interactive)
     env = BrowserEnvironment(api_key="test-key", config=config)
     monkeypatch.setattr(environment_module.sys, "platform", "win32")
+    # Supply Windows constants when exercising this branch on macOS/Linux.
+    monkeypatch.setattr(
+        environment_module.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, raising=False
+    )
+    monkeypatch.setattr(
+        environment_module.subprocess, "DETACHED_PROCESS", 0x8, raising=False
+    )
     autoload_used = MagicMock(return_value=True)
     monkeypatch.setattr(
         environment_module,

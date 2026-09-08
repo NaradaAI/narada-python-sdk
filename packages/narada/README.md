@@ -17,6 +17,9 @@
 
 The official Narada Python SDK that helps you launch browsers and run tasks with Narada UI agents.
 
+For authorized canonical trace downloads and automatic local workflow evidence,
+see [Workflow execution traces](docs/execution-traces.md).
+
 ## Installation
 
 ```bash
