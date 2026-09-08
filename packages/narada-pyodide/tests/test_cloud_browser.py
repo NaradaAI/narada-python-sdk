@@ -459,6 +459,7 @@ async def test_agent_run_keeps_parent_request_id_from_injected_builtins(
 async def test_agent_run_forwards_clear_chat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    trace = {"schemaVersion": 1, "traceId": "synthetic"}
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "child-request-123"}),
@@ -467,6 +468,7 @@ async def test_agent_run_forwards_clear_chat(
                     "status": "success",
                     "response": {
                         "text": "done",
+                        "executionTraceContext": trace,
                         "output": {"type": "text", "content": "done"},
                     },
                     "completedAt": "2026-05-08T00:00:00+00:00",
@@ -483,9 +485,13 @@ async def test_agent_run_forwards_clear_chat(
         cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    await narada_pkg.Agent(environment=env).run("fresh task", clear_chat=True)
+    result = await narada_pkg.Agent(environment=env).run(
+        "fresh task", clear_chat=True, require_execution_trace=True
+    )
 
     payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["requireExecutionTrace"] is True
+    assert result.execution_trace_context == trace
     assert payload["clearChat"] is True
     assert "reasoningMode" not in payload
     assert "modelTier" not in payload
