@@ -83,6 +83,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada.config import BrowserConfig, ProxyConfig
+from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
 from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
@@ -632,6 +633,7 @@ class _BrowserInitializationHelper:
 
 class Environment(ABC):
     vector_stores: VectorStoreCatalog
+    google_drive: GoogleDriveClient
 
     _auth_headers: dict[str, str]
     _base_url: str
@@ -652,6 +654,10 @@ class Environment(ABC):
             self._auth_headers = {"x-api-key": api_key}
         self._base_url = base_url or os.getenv(
             "NARADA_API_BASE_URL", "https://api.narada.ai/fast/v2"
+        )
+        self.google_drive = GoogleDriveClient(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
         )
         self.vector_stores = VectorStoreCatalog(
             base_url=self._base_url,
