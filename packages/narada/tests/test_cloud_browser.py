@@ -186,8 +186,10 @@ async def test_dispatch_request_calls_input_required_callback_once_per_input_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("required", [False, True])
 async def test_dispatch_request_includes_execution_trace_context(
     monkeypatch: pytest.MonkeyPatch,
+    required: bool,
 ) -> None:
     import narada.environment as environment_module
 
@@ -198,6 +200,7 @@ async def test_dispatch_request_includes_execution_trace_context(
         "parentSegmentId": "segment-local",
     }
     monkeypatch.setenv("NARADA_EXECUTION_TRACE_CONTEXT", json.dumps(trace_context))
+    monkeypatch.setenv("NARADA_RUN_DIR", "ignored-by-public-sdk")
     fake_session = _RemoteDispatchFakeClientSession(
         [
             {
@@ -215,11 +218,14 @@ async def test_dispatch_request_includes_execution_trace_context(
     )
 
     env = RemoteBrowserEnvironment(browser_window_id="bw-1", api_key="test-key")
-    response = await env._dispatch_request(prompt="Summarize", timeout=5)
+    response = await env._dispatch_request(
+        prompt="Summarize", timeout=5, require_execution_trace=required
+    )
 
     assert response["status"] == "success"
     assert fake_session.dispatched_body is not None
     assert fake_session.dispatched_body["executionTraceContext"] == trace_context
+    assert fake_session.dispatched_body.get("requireExecutionTrace", False) is required
 
 
 @pytest.mark.asyncio
@@ -887,6 +893,10 @@ async def test_agent_run_appends_critic_workflow_trace(
                             narada_validation_passed=True
                         ),
                         "workflowTrace": critic_workflow_trace,
+                        "executionTraceContext": {
+                            "schemaVersion": 1,
+                            "traceId": "critic-trace",
+                        },
                     },
                     "usage": {"actions": 0, "credits": 0},
                 },
@@ -894,9 +904,18 @@ async def test_agent_run_appends_critic_workflow_trace(
         ),
     )
 
-    response = await agent.run("return a trace", critic={})
+    response = await agent.run(
+        "return a trace", critic={}, require_execution_trace=True
+    )
+    assert all(
+        call.kwargs["require_execution_trace"]
+        for call in agent._dispatch_request.call_args_list
+    )
+    assert response.request_id == "request-123"
+    assert response.critic_result.request_id == "critic-request-123"
 
     assert response.critic_result is not None
+    assert response.critic_result.execution_trace_context["traceId"] == "critic-trace"
     assert response.critic_result.workflow_trace == critic_workflow_trace
     assert response.workflow_trace == {
         **workflow_trace,

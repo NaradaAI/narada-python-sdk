@@ -78,6 +78,8 @@ async def run_critic(
     critic_workflow_trace = critic_content.get("workflowTrace")
 
     return CriticResult(
+        request_id=critic_dispatch_response.get("requestId"),
+        execution_trace_context=critic_content.get("executionTraceContext"),
         validation_passed=validation_passed,
         structured_output=structured_output,
         usage=AgentUsage.model_validate(critic_dispatch_response["usage"]),

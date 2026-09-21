@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -114,6 +115,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -141,6 +143,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -167,6 +170,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
@@ -195,6 +199,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            require_execution_trace=require_execution_trace,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -212,7 +217,10 @@ class Agent(Generic[_StructuredOutput]):
         critic_result: CriticResult | None = None
         if critic is not None:
             critic_result = await run_critic(
-                dispatch_request=self._dispatch_request,
+                dispatch_request=partial(
+                    self._dispatch_request,
+                    require_execution_trace=require_execution_trace,
+                ),
                 original_prompt=prompt,
                 response_content=response_content,
                 action_trace_raw=action_trace_raw,
@@ -240,6 +248,7 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def _dispatch_request(
@@ -266,6 +275,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -291,6 +301,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             critic_context=critic_context,
+            require_execution_trace=require_execution_trace,
             timeout=timeout,
         )
 
