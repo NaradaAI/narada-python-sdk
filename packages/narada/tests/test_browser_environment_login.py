@@ -7,10 +7,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from narada import BrowserEnvironment
+from narada import Agent, BrowserEnvironment
 from narada.config import BrowserConfig
 from narada.environment import create_side_panel_url
-from narada_core.actions.models import CloseWindowRequest
+from narada_core.actions.models import (
+    CloseTabRequest,
+    CloseTabResponse,
+    CloseWindowRequest,
+)
 from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
@@ -349,6 +353,54 @@ async def test_browser_environment_close_closes_window_before_detaching(
     assert env._context is None
     assert env._playwright is None
     assert env._playwright_context_manager is None
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_skips_window_action_after_closing_last_tab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    run_extension_action = AsyncMock(return_value=CloseTabResponse(closes_window=True))
+    detach = AsyncMock()
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+    monkeypatch.setattr(env, "_detach", detach)
+
+    await Agent(environment=env).close_tab()
+    await env.close()
+
+    run_extension_action.assert_awaited_once()
+    request = run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseTabRequest)
+    detach.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_environment_close_still_closes_window_after_non_last_tab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = BrowserEnvironment(
+        auth_headers={"x-api-key": "test-key"},
+        config=BrowserConfig(interactive=False),
+    )
+    env._initialized = True
+    env._browser_window_id = "browser-window-123"
+    run_extension_action = AsyncMock(
+        side_effect=[CloseTabResponse(closes_window=False), None]
+    )
+    monkeypatch.setattr(env, "_run_extension_action", run_extension_action)
+    monkeypatch.setattr(env, "_detach", AsyncMock())
+
+    await Agent(environment=env).close_tab()
+    await env.close()
+
+    assert run_extension_action.await_count == 2
+    close_window_request = run_extension_action.await_args_list[1].args[0]
+    assert isinstance(close_window_request, CloseWindowRequest)
 
 
 @pytest.mark.asyncio

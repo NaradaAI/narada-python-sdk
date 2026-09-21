@@ -24,7 +24,7 @@ async def test_append_google_sheet_row_dispatches_object_and_returns_updated_ran
 
     result = await Agent(environment=environment).append_google_sheet_row(
         spreadsheet_id="spreadsheet-id",
-        range="People!A1:D1",
+        header_range="People!A1:D1",
         row={"Name": "Ada", "Age": 36, "Active": True, "Notes": None},
         timeout=30,
     )
@@ -34,7 +34,7 @@ async def test_append_google_sheet_row_dispatches_object_and_returns_updated_ran
     assert request.model_dump() == {
         "name": "append_google_sheet_row",
         "spreadsheet_id": "spreadsheet-id",
-        "range": "People!A1:D1",
+        "header_range": "People!A1:D1",
         "row": {"Name": "Ada", "Age": 36, "Active": True, "Notes": None},
     }
     assert response_model is AppendGoogleSheetRowResponse

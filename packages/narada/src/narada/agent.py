@@ -16,6 +16,8 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    CloseTabRequest,
+    CloseTabResponse,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
     CriticResult,
@@ -411,6 +413,15 @@ class Agent(Generic[_StructuredOutput]):
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
+    async def close_tab(self, *, timeout: int | None = None) -> None:
+        """Closes the active browser tab."""
+        environment = self._browser_environment()
+        response = await environment._run_extension_action(
+            CloseTabRequest(), CloseTabResponse, timeout=timeout
+        )
+        if response.closes_window:
+            environment._mark_browser_window_closed()
+
     async def wait_for_element(
         self,
         *,
@@ -529,7 +540,7 @@ class Agent(Generic[_StructuredOutput]):
         self,
         *,
         spreadsheet_id: str,
-        range: str,
+        header_range: str,
         row: Mapping[str, str | int | float | bool | None],
         timeout: int | None = None,
     ) -> AppendGoogleSheetRowResponse:
@@ -537,7 +548,7 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             AppendGoogleSheetRowRequest(
                 spreadsheet_id=spreadsheet_id,
-                range=range,
+                header_range=header_range,
                 row=dict(row),
             ),
             AppendGoogleSheetRowResponse,

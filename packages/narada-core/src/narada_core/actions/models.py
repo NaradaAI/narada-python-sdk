@@ -383,6 +383,14 @@ class CloseWindowRequest(BaseModel):
     name: Literal["close_window"] = "close_window"
 
 
+class CloseTabRequest(BaseModel):
+    name: Literal["close_tab"] = "close_tab"
+
+
+class CloseTabResponse(BaseModel):
+    closes_window: bool
+
+
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str
@@ -407,7 +415,7 @@ class ReadGoogleSheetResponse(BaseModel):
 class AppendGoogleSheetRowRequest(BaseModel):
     name: Literal["append_google_sheet_row"] = "append_google_sheet_row"
     spreadsheet_id: str
-    range: str
+    header_range: str
     row: dict[str, str | int | float | bool | None]
 
 
@@ -573,6 +581,7 @@ type ExtensionActionRequest = (
     AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
+    | CloseTabRequest
     | AppendGoogleSheetRowRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest

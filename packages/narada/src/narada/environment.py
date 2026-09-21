@@ -1169,6 +1169,9 @@ class BaseBrowserEnvironment(Environment):
     def _dispatch_browser_window_id(self) -> str | None:
         return self.browser_window_id
 
+    def _mark_browser_window_closed(self) -> None:
+        self._browser_window_id = None
+
 
 class _PlaywrightLifecycleMixin:
     _context: BrowserContext | None
@@ -1325,6 +1328,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         try:
             if self._initialized and self._browser_window_id is not None:
                 await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
+                self._mark_browser_window_closed()
         finally:
             await self._detach()
 
@@ -2227,9 +2231,10 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
         session.
         """
         if self._cloud_browser_session_id is None:
-            return await self._run_extension_action(
-                CloseWindowRequest(), timeout=timeout
-            )
+            if self._browser_window_id is not None:
+                await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
+                self._mark_browser_window_closed()
+            return
 
         await _stop_cloud_browser_session(
             base_url=self._base_url,

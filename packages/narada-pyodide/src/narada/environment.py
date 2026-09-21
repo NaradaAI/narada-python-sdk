@@ -735,10 +735,6 @@ class Environment(ABC):
             )
             raise
 
-    async def _close_browser_window(self, *, timeout: int | None = None) -> None:
-        """Gracefully closes the current browser window."""
-        return await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
-
     @overload
     async def _run_extension_action(
         self,
@@ -905,6 +901,17 @@ class BaseBrowserEnvironment(Environment):
     @property
     def _dispatch_browser_window_id(self) -> str | None:
         return self.browser_window_id
+
+    def _mark_browser_window_closed(self) -> None:
+        self._browser_window_id = None
+
+    async def _close_browser_window(self, *, timeout: int | None = None) -> None:
+        """Gracefully closes the current browser window."""
+        if self._browser_window_id is None:
+            return
+
+        await self._run_extension_action(CloseWindowRequest(), timeout=timeout)
+        self._mark_browser_window_closed()
 
 
 class BrowserEnvironment(BaseBrowserEnvironment):

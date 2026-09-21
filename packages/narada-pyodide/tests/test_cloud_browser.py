@@ -134,7 +134,7 @@ async def test_append_google_sheet_row_matches_desktop_sdk(
 
     result = await narada_pkg.Agent(environment=environment).append_google_sheet_row(
         spreadsheet_id="spreadsheet-id",
-        range="People!A1:D1",
+        header_range="People!A1:D1",
         row={"Name": "Ada", "Age": 36},
         timeout=30,
     )
@@ -144,7 +144,7 @@ async def test_append_google_sheet_row_matches_desktop_sdk(
     assert request.model_dump() == {
         "name": "append_google_sheet_row",
         "spreadsheet_id": "spreadsheet-id",
-        "range": "People!A1:D1",
+        "header_range": "People!A1:D1",
         "row": {"Name": "Ada", "Age": 36},
     }
     assert response_model is AppendGoogleSheetRowResponse
@@ -1551,6 +1551,51 @@ async def test_remote_browser_environment_without_cloud_session_uses_extension_c
     assert payload["browserWindowId"] == "browser-window-123"
     assert payload["action"]["name"] == "close_window"
     assert "parentRunIds" not in payload
+
+
+@pytest.mark.asyncio
+async def test_agent_close_tab_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"closes_window":false}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).close_tab(timeout=15)
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {"name": "close_tab"}
+    assert payload["timeout"] == 15
+
+
+@pytest.mark.asyncio
+async def test_close_after_closing_last_tab_does_not_send_close_window_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"closes_window":true}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).close_tab()
+    await env.close()
+
+    assert pyfetch.await_count == 1
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {"name": "close_tab"}
 
 
 @pytest.mark.asyncio
