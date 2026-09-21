@@ -134,7 +134,7 @@ async def test_append_google_sheet_row_matches_desktop_sdk(
 
     result = await narada_pkg.Agent(environment=environment).append_google_sheet_row(
         spreadsheet_id="spreadsheet-id",
-        range="People!A1:D1",
+        header_range="People!A1:D1",
         row={"Name": "Ada", "Age": 36},
         timeout=30,
     )
@@ -144,7 +144,7 @@ async def test_append_google_sheet_row_matches_desktop_sdk(
     assert request.model_dump() == {
         "name": "append_google_sheet_row",
         "spreadsheet_id": "spreadsheet-id",
-        "range": "People!A1:D1",
+        "header_range": "People!A1:D1",
         "row": {"Name": "Ada", "Age": 36},
     }
     assert response_model is AppendGoogleSheetRowResponse

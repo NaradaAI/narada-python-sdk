@@ -541,7 +541,7 @@ class Agent(Generic[_StructuredOutput]):
         self,
         *,
         spreadsheet_id: str,
-        range: str,
+        header_range: str,
         row: Mapping[str, str | int | float | bool | None],
         timeout: int | None = None,
     ) -> AppendGoogleSheetRowResponse:
@@ -549,7 +549,7 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             AppendGoogleSheetRowRequest(
                 spreadsheet_id=spreadsheet_id,
-                range=range,
+                header_range=header_range,
                 row=dict(row),
             ),
             AppendGoogleSheetRowResponse,

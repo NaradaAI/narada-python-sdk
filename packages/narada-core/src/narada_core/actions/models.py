@@ -417,7 +417,7 @@ class ReadGoogleSheetResponse(BaseModel):
 class AppendGoogleSheetRowRequest(BaseModel):
     name: Literal["append_google_sheet_row"] = "append_google_sheet_row"
     spreadsheet_id: str
-    range: str
+    header_range: str
     row: dict[str, str | int | float | bool | None]
 
 
