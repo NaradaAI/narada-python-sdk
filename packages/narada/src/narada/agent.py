@@ -16,6 +16,8 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    AppendGoogleSheetRowRequest,
+    AppendGoogleSheetRowResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -520,6 +522,25 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
             ReadGoogleSheetResponse,
+            timeout=timeout,
+        )
+
+    async def append_google_sheet_row(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        row: Mapping[str, str | int | float | bool | None],
+        timeout: int | None = None,
+    ) -> AppendGoogleSheetRowResponse:
+        """Appends an object as a row using the selected range's first row as headers."""
+        return await self._browser_environment()._run_extension_action(
+            AppendGoogleSheetRowRequest(
+                spreadsheet_id=spreadsheet_id,
+                range=range,
+                row=dict(row),
+            ),
+            AppendGoogleSheetRowResponse,
             timeout=timeout,
         )
 

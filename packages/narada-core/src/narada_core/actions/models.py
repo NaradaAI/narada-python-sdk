@@ -404,6 +404,17 @@ class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
 
 
+class AppendGoogleSheetRowRequest(BaseModel):
+    name: Literal["append_google_sheet_row"] = "append_google_sheet_row"
+    spreadsheet_id: str
+    range: str
+    row: dict[str, str | int | float | bool | None]
+
+
+class AppendGoogleSheetRowResponse(BaseModel):
+    updated_range: str = Field(alias="updatedRange")
+
+
 class ReadExcelSheetRequest(BaseModel):
     name: Literal["read_excel_sheet"] = "read_excel_sheet"
     workbook_url: str
@@ -562,6 +573,7 @@ type ExtensionActionRequest = (
     AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
+    | AppendGoogleSheetRowRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
     | SavePdfFileRequest
