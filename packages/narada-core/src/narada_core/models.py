@@ -217,6 +217,16 @@ class PressKeysTrace(TypedDict):
     description: str
 
 
+class ListGoogleDriveFilesTrace(TypedDict):
+    step_type: Literal["listGoogleDriveFiles"]
+    description: str
+
+
+class DownloadGoogleDriveFileTrace(TypedDict):
+    step_type: Literal["downloadGoogleDriveFile"]
+    description: str
+
+
 class ReadGoogleSheetTrace(TypedDict):
     step_type: Literal["readGoogleSheet"]
     url: str
@@ -421,6 +431,8 @@ ApaStepTrace = (
     | WaitForElementTrace
     | PressKeysTrace
     | ReadCsvTrace
+    | ListGoogleDriveFilesTrace
+    | DownloadGoogleDriveFileTrace
     | ReadGoogleSheetTrace
     | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
@@ -492,6 +504,31 @@ class _RemoteDispatchPollResponse(TypedDict):
     completedAt: str | None
     usage: Usage | None
     hitlInputMetadata: HitlInputMetadata | None
+
+
+class GoogleDriveAuth(TypedDict):
+    """Google Drive access mode. Currently only public sharing is supported."""
+
+    type: Literal["public"]
+
+
+class GoogleDriveFile(TypedDict):
+    """A directly contained Google Drive file, usable as a download reference."""
+
+    id: str
+    name: str
+    mimeType: str
+    url: str
+    resourceKey: NotRequired[str]
+
+
+class InMemoryFileVariable(TypedDict):
+    """Downloaded content in the Agent Studio file-variable format."""
+
+    source: Literal["inMemoryFile"]
+    filename: str
+    mimeType: str
+    base64: str
 
 
 class File(TypedDict):

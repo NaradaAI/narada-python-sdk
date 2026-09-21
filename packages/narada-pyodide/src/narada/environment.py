@@ -61,6 +61,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from .google_drive import GoogleDriveClient
 from .retry import pyfetch_with_retries
 from .vector_stores import VectorStoreCatalog
 from .version import __version__
@@ -224,6 +225,7 @@ class SessionDownloadItem:
 
 class Environment(ABC):
     vector_stores: VectorStoreCatalog
+    google_drive: GoogleDriveClient
 
     _api_key: str | None
     _base_url: str
@@ -254,6 +256,10 @@ class Environment(ABC):
         )
         self._user_id = user_id
         self._env = env
+        self.google_drive = GoogleDriveClient(
+            base_url=self._base_url,
+            get_auth_headers=self._get_auth_headers,
+        )
         self.vector_stores = VectorStoreCatalog(
             base_url=self._base_url,
             get_auth_headers=self._get_auth_headers,

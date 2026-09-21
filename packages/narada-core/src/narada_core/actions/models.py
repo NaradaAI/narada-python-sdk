@@ -12,6 +12,7 @@ from typing import (
     cast,
     override,
 )
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +27,10 @@ _StructuredOutputT = TypeVar("_StructuredOutputT")
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
+
+
+def _generate_hitl_step_id() -> str:
+    return uuid4().hex
 
 
 class AgentUsage(BaseModel):
@@ -50,7 +55,8 @@ class CriticResult(BaseModel):
     structured_output: Any
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
-    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
+    workflow_trace: dict[str, Any] | None = Field(
+        default=None, alias="workflowTrace")
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
@@ -66,7 +72,8 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
-    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
+    workflow_trace: dict[str, Any] | None = Field(
+        default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
     execution_trace_context: dict[str, Any] | None = Field(
         default=None, alias="executionTraceContext"
@@ -407,6 +414,17 @@ class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
 
 
+class AppendGoogleSheetRowRequest(BaseModel):
+    name: Literal["append_google_sheet_row"] = "append_google_sheet_row"
+    spreadsheet_id: str
+    range: str
+    row: dict[str, str | int | float | bool | None]
+
+
+class AppendGoogleSheetRowResponse(BaseModel):
+    updated_range: str = Field(alias="updatedRange")
+
+
 class ReadExcelSheetRequest(BaseModel):
     name: Literal["read_excel_sheet"] = "read_excel_sheet"
     workbook_url: str
@@ -490,14 +508,15 @@ class ExecuteJavaScriptOnPageResponse(BaseModel):
 
 class PromptForUserInputVariable(BaseModel):
     name: str
-    type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
+    type: Literal["string", "number", "boolean",
+                  "enum", "dataTable", "object", "array"]
     required: bool
     enum_values: list[str] | None = None
 
 
 class PromptForUserInputRequest(BaseModel):
     name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     variables: list[PromptForUserInputVariable]
     prompt_message: str | None = None
 
@@ -506,9 +525,20 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class PromptForUserFileRequest(BaseModel):
+    name: Literal["prompt_for_user_file"] = "prompt_for_user_file"
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
+    variable_name: str
+    prompt_message: str | None = None
+
+
+class PromptForUserFileResponse(BaseModel):
+    file: dict[str, Any]
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     prompt_message: str
     approve_label: str
     reject_label: str
@@ -540,7 +570,7 @@ class PressKeyRequest(BaseModel):
 
 
 HitlInputAction = Annotated[
-    PromptForUserInputRequest | UserApprovalRequest,
+    PromptForUserFileRequest | PromptForUserInputRequest | UserApprovalRequest,
     Field(discriminator="name"),
 ]
 
@@ -555,6 +585,7 @@ type ExtensionActionRequest = (
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
     | CloseTabRequest
+    | AppendGoogleSheetRowRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
     | SavePdfFileRequest
@@ -565,6 +596,7 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PressKeyRequest
     | PrintMessageRequest
+    | PromptForUserFileRequest
     | PromptForUserInputRequest
     | ReadExcelSheetRequest
     | ReadGoogleSheetRequest

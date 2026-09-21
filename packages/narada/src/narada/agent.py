@@ -18,6 +18,8 @@ from narada_core.actions.models import (
     AgentUsage,
     CloseTabRequest,
     CloseTabResponse,
+    AppendGoogleSheetRowRequest,
+    AppendGoogleSheetRowResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -34,6 +36,8 @@ from narada_core.actions.models import (
     PressKeyEventItem,
     PressKeyRequest,
     PrintMessageRequest,
+    PromptForUserFileRequest,
+    PromptForUserFileResponse,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -430,7 +434,8 @@ class Agent(Generic[_StructuredOutput]):
         Returns True if the element was found, False if no selector matched before timeout.
         """
         result = await self._browser_environment()._run_extension_action(
-            WaitForElementRequest(selectors=selectors, state=state, timeout=timeout),
+            WaitForElementRequest(selectors=selectors,
+                                  state=state, timeout=timeout),
             WaitForElementResponse,
             timeout=timeout // 1000 + 30,
         )
@@ -466,7 +471,6 @@ class Agent(Generic[_StructuredOutput]):
     async def prompt_for_user_input(
         self,
         *,
-        step_id: str,
         variables: list[PromptForUserInputVariable],
         prompt_message: str | None = None,
         timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
@@ -474,17 +478,34 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             PromptForUserInputRequest(
-                step_id=step_id, prompt_message=prompt_message, variables=variables
+                prompt_message=prompt_message, variables=variables
             ),
             PromptForUserInputResponse,
             timeout=timeout,
         )
         return result.values_by_name
 
+    async def prompt_for_user_file(
+        self,
+        *,
+        variable_name: str,
+        prompt_message: str | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Prompts the user for a file in the extension UI."""
+        result = await self._browser_environment()._run_extension_action(
+            PromptForUserFileRequest(
+                variable_name=variable_name,
+                prompt_message=prompt_message,
+            ),
+            PromptForUserFileResponse,
+            timeout=timeout,
+        )
+        return result.file
+
     async def user_approval(
         self,
         *,
-        step_id: str,
         prompt_message: str,
         approve_label: str,
         reject_label: str,
@@ -493,7 +514,6 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user to approve or reject in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             UserApprovalRequest(
-                step_id=step_id,
                 prompt_message=prompt_message,
                 approve_label=approve_label,
                 reject_label=reject_label,
@@ -514,6 +534,25 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
             ReadGoogleSheetResponse,
+            timeout=timeout,
+        )
+
+    async def append_google_sheet_row(
+        self,
+        *,
+        spreadsheet_id: str,
+        range: str,
+        row: Mapping[str, str | int | float | bool | None],
+        timeout: int | None = None,
+    ) -> AppendGoogleSheetRowResponse:
+        """Appends an object as a row using the selected range's first row as headers."""
+        return await self._browser_environment()._run_extension_action(
+            AppendGoogleSheetRowRequest(
+                spreadsheet_id=spreadsheet_id,
+                range=range,
+                row=dict(row),
+            ),
+            AppendGoogleSheetRowResponse,
             timeout=timeout,
         )
 
