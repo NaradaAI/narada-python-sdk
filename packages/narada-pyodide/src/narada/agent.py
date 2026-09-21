@@ -444,8 +444,7 @@ class Agent(Generic[_StructuredOutput]):
         Returns True if the element was found, False if no selector matched before timeout.
         """
         result = await self._browser_environment()._run_extension_action(
-            WaitForElementRequest(selectors=selectors,
-                                  state=state, timeout=timeout),
+            WaitForElementRequest(selectors=selectors, state=state, timeout=timeout),
             WaitForElementResponse,
             timeout=timeout // 1000 + 30,
         )

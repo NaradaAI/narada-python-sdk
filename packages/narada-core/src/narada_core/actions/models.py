@@ -55,8 +55,7 @@ class CriticResult(BaseModel):
     structured_output: Any
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
-    workflow_trace: dict[str, Any] | None = Field(
-        default=None, alias="workflowTrace")
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
 
 
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
@@ -72,8 +71,7 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     ]
     usage: AgentUsage
     action_trace: tracing_model.ActionTrace | None = None
-    workflow_trace: dict[str, Any] | None = Field(
-        default=None, alias="workflowTrace")
+    workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
     execution_trace_context: dict[str, Any] | None = Field(
         default=None, alias="executionTraceContext"
@@ -508,8 +506,7 @@ class ExecuteJavaScriptOnPageResponse(BaseModel):
 
 class PromptForUserInputVariable(BaseModel):
     name: str
-    type: Literal["string", "number", "boolean",
-                  "enum", "dataTable", "object", "array"]
+    type: Literal["string", "number", "boolean", "enum", "dataTable", "object", "array"]
     required: bool
     enum_values: list[str] | None = None
 
