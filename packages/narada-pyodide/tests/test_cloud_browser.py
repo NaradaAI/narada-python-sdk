@@ -11,6 +11,8 @@ from uuid import UUID
 import pytest
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    AppendGoogleSheetRowRequest,
+    AppendGoogleSheetRowResponse,
     PromptForUserInputVariable,
 )
 from narada_core.models import AgentKind, ReasoningEffort
@@ -112,6 +114,42 @@ def _import_pyodide_narada(monkeypatch: pytest.MonkeyPatch, *, pyfetch: AsyncMoc
     monkeypatch.setattr(builtins, "_narada_request_id", None, raising=False)
     env_module._narada_get_id_token = AsyncMock(return_value="frontend-id-token")
     return narada_pkg, env_module
+
+
+@pytest.mark.asyncio
+async def test_append_google_sheet_row_matches_desktop_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=AsyncMock())
+    environment = narada_pkg.BaseBrowserEnvironment(
+        api_key="test-api-key",
+        browser_window_id="browser-window-id",
+        initialized=True,
+    )
+    response = AppendGoogleSheetRowResponse.model_validate(
+        {"updatedRange": "People!A4:D4"}
+    )
+    run_extension_action = AsyncMock(return_value=response)
+    monkeypatch.setattr(environment, "_run_extension_action", run_extension_action)
+
+    result = await narada_pkg.Agent(environment=environment).append_google_sheet_row(
+        spreadsheet_id="spreadsheet-id",
+        range="People!A1:D1",
+        row={"Name": "Ada", "Age": 36},
+        timeout=30,
+    )
+
+    request, response_model = run_extension_action.await_args.args
+    assert isinstance(request, AppendGoogleSheetRowRequest)
+    assert request.model_dump() == {
+        "name": "append_google_sheet_row",
+        "spreadsheet_id": "spreadsheet-id",
+        "range": "People!A1:D1",
+        "row": {"Name": "Ada", "Age": 36},
+    }
+    assert response_model is AppendGoogleSheetRowResponse
+    assert run_extension_action.await_args.kwargs == {"timeout": 30}
+    assert result.updated_range == "People!A4:D4"
 
 
 @pytest.mark.asyncio
