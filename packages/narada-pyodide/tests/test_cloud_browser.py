@@ -1440,6 +1440,26 @@ async def test_remote_browser_environment_without_cloud_session_uses_extension_c
 
 
 @pytest.mark.asyncio
+async def test_agent_close_tab_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).close_tab(timeout=15)
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {"name": "close_tab"}
+    assert payload["timeout"] == 15
+
+
+@pytest.mark.asyncio
 async def test_agent_execute_javascript_on_page_dispatches_extension_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

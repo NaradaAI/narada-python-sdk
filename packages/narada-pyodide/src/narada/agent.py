@@ -16,6 +16,7 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    CloseTabRequest,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -415,6 +416,12 @@ class Agent(Generic[_StructuredOutput]):
         """Navigates the active page in this window to the given URL."""
         return await self._browser_environment()._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
+        )
+
+    async def close_tab(self, *, timeout: int | None = None) -> None:
+        """Closes the active browser tab."""
+        return await self._browser_environment()._run_extension_action(
+            CloseTabRequest(), timeout=timeout
         )
 
     async def wait_for_element(

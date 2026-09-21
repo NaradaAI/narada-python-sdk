@@ -378,6 +378,10 @@ class CloseWindowRequest(BaseModel):
     name: Literal["close_window"] = "close_window"
 
 
+class CloseTabRequest(BaseModel):
+    name: Literal["close_tab"] = "close_tab"
+
+
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str
@@ -546,6 +550,7 @@ type ExtensionActionRequest = (
     AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
+    | CloseTabRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
     | SavePdfFileRequest
