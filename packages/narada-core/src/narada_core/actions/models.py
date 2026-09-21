@@ -382,6 +382,10 @@ class CloseTabRequest(BaseModel):
     name: Literal["close_tab"] = "close_tab"
 
 
+class CloseTabResponse(BaseModel):
+    closes_window: bool
+
+
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str

@@ -17,6 +17,7 @@ from narada_core.actions.models import (
     AgentResponse,
     AgentUsage,
     CloseTabRequest,
+    CloseTabResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -420,9 +421,12 @@ class Agent(Generic[_StructuredOutput]):
 
     async def close_tab(self, *, timeout: int | None = None) -> None:
         """Closes the active browser tab."""
-        return await self._browser_environment()._run_extension_action(
-            CloseTabRequest(), timeout=timeout
+        environment = self._browser_environment()
+        response = await environment._run_extension_action(
+            CloseTabRequest(), CloseTabResponse, timeout=timeout
         )
+        if response.closes_window:
+            environment._mark_browser_window_closed()
 
     async def wait_for_element(
         self,

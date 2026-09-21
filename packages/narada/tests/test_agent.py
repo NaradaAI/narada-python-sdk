@@ -15,7 +15,7 @@ from narada import (
     ReasoningEffort,
 )
 from narada.environment import BaseBrowserEnvironment
-from narada_core.actions.models import CloseTabRequest
+from narada_core.actions.models import CloseTabRequest, CloseTabResponse
 
 
 class _FakeResponse:
@@ -91,7 +91,9 @@ class _CountingEnvironment(Environment):
 @pytest.mark.asyncio
 async def test_agent_close_tab_dispatches_extension_action() -> None:
     env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
-    env._run_extension_action = AsyncMock()  # type: ignore[method-assign]
+    env._run_extension_action = AsyncMock(  # type: ignore[method-assign]
+        return_value=CloseTabResponse(closes_window=False)
+    )
 
     await Agent(environment=env).close_tab(timeout=15)
 
@@ -99,7 +101,21 @@ async def test_agent_close_tab_dispatches_extension_action() -> None:
     request = env._run_extension_action.await_args.args[0]
     assert isinstance(request, CloseTabRequest)
     assert request.model_dump() == {"name": "close_tab"}
+    assert env._run_extension_action.await_args.args[1] is CloseTabResponse
     assert env._run_extension_action.await_args.kwargs == {"timeout": 15}
+    assert env.browser_window_id == "window-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_close_tab_marks_environment_closed_for_last_tab() -> None:
+    env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
+    env._run_extension_action = AsyncMock(  # type: ignore[method-assign]
+        return_value=CloseTabResponse(closes_window=True)
+    )
+
+    await Agent(environment=env).close_tab()
+
+    assert env._browser_window_id is None
 
 
 @pytest.mark.asyncio
