@@ -315,6 +315,33 @@ async def test_agentic_selector_returns_verification_status(
 
 
 @pytest.mark.asyncio
+async def test_agentic_selector_serializes_press_enter_for_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    await agent.agentic_selector(
+        action={"type": "fill", "value": "Narada AI", "press_enter": True},
+        selectors={"name": "q"},
+        fallback_operator_query="Fill the search box and press Enter",
+    )
+
+    assert fake_session.post_bodies[0]["action"]["action"] == {
+        "type": "fill",
+        "value": "Narada AI",
+        "pressEnter": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_agentic_selector_omits_blank_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
