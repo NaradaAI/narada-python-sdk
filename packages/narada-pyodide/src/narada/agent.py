@@ -317,9 +317,22 @@ class Agent(Generic[_StructuredOutput]):
 
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
+
+        For select_file actions, file must be an existing file-variable value. Local file uploads
+        are unavailable in the browser runtime.
         """
+        browser_environment = self._browser_environment()
+        normalized_action = action
+        if action["type"] == "select_file":
+            normalized_action = {
+                "type": "select_file",
+                "file": await browser_environment._normalize_input_variables_value_impl(
+                    input_variable_value=action["file"]
+                ),
+            }
+
         request = AgenticSelectorRequest(
-            action=action,
+            action=normalized_action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
             verification_description=verification_description,
@@ -332,7 +345,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
 
-        result = await self._browser_environment()._run_extension_action(
+        result = await browser_environment._run_extension_action(
             request,
             response_model,
             timeout=timeout,

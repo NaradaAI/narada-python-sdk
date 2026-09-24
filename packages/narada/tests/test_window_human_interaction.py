@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
+from io import BytesIO
 from typing import Any
 from uuid import UUID
 
@@ -311,6 +312,54 @@ async def test_agentic_selector_returns_verification_status(
         "fallback_operator_query": "Click the submit button",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_uploads_local_file_for_select_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    environment = RemoteBrowserEnvironment(
+        browser_window_id="bw-1",
+        api_key="test-key",
+    )
+    uploaded_files = []
+
+    async def fake_upload_file_impl(*, file):
+        uploaded_files.append(file)
+        return {"key": "user-123/uploads/invoice.pdf"}
+
+    monkeypatch.setattr(environment, "_upload_file_impl", fake_upload_file_impl)
+    invoice = BytesIO(b"invoice contents")
+    invoice.name = "/tmp/invoice.pdf"
+
+    await Agent(environment=environment).agentic_selector(
+        action={"type": "select_file", "file": invoice},
+        selectors={"tag_name": "input", "type": "file"},
+        fallback_operator_query="Select the invoice file",
+    )
+
+    assert uploaded_files == [invoice]
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_selector",
+        "action": {
+            "type": "selectFile",
+            "file": {
+                "source": "remoteDispatchUpload",
+                "id": "user-123/uploads/invoice.pdf",
+                "filename": "invoice.pdf",
+                "mimeType": "application/pdf",
+            },
+        },
+        "selectors": {
+            "type": {"value": "file"},
+            "tagName": {"value": "input"},
+        },
+        "fallback_operator_query": "Select the invoice file",
     }
 
 

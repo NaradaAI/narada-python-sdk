@@ -308,9 +308,22 @@ class Agent(Generic[_StructuredOutput]):
         the Operator agent if the selectors fail to match a unique element.
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
+
+        For select_file actions, file may be an open local file or an existing file-variable value.
+        Local files are uploaded before the browser action is dispatched.
         """
+        browser_environment = self._browser_environment()
+        normalized_action = action
+        if action["type"] == "select_file":
+            normalized_action = {
+                "type": "select_file",
+                "file": await browser_environment._normalize_input_variables_value_impl(
+                    input_variable_value=action["file"]
+                ),
+            }
+
         request = AgenticSelectorRequest(
-            action=action,
+            action=normalized_action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
             verification_description=verification_description,
@@ -322,7 +335,7 @@ class Agent(Generic[_StructuredOutput]):
             or request.verification_description is not None
             else None
         )
-        result = await self._browser_environment()._run_extension_action(
+        result = await browser_environment._run_extension_action(
             request,
             response_model=response_model,
             timeout=timeout,

@@ -1496,6 +1496,44 @@ async def test_agentic_selector_returns_verification_status(
 
 
 @pytest.mark.asyncio
+async def test_agentic_selector_preserves_file_value_for_select_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    file_value = {
+        "source": "agentStudioAttachment",
+        "id": "file-123",
+        "filename": "invoice.pdf",
+        "mimeType": "application/pdf",
+        "itemId": "workflow-123",
+    }
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).agentic_selector(
+        action={"type": "select_file", "file": file_value},
+        selectors={"tag_name": "input", "type": "file"},
+        fallback_operator_query="Select the invoice file",
+    )
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "selectFile", "file": file_value},
+        "selectors": {
+            "type": {"value": "file"},
+            "tagName": {"value": "input"},
+        },
+        "fallback_operator_query": "Select the invoice file",
+    }
+
+
+@pytest.mark.asyncio
 async def test_agent_user_approval_respects_explicit_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

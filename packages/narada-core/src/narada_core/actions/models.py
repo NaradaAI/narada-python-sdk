@@ -109,6 +109,11 @@ class AgenticSelectorSelectOptionByValueAction(TypedDict):
     value: str
 
 
+class AgenticSelectorSelectFileAction(TypedDict):
+    type: Literal["select_file"]
+    file: Any
+
+
 class AgenticSelectorGetTextAction(TypedDict):
     type: Literal["get_text"]
 
@@ -126,6 +131,7 @@ AgenticSelectorAction = (
     | AgenticSelectorFillAction
     | AgenticSelectorSelectOptionByIndexAction
     | AgenticSelectorSelectOptionByValueAction
+    | AgenticSelectorSelectFileAction
     | AgenticSelectorGetTextAction
     | AgenticSelectorGetPropertyAction
 )
@@ -147,6 +153,8 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
             return {"type": "selectOptionByValue", "value": action["value"]}
+        case "select_file":
+            return {"type": "selectFile", "file": action["file"]}
         case "get_text":
             return {"type": "getText"}
         case "get_property":
