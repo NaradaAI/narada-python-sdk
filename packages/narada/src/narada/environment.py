@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import mimetypes
 import os
 import random
@@ -81,14 +82,13 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
-from narada._logger import get_logger
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
 from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -1810,9 +1810,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     )
 
         except PlaywrightError as error:
-            self._console.print(
-                "\n[bold red]> Playwright error:[/bold red]",
-                error,
+            logger.warning(
+                "Playwright error while waiting for the browser window ID: %s", error
             )
             if restart_on_autoload_failure:
                 raise _BrowserAutoloadRestartRequired(

@@ -15,13 +15,12 @@ module.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from narada_core.actions.models import ExtensionActionRequest
 from pydantic import BaseModel
-
-from ._logger import get_logger
 
 if TYPE_CHECKING:
     # Injected by the frontend JavaScript runtime at worker startup. narada-pyodide is
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
     def _narada_emit_trace_event(event_json: str) -> None: ...
 
 
-logger = get_logger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def now_ms() -> int:
@@ -54,7 +53,7 @@ def emit_trace_event(event: dict[str, Any]) -> None:
     try:
         _narada_emit_trace_event(json.dumps(event, default=str))  # noqa: F821
     except Exception:  # noqa: BLE001 — broad by design; see docstring
-        logger.warning("Trace event emission failed", exc_info=True)
+        _logger.warning("trace event emission failed", exc_info=True)
 
 
 def dump_model(model: BaseModel) -> dict[str, Any]:

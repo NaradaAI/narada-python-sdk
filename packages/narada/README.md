@@ -133,6 +133,34 @@ response = await Agent(environment=env, kind=AgentKind.PRODUCTIVITY).run(
 See the managed and external examples in
 [`examples/04_extending_the_agent/`](examples/04_extending_the_agent/).
 
+## Logging
+
+The SDK logs through standard `logging` loggers named after its modules, such as
+`narada.environment`, all under the `narada` logger. It installs no handlers and leaves levels and
+propagation alone, so Narada records go wherever your application's logging configuration sends
+them. Without any configuration, Python prints warnings and errors to stderr.
+
+To print Narada logs as `[narada.<module>.<function>:<line>] <message>`, call `enable_logging`:
+
+```python
+import logging
+
+import narada
+
+narada.enable_logging(logging.DEBUG)
+```
+
+If your application configures logging itself, Narada records propagate to its handlers. Pass
+`narada.LOG_FORMAT` to your formatter to use the same format there:
+
+```python
+logging.basicConfig(level=logging.INFO, format=narada.LOG_FORMAT)
+logging.getLogger("narada").setLevel(logging.DEBUG)
+```
+
+Use one approach or the other: `enable_logging` adds its own handler, so combining it with root
+handlers prints each Narada record twice.
+
 ## License
 
 This project is licensed under the Apache 2.0 License.

@@ -2,6 +2,7 @@ import asyncio
 import builtins
 import inspect
 import json
+import logging
 import mimetypes
 import os
 import time
@@ -60,7 +61,6 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
-from ._logger import get_logger
 from .google_drive import GoogleDriveClient
 from .retry import pyfetch_with_retries
 from .vector_stores import VectorStoreCatalog
@@ -69,7 +69,7 @@ from .version import __version__
 # Magic variable injected by the frontend runtime that stores the IDs of the current runnables
 # in the stack on the frontend.
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _parent_run_ids() -> list[str]:
