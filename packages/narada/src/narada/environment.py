@@ -2333,10 +2333,9 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         """Create a cloud browser session and initialize the browser extension.
         Retry up to 3 times on error.
 
-        Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
-        Playwright over CDP, opens ``login_url``, and waits for
-        ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
-        interactive prompts and related behavior.
+        Calls ``POST /cloud-browser/create-cloud-browser-session`` with warm reuse enabled.
+        A ready warm browser can be attached over CDP. A cold browser still uses
+        ``login_url`` and waits for ``#narada-browser-window-id``.
         """
         max_attempts = 3
         for attempt in range(max_attempts):
@@ -2370,6 +2369,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             async with session.post(
                 endpoint_url,
                 headers=self._auth_headers,
+                params={"allow_warm_session": "true"},
                 json=request_body,
                 timeout=aiohttp.ClientTimeout(
                     total=180
@@ -2395,13 +2395,26 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._session_id = session_id
         self._cdp_websocket_url = cdp_websocket_url
 
-        # Connect to browser via CDP with authentication headers and log the user in.
-        await self._initialize_cloud_browser_window(
-            cdp_websocket_url=cdp_websocket_url,
-            session_id=session_id,
-            login_url=login_url,
-            cdp_auth_headers=cdp_auth_headers,
-        )
+        browser_window_id = response_data.get("browser_window_id")
+        if browser_window_id is not None:
+            assert self._playwright is not None
+            # Warm session already has an initialized, signed-in browser window.
+            browser = await self._playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=cdp_auth_headers
+            )
+            self._playwright_browser = browser
+            self._context = browser.contexts[0]
+            self._browser_window_id = browser_window_id
+            if self._config.interactive:
+                self._print_success_message(browser_window_id)
+        else:
+            # Cold start: connect to browser via CDP with authentication headers and log the user in.
+            await self._initialize_cloud_browser_window(
+                cdp_websocket_url=cdp_websocket_url,
+                session_id=session_id,
+                login_url=login_url,
+                cdp_auth_headers=cdp_auth_headers,
+            )
 
     @staticmethod
     def _is_non_retryable_initialization_error(error: Exception) -> bool:
