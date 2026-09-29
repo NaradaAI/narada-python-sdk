@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess
+import sys
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -1176,6 +1177,10 @@ async def test_open_initialization_uses_target_only_match(
     fix_download_behavior.assert_awaited_once_with(context, side_panel_match)  # type: ignore[arg-type]
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Launches Chrome with Windows-only subprocess creation flags",
+)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("interactive", [False, True])
 async def test_launch_browser_restarts_once_after_autoload_failure(
