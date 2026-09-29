@@ -161,6 +161,24 @@ logging.getLogger("narada").setLevel(logging.DEBUG)
 Use one approach or the other: `enable_logging` adds its own handler, so combining it with root
 handlers prints each Narada record twice.
 
+### Time profiling
+
+At `DEBUG` level, the SDK logs how long each high-level step took, such as launching Chrome,
+connecting over CDP, waiting for the Narada extension, submitting an agent request, and waiting for
+its result:
+
+```text
+[narada.environment._launch_browser_once:1515] Time profile: action=start phase=launch_chrome outcome=ok elapsed_ms=412
+[narada.environment._initialize_launched_browser:1585] Time profile: action=start phase=connect_cdp attempt=1 outcome=ok elapsed_ms=96
+[narada.environment._ensure_initialized:697] Time profile: action=start phase=total environment=BrowserEnvironment outcome=ok elapsed_ms=6184
+[narada.environment._dispatch_request:1035] Time profile: action=agent_run phase=wait_for_completion request_id=... outcome=ok elapsed_ms=41230
+```
+
+`action` is the SDK operation (`start`, `agent_run`, `extension_action`, or `close`), `phase` is
+the step within it, and `outcome` is `ok` or the name of the exception that ended the step. Each
+record also carries these values as a `narada_time_profile` dictionary attribute for structured log
+handlers.
+
 ## License
 
 This project is licensed under the Apache 2.0 License.
