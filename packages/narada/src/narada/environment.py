@@ -742,7 +742,7 @@ class Environment(ABC):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=self._auth_headers) as resp:
                     if not resp.ok:
-                        logging.warning(
+                        logger.warning(
                             "Failed to fetch SDK config: %s %s",
                             resp.status,
                             await resp.text(),
@@ -751,7 +751,7 @@ class Environment(ABC):
 
                     return _SdkConfig.model_validate(await resp.json())
         except Exception as e:
-            logging.warning("Failed to fetch SDK config: %s", e)
+            logger.warning("Failed to fetch SDK config: %s", e)
             return None
 
     async def _validate_sdk_config(self) -> None:
@@ -1810,9 +1810,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     )
 
         except PlaywrightError as error:
-            self._console.print(
-                "\n[bold red]> Playwright error:[/bold red]",
-                error,
+            logger.warning(
+                "Playwright error while waiting for the browser window ID: %s", error
             )
             if restart_on_autoload_failure:
                 raise _BrowserAutoloadRestartRequired(
@@ -1866,9 +1865,9 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         },
                     },
                 )
-                logging.debug("Browser-level proxy authentication credentials provided")
+                logger.debug("Browser-level proxy authentication credentials provided")
             except Exception as e:
-                logging.error("Failed to respond to proxy auth challenge: %s", e)
+                logger.error("Failed to respond to proxy auth challenge: %s", e)
 
         async def handle_request_paused(params: dict[str, Any]) -> None:
             # Continue all paused requests immediately
@@ -2555,7 +2554,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             except NaradaExtensionMissingError:
                 if attempt == max_attempts - 1:
                     raise
-                logging.info("Waiting for Narada extension to be installed...")
+                logger.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
             except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
@@ -2850,7 +2849,7 @@ async def _find_side_panel_match(
 ) -> _SidePanelMatch | None:
     side_panel_page = _find_page_by_url(browser, side_panel_url)
     if side_panel_page is not None:
-        print("Narada side panel found via Playwright.")  # TODO: remove
+        logger.debug("Narada side panel found via Playwright")
         return _SidePanelMatch(
             page=side_panel_page,
             target_id=None,
@@ -2866,7 +2865,7 @@ async def _find_side_panel_match(
             continue
 
         browser_context_id = target_info.get("browserContextId")
-        print("Narada side panel found via raw CDP.")  # TODO: remove
+        logger.debug("Narada side panel found via raw CDP")
         return _SidePanelMatch(
             page=None,
             target_id=target_id,

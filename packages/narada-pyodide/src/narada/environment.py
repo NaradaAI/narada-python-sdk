@@ -325,14 +325,14 @@ class Environment(ABC):
         try:
             resp = await pyfetch(url, headers=headers)
             if not resp.ok:
-                logging.warning(
+                logger.warning(
                     "Failed to fetch SDK config: %s %s", resp.status, await resp.text()
                 )
                 return None
 
             return _SdkConfig.model_validate(await resp.json())
         except Exception as e:
-            logging.warning("Failed to fetch SDK config: %s", e)
+            logger.warning("Failed to fetch SDK config: %s", e)
             return None
 
     async def _validate_sdk_config(self) -> None:

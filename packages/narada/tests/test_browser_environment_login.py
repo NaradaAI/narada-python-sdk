@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import subprocess
 import sys
 from collections.abc import Callable
@@ -847,6 +848,7 @@ async def test_browser_environment_exhausts_autoload_retries_when_noninteractive
 @pytest.mark.parametrize("restart_on_autoload_failure", [False, True])
 async def test_browser_environment_handles_closed_initialization_page(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     restart_on_autoload_failure: bool,
 ) -> None:
     import narada.environment as environment_module
@@ -876,7 +878,10 @@ async def test_browser_environment_handles_closed_initialization_page(
         if restart_on_autoload_failure
         else SystemExit
     )
-    with pytest.raises(expected_error) as exc_info:
+    with (
+        caplog.at_level(logging.WARNING, logger="narada"),
+        pytest.raises(expected_error) as exc_info,
+    ):
         await env._wait_for_browser_window_id_with_lazy_login(
             AsyncMock(),
             env._config,
@@ -884,16 +889,17 @@ async def test_browser_environment_handles_closed_initialization_page(
             restart_on_autoload_failure=restart_on_autoload_failure,
         )
 
-    assert console_print.call_args_list[0].args == (
-        "\n[bold red]> Playwright error:[/bold red]",
-        playwright_error,
+    [record] = caplog.records
+    assert record.name == "narada.environment"
+    assert record.getMessage() == (
+        "Playwright error while waiting for the browser window ID: page closed"
     )
     if restart_on_autoload_failure:
         assert exc_info.value.__cause__ is playwright_error
-        assert console_print.call_count == 1
+        console_print.assert_not_called()
     else:
         assert exc_info.value.code == 1  # type: ignore[union-attr]
-        assert console_print.call_count == 2
+        console_print.assert_called_once()
         assert "automation page was closed" in console_print.call_args.args[0]
     autoload_used.assert_called_once_with(env._config.extension_id)
 
