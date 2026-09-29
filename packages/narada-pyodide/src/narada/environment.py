@@ -2,7 +2,6 @@ import asyncio
 import builtins
 import inspect
 import json
-import logging
 import mimetypes
 import os
 import time
@@ -61,6 +60,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from ._logger import get_logger
 from .google_drive import GoogleDriveClient
 from .retry import pyfetch_with_retries
 from .vector_stores import VectorStoreCatalog
@@ -69,7 +69,7 @@ from .version import __version__
 # Magic variable injected by the frontend runtime that stores the IDs of the current runnables
 # in the stack on the frontend.
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _parent_run_ids() -> list[str]:
@@ -325,14 +325,14 @@ class Environment(ABC):
         try:
             resp = await pyfetch(url, headers=headers)
             if not resp.ok:
-                logging.warning(
+                logger.warning(
                     "Failed to fetch SDK config: %s %s", resp.status, await resp.text()
                 )
                 return None
 
             return _SdkConfig.model_validate(await resp.json())
         except Exception as e:
-            logging.warning("Failed to fetch SDK config: %s", e)
+            logger.warning("Failed to fetch SDK config: %s", e)
             return None
 
     async def _validate_sdk_config(self) -> None:
