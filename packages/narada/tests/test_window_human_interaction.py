@@ -9,6 +9,8 @@ import pytest
 from narada import Agent, RemoteBrowserEnvironment
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    AgenticSelectorBatchResponse,
+    AgenticSelectorResponse,
     PromptForUserInputVariable,
 )
 
@@ -299,15 +301,20 @@ async def test_agentic_selector_returns_verification_status(
         verification_delay_ms=750,
     )
 
+    assert isinstance(result, AgenticSelectorResponse)
     assert result.value is None
     assert result.verified is False
     assert fake_session.post_bodies[0]["action"] == {
         "name": "agentic_selector",
-        "action": {"type": "click"},
-        "selectors": {
-            "ariaLabel": {"value": "Submit"},
-            "tagName": {"value": "button"},
-        },
+        "actions": [
+            {
+                "action": {"type": "click"},
+                "selectors": {
+                    "ariaLabel": {"value": "Submit"},
+                    "tagName": {"value": "button"},
+                },
+            }
+        ],
         "fallback_operator_query": "Click the submit button",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
@@ -336,9 +343,129 @@ async def test_agentic_selector_omits_blank_verification(
         verification_delay_ms=750,
     )
 
+    assert isinstance(result, AgenticSelectorResponse)
     assert result.verified is None
     assert "verification_description" not in fake_session.post_bodies[0]["action"]
     assert "verification_delay_ms" not in fake_session.post_bodies[0]["action"]
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_returns_values_in_action_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession(
+        [{"status": "success", "data": '{"values":[null,"Done"],"verified":true}'}]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.agentic_selector(
+        actions=[
+            {"action": {"type": "click"}, "selectors": {"tag_name": "button"}},
+            {
+                "action": {"type": "get_text"},
+                "selectors": {"data_testid": "message"},
+                "nth_match": "2",
+            },
+        ],
+        fallback_operator_query="Click the button and read the message",
+        verification_description="The message is visible.",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == [None, "Done"]
+    assert result.verified is True
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_selector",
+        "actions": [
+            {
+                "action": {"type": "click"},
+                "selectors": {"tagName": {"value": "button"}},
+            },
+            {
+                "action": {"type": "getText"},
+                "selectors": {"dataTestId": {"value": "message"}},
+                "nth_match": "2",
+            },
+        ],
+        "fallback_operator_query": "Click the button and read the message",
+        "verification_description": "The message is visible.",
+        "verification_delay_ms": 500,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_with_one_action_normalizes_value_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": '{"value":"Hello"}'}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.agentic_selector(
+        actions=[{"action": {"type": "get_text"}, "selectors": {"id": "title"}}],
+        fallback_operator_query="Read the title",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == ["Hello"]
+    assert result.verified is None
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_with_one_mutation_returns_batch_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": '{"value":null}'}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.agentic_selector(
+        actions=[{"action": {"type": "click"}, "selectors": {"id": "submit"}}],
+        fallback_operator_query="Click submit",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == [None]
+    assert result.verified is None
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_rejects_mixed_and_empty_modes() -> None:
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    with pytest.raises(ValueError, match="either action and selectors"):
+        await agent.agentic_selector(
+            action={"type": "click"},
+            selectors={"id": "button"},
+            actions=[{"action": {"type": "click"}, "selectors": {"id": "button"}}],
+            fallback_operator_query="Click",
+        )
+
+    with pytest.raises(ValueError, match="non-empty actions list"):
+        await agent.agentic_selector(actions=[], fallback_operator_query="Click")
 
 
 @pytest.mark.asyncio

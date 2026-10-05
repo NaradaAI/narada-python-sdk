@@ -11,15 +11,17 @@ from narada_core.actions.models import (
     AgenticMouseActionRequest,
     AgenticMouseActionResponse,
     AgenticSelectorAction,
-    AgenticSelectorRequest,
+    AgenticSelectorBatchRequest,
+    AgenticSelectorBatchResponse,
     AgenticSelectorResponse,
     AgenticSelectors,
+    AgenticSelectorTarget,
     AgentResponse,
     AgentUsage,
-    CloseTabRequest,
-    CloseTabResponse,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
+    CloseTabRequest,
+    CloseTabResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -293,6 +295,7 @@ class Agent(Generic[_StructuredOutput]):
             )
         return self.environment
 
+    @overload
     async def agentic_selector(
         self,
         *,
@@ -301,37 +304,74 @@ class Agent(Generic[_StructuredOutput]):
         fallback_operator_query: str,
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
+        timeout: int | None = 300,
+    ) -> AgenticSelectorResponse: ...
+
+    @overload
+    async def agentic_selector(
+        self,
+        *,
+        actions: list[AgenticSelectorTarget],
+        fallback_operator_query: str,
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
+        timeout: int | None = 300,
+    ) -> AgenticSelectorBatchResponse: ...
+
+    async def agentic_selector(
+        self,
+        *,
+        action: AgenticSelectorAction | None = None,
+        selectors: AgenticSelectors | None = None,
+        actions: list[AgenticSelectorTarget] | None = None,
+        fallback_operator_query: str,
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
-    ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
-        Returns AgenticSelectorResponse with the value for read actions and the verification status
-        when verification_description is provided.
-        """
-        request = AgenticSelectorRequest(
-            action=action,
-            selectors=selectors,
-            fallback_operator_query=fallback_operator_query,
-            verification_description=verification_description,
-            verification_delay_ms=verification_delay_ms,
-        )
-        response_model = (
-            AgenticSelectorResponse
-            if action["type"] in {"get_text", "get_property"}
-            or request.verification_description is not None
-            else None
-        )
-        result = await self._browser_environment()._run_extension_action(
-            request,
-            response_model=response_model,
-            timeout=timeout,
-        )
+    ) -> AgenticSelectorResponse | AgenticSelectorBatchResponse:
+        """Perform one or more selector actions with one shared Operator fallback."""
+        if actions is None and action is not None and selectors is not None:
+            request = AgenticSelectorBatchRequest(
+                actions=[{"action": action, "selectors": selectors}],
+                fallback_operator_query=fallback_operator_query,
+                verification_description=verification_description,
+                verification_delay_ms=verification_delay_ms,
+            )
+            if (
+                action["type"] in {"get_text", "get_property"}
+                or request.verification_description is not None
+            ):
+                response_model = AgenticSelectorResponse
+            else:
+                response_model = None
 
-        if result is None:
-            return AgenticSelectorResponse(value=None)
+            result = await self._browser_environment()._run_extension_action(
+                request,
+                response_model=response_model,
+                timeout=timeout,
+            )
+            if result is None:
+                return AgenticSelectorResponse(value=None)
+            return result
 
-        return result
+        elif actions and action is None and selectors is None:
+            request = AgenticSelectorBatchRequest(
+                actions=actions,
+                fallback_operator_query=fallback_operator_query,
+                verification_description=verification_description,
+                verification_delay_ms=verification_delay_ms,
+            )
+            return await self._browser_environment()._run_extension_action(
+                request,
+                response_model=AgenticSelectorBatchResponse,
+                timeout=timeout,
+            )
+
+        else:
+            raise ValueError(
+                "Provide either action and selectors or a non-empty actions list"
+            )
 
     async def agentic_matching_selectors_finder(
         self,
