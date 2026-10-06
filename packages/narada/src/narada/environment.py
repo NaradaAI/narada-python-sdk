@@ -1502,6 +1502,15 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         # Add proxy arguments if configured.
         if config.proxy is not None:
             config.proxy.validate()
+            if (
+                config.proxy.credentials_secret_arn is not None
+                and not config.proxy.requires_authentication
+            ):
+                raise ValueError(
+                    "credentials_secret_arn is only supported by "
+                    "CloudBrowserEnvironment; "
+                    "local BrowserEnvironment requires proxy username and password"
+                )
             browser_args.append(f"--proxy-server={config.proxy.server}")
 
             if config.proxy.bypass:
@@ -2407,13 +2416,16 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 await asyncio.sleep(retry_backoff_with_jitter)
 
     async def _initialize_once(self) -> None:
-        with log_duration(logger, "start", "start_playwright"):
-            await self._start_playwright()
-        request_body = {
+        request_body: dict[str, Any] = {
             "require_extension": True,
             "session_name": self._session_name,
             "session_timeout": self._session_timeout,
         }
+        if self._config.proxy is not None:
+            request_body["proxy"] = self._config.proxy._cloud_browser_payload()
+
+        with log_duration(logger, "start", "start_playwright"):
+            await self._start_playwright()
         endpoint_url = f"{self._base_url}/cloud-browser/create-cloud-browser-session"
 
         with log_duration(logger, "start", "create_session"):

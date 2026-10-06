@@ -1,6 +1,26 @@
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
+
+_AGENTCORE_DOMAIN_PATTERN = re.compile(
+    r"(\.)?[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+    r"(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*"
+)
+
+
+def _validate_agentcore_bypass_patterns(bypass: str | None) -> list[str]:
+    patterns = [pattern.strip() for pattern in (bypass or "").split(",")]
+    patterns = [pattern for pattern in patterns if pattern]
+    if len(patterns) > 100:
+        raise ValueError("AgentCore Browser allows at most 100 proxy bypass patterns")
+    for pattern in patterns:
+        if len(pattern) > 253 or _AGENTCORE_DOMAIN_PATTERN.fullmatch(pattern) is None:
+            raise ValueError(
+                f"Invalid AgentCore Browser proxy bypass pattern: {pattern!r}"
+            )
+    return patterns
 
 
 def _default_executable_path() -> str:
@@ -22,18 +42,23 @@ def _default_user_data_dir() -> str:
 
 @dataclass
 class ProxyConfig:
-    """Configuration for HTTP/HTTPS/SOCKS5 proxy.
+    """Configuration for local or AgentCore-managed browser proxies.
 
     Args:
-        server: Proxy server URL. HTTP and SOCKS proxies are supported, for example
-                "http://myproxy.com:3128" or "socks5://myproxy.com:3128".
-                Short form "myproxy.com:3128" is considered an HTTP proxy.
+        server: Proxy server URL. Local browsers support HTTP and SOCKS proxies, for
+            example "http://myproxy.com:3128" or "socks5://myproxy.com:3128". Cloud
+            browsers accept an HTTP proxy endpoint ("http://myproxy.com:3128" or
+            "myproxy.com:3128").
         username: Optional username for proxy authentication.
         password: Optional password for proxy authentication.
+        credentials_secret_arn: AWS Secrets Manager secret ARN containing ``username``
+            and ``password`` keys. Used only by ``CloudBrowserEnvironment`` because
+            AgentCore Browser reads proxy credentials from Secrets Manager instead of
+            accepting them inline.
         bypass: Optional comma-separated domains to bypass proxy,
                 for example ".com, chromium.org, .domain.com".
         ignore_cert_errors: If True, ignore SSL certificate errors. Required for proxies that
-                            perform HTTPS inspection (MITM). Use with caution.
+            perform HTTPS inspection (MITM) in local Chrome. Use with caution.
     """
 
     server: str
@@ -41,6 +66,7 @@ class ProxyConfig:
     password: str | None = None
     bypass: str | None = None
     ignore_cert_errors: bool = False
+    credentials_secret_arn: str | None = None
 
     @property
     def requires_authentication(self) -> bool:
@@ -62,6 +88,76 @@ class ProxyConfig:
                 "Both username and password must be provided for proxy authentication, "
                 "or neither should be provided"
             )
+
+        if (
+            self.credentials_secret_arn is not None
+            and not self.credentials_secret_arn.strip()
+        ):
+            raise ValueError("Proxy credentials secret ARN cannot be empty")
+
+    def _cloud_browser_payload(self) -> dict[str, str]:
+        """Return the proxy fields supported by an AgentCore Browser session."""
+        self.validate()
+
+        candidate = self.server.strip()
+        if "://" not in candidate:
+            candidate = f"http://{candidate}"
+
+        try:
+            parsed_server = urlsplit(candidate)
+            port = parsed_server.port
+        except ValueError as error:
+            raise ValueError(
+                "Proxy server must be a valid HTTP host and port"
+            ) from error
+
+        scheme = parsed_server.scheme.lower()
+        if scheme == "https":
+            raise ValueError(
+                "AgentCore Browser proxy settings pass only hostname and port; "
+                "they cannot select TLS to the proxy. Use an HTTP proxy endpoint."
+            )
+        if scheme != "http":
+            raise ValueError(
+                "AgentCore Browser supports HTTP proxy endpoints only; SOCKS "
+                "proxies are supported only by local BrowserEnvironment"
+            )
+        if (
+            not parsed_server.hostname
+            or parsed_server.username
+            or parsed_server.password
+        ):
+            raise ValueError(
+                "Proxy server must contain a host only; configure credentials "
+                "separately"
+            )
+        if (
+            parsed_server.path not in {"", "/"}
+            or parsed_server.query
+            or parsed_server.fragment
+        ):
+            raise ValueError("Proxy server must not include a path, query, or fragment")
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("Proxy server port must be between 1 and 65535")
+        if self.ignore_cert_errors:
+            raise ValueError(
+                "ignore_cert_errors is not supported by CloudBrowserEnvironment "
+                "proxy settings"
+            )
+        if self.requires_authentication and not self.credentials_secret_arn:
+            raise ValueError(
+                "CloudBrowserEnvironment proxy authentication requires "
+                "credentials_secret_arn; "
+                "store the credentials in AWS Secrets Manager"
+            )
+
+        bypass_patterns = _validate_agentcore_bypass_patterns(self.bypass)
+        payload = {"server": self.server.strip()}
+        if self.credentials_secret_arn is not None:
+            payload["credentials_secret_arn"] = self.credentials_secret_arn.strip()
+        if bypass_patterns:
+            payload["bypass"] = ",".join(bypass_patterns)
+        return payload
 
 
 @dataclass
