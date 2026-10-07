@@ -97,6 +97,7 @@ class AgenticSelectorHoverAction(TypedDict):
 class AgenticSelectorFillAction(TypedDict):
     type: Literal["fill"]
     value: str
+    press_enter: NotRequired[bool]
 
 
 class AgenticSelectorSelectOptionByIndexAction(TypedDict):
@@ -142,7 +143,11 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "hover":
             return {"type": "hover"}
         case "fill":
-            return cast(dict[str, Any], action)
+            return {
+                "type": "fill",
+                "value": action["value"],
+                "pressEnter": action.get("press_enter", False),
+            }
         case "select_option_by_index":
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":

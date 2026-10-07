@@ -1,4 +1,4 @@
-name: Format/Lint Pipeline
+name: Checks
 
 permissions:
   contents: read
@@ -31,6 +31,30 @@ jobs:
       - name: Check format
         run: uv run ruff format --check --diff
 
-      # TODO: Enable linting
-      # - name: Lint code
-      #   run: uv run ruff check
+      - name: Lint code
+        run: uv run ruff check
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # narada and narada-pyodide both install the top-level module `narada` and have
+        # same-named test files, so each package's tests run in their own pytest session.
+        package: [narada, narada-pyodide]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Run tests
+        working-directory: packages/${{ matrix.package }}
+        run: uv run --locked pytest tests

@@ -61,6 +61,7 @@ from pyodide.ffi import JsProxy, create_once_callable
 from pyodide.http import pyfetch
 
 from . import _trace
+from ._logging import log_duration
 from .google_drive import GoogleDriveClient
 from .retry import pyfetch_with_retries
 from .vector_stores import VectorStoreCatalog
@@ -296,10 +297,14 @@ class Environment(ABC):
             if self._initialized:
                 return
 
-            if self._validates_sdk_config:
-                await self._validate_sdk_config()
-            await self._initialize()
-            self._initialized = True
+            with log_duration(
+                logger, "start", "total", environment=type(self).__name__
+            ):
+                if self._validates_sdk_config:
+                    with log_duration(logger, "start", "validate_sdk_config"):
+                        await self._validate_sdk_config()
+                await self._initialize()
+                self._initialized = True
 
     @property
     def _validates_sdk_config(self) -> bool:
@@ -309,7 +314,8 @@ class Environment(ABC):
         pass
 
     async def close(self, *, timeout: int | None = None) -> None:
-        await self._close_impl(timeout=timeout)
+        with log_duration(logger, "close", "total", environment=type(self).__name__):
+            await self._close_impl(timeout=timeout)
 
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         pass
@@ -325,14 +331,14 @@ class Environment(ABC):
         try:
             resp = await pyfetch(url, headers=headers)
             if not resp.ok:
-                logging.warning(
+                logger.warning(
                     "Failed to fetch SDK config: %s %s", resp.status, await resp.text()
                 )
                 return None
 
             return _SdkConfig.model_validate(await resp.json())
         except Exception as e:
-            logging.warning("Failed to fetch SDK config: %s", e)
+            logger.warning("Failed to fetch SDK config: %s", e)
             return None
 
     async def _validate_sdk_config(self) -> None:
@@ -608,104 +614,111 @@ class Environment(ABC):
             signal = controller.signal
 
             setTimeout(create_once_callable(controller.abort), timeout * 1000)
-            fetch_response = await pyfetch(
-                f"{self._base_url}/remote-dispatch",
-                method="POST",
-                headers=headers,
-                body=json.dumps(body),
-                signal=signal,
-            )
-
-            if not fetch_response.ok:
-                status = fetch_response.status
-                text = await fetch_response.text()
-                raise NaradaError(f"Failed to dispatch request: {status} {text}")
-
-            request_id = (await fetch_response.json())["requestId"]
-
-            while (now := time.monotonic()) < deadline:
-                abort_controller = AbortController.new()
-                signal = abort_controller.signal
-
-                setTimeout(
-                    create_once_callable(abort_controller.abort),
-                    (deadline - now) * 1000,
-                )
-                fetch_response = await pyfetch_with_retries(
-                    f"{self._base_url}/remote-dispatch/responses/{request_id}",
+            with log_duration(logger, "agent_run", "submit"):
+                fetch_response = await pyfetch(
+                    f"{self._base_url}/remote-dispatch",
+                    method="POST",
                     headers=headers,
+                    body=json.dumps(body),
                     signal=signal,
-                    retry_deadline=deadline,
                 )
 
                 if not fetch_response.ok:
                     status = fetch_response.status
                     text = await fetch_response.text()
-                    raise NaradaError(f"Failed to poll for response: {status} {text}")
+                    raise NaradaError(f"Failed to dispatch request: {status} {text}")
 
-                response: _RemoteDispatchPollResponse = await fetch_response.json()
-                response["requestId"] = request_id
+                request_id = (await fetch_response.json())["requestId"]
 
-                if response["completedAt"] is None:
-                    await _notify_input_required_callback(
-                        on_input_required,
-                        response,
-                        seen_input_ids,
+            with log_duration(
+                logger, "agent_run", "wait_for_completion", request_id=request_id
+            ):
+                while (now := time.monotonic()) < deadline:
+                    abort_controller = AbortController.new()
+                    signal = abort_controller.signal
+
+                    setTimeout(
+                        create_once_callable(abort_controller.abort),
+                        (deadline - now) * 1000,
                     )
-                    # Poll every 3 seconds.
-                    await asyncio.sleep(3)
-                    continue
+                    fetch_response = await pyfetch_with_retries(
+                        f"{self._base_url}/remote-dispatch/responses/{request_id}",
+                        headers=headers,
+                        signal=signal,
+                        retry_deadline=deadline,
+                    )
 
-                response_content = response["response"]
-                if response_content is not None:
-                    # Populate the `structuredOutput` field. This is a client-side field
-                    # that's not directly returned by the API.
-                    output_data = response_content.get("output")
-                    if (
-                        output_schema is not None
-                        and output_data is not None
-                        and output_data.get("type") == "structured"
-                    ):
-                        response_content["structuredOutput"] = (
-                            output_schema.model_validate(output_data["content"])
+                    if not fetch_response.ok:
+                        status = fetch_response.status
+                        text = await fetch_response.text()
+                        raise NaradaError(
+                            f"Failed to poll for response: {status} {text}"
                         )
-                    else:
-                        response_content["structuredOutput"] = None
 
-                trace_status = cast(_trace.SubAgentCallStatus, response["status"])
-                trace_error: str | None = (
-                    response_content.get("text")
-                    if response["status"] == "error" and response_content is not None
-                    else None
-                )
-                trace_text: str | None = (
-                    response_content.get("text")
-                    if response["status"] in ("success", "input-required")
-                    and response_content is not None
-                    else None
-                )
-                _trace.emit_sub_agent_call(
-                    ts_start=trace_start_ms,
-                    agent_type=agent_type_str,
-                    prompt=prompt,
-                    status=trace_status,
-                    request_id=request_id,
-                    text=trace_text,
-                    error_message=trace_error,
-                    action_trace_raw=(
-                        response_content.get("actionTrace")
-                        if response_content is not None
+                    response: _RemoteDispatchPollResponse = await fetch_response.json()
+                    response["requestId"] = request_id
+
+                    if response["completedAt"] is None:
+                        await _notify_input_required_callback(
+                            on_input_required,
+                            response,
+                            seen_input_ids,
+                        )
+                        # Poll every 3 seconds.
+                        await asyncio.sleep(3)
+                        continue
+
+                    response_content = response["response"]
+                    if response_content is not None:
+                        # Populate the `structuredOutput` field. This is a client-side field
+                        # that's not directly returned by the API.
+                        output_data = response_content.get("output")
+                        if (
+                            output_schema is not None
+                            and output_data is not None
+                            and output_data.get("type") == "structured"
+                        ):
+                            response_content["structuredOutput"] = (
+                                output_schema.model_validate(output_data["content"])
+                            )
+                        else:
+                            response_content["structuredOutput"] = None
+
+                    trace_status = cast(_trace.SubAgentCallStatus, response["status"])
+                    trace_error: str | None = (
+                        response_content.get("text")
+                        if response["status"] == "error"
+                        and response_content is not None
                         else None
-                    ),
-                    execution_trace_context=(
-                        response_content.get("executionTraceContext")
-                        if response_content is not None
+                    )
+                    trace_text: str | None = (
+                        response_content.get("text")
+                        if response["status"] in ("success", "input-required")
+                        and response_content is not None
                         else None
-                    ),
-                )
-                return cast(Response, response)
-            else:
-                raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+                    )
+                    _trace.emit_sub_agent_call(
+                        ts_start=trace_start_ms,
+                        agent_type=agent_type_str,
+                        prompt=prompt,
+                        status=trace_status,
+                        request_id=request_id,
+                        text=trace_text,
+                        error_message=trace_error,
+                        action_trace_raw=(
+                            response_content.get("actionTrace")
+                            if response_content is not None
+                            else None
+                        ),
+                        execution_trace_context=(
+                            response_content.get("executionTraceContext")
+                            if response_content is not None
+                            else None
+                        ),
+                    )
+                    return cast(Response, response)
+                else:
+                    raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE:
             _trace.emit_sub_agent_call(
@@ -803,31 +816,34 @@ class Environment(ABC):
             if timeout is not None:
                 body["timeout"] = timeout
 
-            fetch_response = await pyfetch(
-                f"{self._base_url}/extension-actions",
-                method="POST",
-                headers=headers,
-                body=json.dumps(body),
-                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
-            )
+            with log_duration(logger, "extension_action", request.name):
+                fetch_response = await pyfetch(
+                    f"{self._base_url}/extension-actions",
+                    method="POST",
+                    headers=headers,
+                    body=json.dumps(body),
+                    # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+                )
 
-            if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
-                raise NaradaTimeoutError
-            elif not fetch_response.ok:
-                status = fetch_response.status
-                text = await fetch_response.text()
-                raise NaradaError(f"Failed to run extension action: {status} {text}")
+                if fetch_response.status == HTTPStatus.GATEWAY_TIMEOUT:
+                    raise NaradaTimeoutError
+                elif not fetch_response.ok:
+                    status = fetch_response.status
+                    text = await fetch_response.text()
+                    raise NaradaError(
+                        f"Failed to run extension action: {status} {text}"
+                    )
 
-            resp_json = await fetch_response.json()
+                resp_json = await fetch_response.json()
 
-            response = ExtensionActionResponse.model_validate(resp_json)
-            workflow_trace = getattr(response, "workflowTrace", None)
-            if workflow_trace is not None:
-                _trace.emit_sub_workflow(workflow_trace=workflow_trace)
-            if response.status == "error":
-                raise NaradaError(response.error)
-            if response.status == "aborted":
-                raise UserAbortedError
+                response = ExtensionActionResponse.model_validate(resp_json)
+                workflow_trace = getattr(response, "workflowTrace", None)
+                if workflow_trace is not None:
+                    _trace.emit_sub_workflow(workflow_trace=workflow_trace)
+                if response.status == "error":
+                    raise NaradaError(response.error)
+                if response.status == "aborted":
+                    raise UserAbortedError
 
             if response_model is None:
                 _trace.emit_extension_action(
@@ -1029,13 +1045,14 @@ class CloudBrowserEnvironment(BaseBrowserEnvironment):
         return self._session_id
 
     async def _initialize(self) -> None:
-        response_data = await _create_and_initialize_cloud_browser_session(
-            base_url=self._base_url,
-            auth_headers=await self._get_auth_headers(),
-            session_name=self._session_name,
-            session_timeout=self._session_timeout,
-            require_extension=True,
-        )
+        with log_duration(logger, "start", "create_session"):
+            response_data = await _create_and_initialize_cloud_browser_session(
+                base_url=self._base_url,
+                auth_headers=await self._get_auth_headers(),
+                session_name=self._session_name,
+                session_timeout=self._session_timeout,
+                require_extension=True,
+            )
         self._browser_window_id = response_data["browser_window_id"]
         self._session_id = response_data["session_id"]
 
@@ -1103,13 +1120,14 @@ class LambdaEnvironment(Environment):
         return self._browser_window_id
 
     async def _initialize(self) -> None:
-        response_data = await _create_and_initialize_cloud_browser_session(
-            base_url=self._base_url,
-            auth_headers=await self._get_auth_headers(),
-            session_name=self._session_name,
-            session_timeout=self._session_timeout,
-            require_extension=False,
-        )
+        with log_duration(logger, "start", "create_session"):
+            response_data = await _create_and_initialize_cloud_browser_session(
+                base_url=self._base_url,
+                auth_headers=await self._get_auth_headers(),
+                session_name=self._session_name,
+                session_timeout=self._session_timeout,
+                require_extension=False,
+            )
         self._browser_window_id = response_data["browser_window_id"]
         self._session_id = response_data["session_id"]
 

@@ -82,6 +82,7 @@ from playwright.async_api._context_manager import PlaywrightContextManager
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
+from narada._logging import log_duration
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
@@ -693,21 +694,25 @@ class Environment(ABC):
             if self._initialized:
                 return
 
-            try:
-                if self._validates_sdk_config:
-                    await self._validate_sdk_config()
-                await self._initialize()
-                # Commit initialization before the first cleanup await so cancellation
-                # cannot make a successfully created browser look uninitialized.
-                self._initialized = True
-            finally:
+            with log_duration(
+                logger, "start", "total", environment=type(self).__name__
+            ):
                 try:
-                    await self._detach()
-                except Exception:
-                    logger.warning(
-                        "Failed to detach environment resources after initialization",
-                        exc_info=True,
-                    )
+                    if self._validates_sdk_config:
+                        with log_duration(logger, "start", "validate_sdk_config"):
+                            await self._validate_sdk_config()
+                    await self._initialize()
+                    # Commit initialization before the first cleanup await so cancellation
+                    # cannot make a successfully created browser look uninitialized.
+                    self._initialized = True
+                finally:
+                    try:
+                        await self._detach()
+                    except Exception:
+                        logger.warning(
+                            "Failed to detach environment resources after initialization",
+                            exc_info=True,
+                        )
 
     def _acquire_initialization_lock(self) -> asyncio.Lock:
         if self._init_lock is None:
@@ -723,7 +728,10 @@ class Environment(ABC):
 
     async def close(self, *, timeout: int | None = None) -> None:
         async with self._acquire_initialization_lock():
-            await self._close_impl(timeout=timeout)
+            with log_duration(
+                logger, "close", "total", environment=type(self).__name__
+            ):
+                await self._close_impl(timeout=timeout)
 
     async def _close_impl(self, *, timeout: int | None = None) -> None:
         pass
@@ -742,7 +750,7 @@ class Environment(ABC):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=self._auth_headers) as resp:
                     if not resp.ok:
-                        logging.warning(
+                        logger.warning(
                             "Failed to fetch SDK config: %s %s",
                             resp.status,
                             await resp.text(),
@@ -751,7 +759,7 @@ class Environment(ABC):
 
                     return _SdkConfig.model_validate(await resp.json())
         except Exception as e:
-            logging.warning("Failed to fetch SDK config: %s", e)
+            logger.warning("Failed to fetch SDK config: %s", e)
             return None
 
     async def _validate_sdk_config(self) -> None:
@@ -978,7 +986,8 @@ class Environment(ABC):
             body["additionalContext"] = additional_context
         if attachment is not None:
             if self._is_uploadable_file(attachment):
-                body["attachment"] = await self._upload_file_impl(file=attachment)
+                with log_duration(logger, "agent_run", "upload_attachment"):
+                    body["attachment"] = await self._upload_file_impl(file=attachment)
             else:
                 body["attachment"] = attachment
         if user_resource_credentials is not None:
@@ -995,9 +1004,10 @@ class Environment(ABC):
         if secret_variables is not None:
             body["secretVariables"] = secret_variables
         if input_variables is not None:
-            body["inputVariables"] = await self._normalize_input_variables(
-                input_variables=input_variables
-            )
+            with log_duration(logger, "agent_run", "upload_input_variables"):
+                body["inputVariables"] = await self._normalize_input_variables(
+                    input_variables=input_variables
+                )
         if critic_context is not None:
             body["criticContext"] = critic_context
         if callback_url is not None:
@@ -1012,55 +1022,59 @@ class Environment(ABC):
         try:
             seen_input_ids: set[str] = set()
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self._base_url}/remote-dispatch",
-                    headers=self._auth_headers,
-                    json=body,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as resp:
-                    resp.raise_for_status()
-                    request_id = (await resp.json())["requestId"]
-
-                while (now := time.monotonic()) < deadline:
-                    async with session.get(
-                        f"{self._base_url}/remote-dispatch/responses/{request_id}",
+                with log_duration(logger, "agent_run", "submit"):
+                    async with session.post(
+                        f"{self._base_url}/remote-dispatch",
                         headers=self._auth_headers,
-                        timeout=aiohttp.ClientTimeout(total=deadline - now),
+                        json=body,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
                     ) as resp:
                         resp.raise_for_status()
-                        response: _RemoteDispatchPollResponse = await resp.json()
+                        request_id = (await resp.json())["requestId"]
 
-                    response["requestId"] = request_id
+                with log_duration(
+                    logger, "agent_run", "wait_for_completion", request_id=request_id
+                ):
+                    while (now := time.monotonic()) < deadline:
+                        async with session.get(
+                            f"{self._base_url}/remote-dispatch/responses/{request_id}",
+                            headers=self._auth_headers,
+                            timeout=aiohttp.ClientTimeout(total=deadline - now),
+                        ) as resp:
+                            resp.raise_for_status()
+                            response: _RemoteDispatchPollResponse = await resp.json()
 
-                    if response["completedAt"] is None:
-                        await _notify_input_required_callback(
-                            on_input_required,
-                            response,
-                            seen_input_ids,
-                        )
-                        # Poll every 3 seconds.
-                        await asyncio.sleep(3)
-                        continue
+                        response["requestId"] = request_id
 
-                    response_content = response["response"]
-                    if response_content is not None:
-                        # Populate the `structuredOutput` field. This is a client-side field
-                        # that's not directly returned by the API.
-                        output_data = response_content.get("output")
-                        if (
-                            output_schema is not None
-                            and output_data is not None
-                            and output_data.get("type") == "structured"
-                        ):
-                            response_content["structuredOutput"] = (
-                                output_schema.model_validate(output_data["content"])
+                        if response["completedAt"] is None:
+                            await _notify_input_required_callback(
+                                on_input_required,
+                                response,
+                                seen_input_ids,
                             )
-                        else:
-                            response_content["structuredOutput"] = None
+                            # Poll every 3 seconds.
+                            await asyncio.sleep(3)
+                            continue
 
-                    return cast(Response, response)
-                else:
-                    raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+                        response_content = response["response"]
+                        if response_content is not None:
+                            # Populate the `structuredOutput` field. This is a client-side field
+                            # that's not directly returned by the API.
+                            output_data = response_content.get("output")
+                            if (
+                                output_schema is not None
+                                and output_data is not None
+                                and output_data.get("type") == "structured"
+                            ):
+                                response_content["structuredOutput"] = (
+                                    output_schema.model_validate(output_data["content"])
+                                )
+                            else:
+                                response_content["structuredOutput"] = None
+
+                        return cast(Response, response)
+                    else:
+                        raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
@@ -1111,23 +1125,24 @@ class Environment(ABC):
         if timeout is not None:
             body["timeout"] = timeout
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self._base_url}/extension-actions",
-                headers=self._auth_headers,
-                json=body,
-                # Don't specify `timeout` here as the (soft) timeout is handled by the server.
-            ) as resp:
-                if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
-                    raise NaradaTimeoutError
-                resp.raise_for_status()
-                resp_json = await resp.json()
+        with log_duration(logger, "extension_action", request.name):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self._base_url}/extension-actions",
+                    headers=self._auth_headers,
+                    json=body,
+                    # Don't specify `timeout` here as the (soft) timeout is handled by the server.
+                ) as resp:
+                    if resp.status == HTTPStatus.GATEWAY_TIMEOUT:
+                        raise NaradaTimeoutError
+                    resp.raise_for_status()
+                    resp_json = await resp.json()
 
-        response = ExtensionActionResponse.model_validate(resp_json)
-        if response.status == "error":
-            raise NaradaError(response.error)
-        if response.status == "aborted":
-            raise UserAbortedError
+            response = ExtensionActionResponse.model_validate(resp_json)
+            if response.status == "error":
+                raise NaradaError(response.error)
+            if response.status == "aborted":
+                raise UserAbortedError
 
         if response_model is None:
             return None
@@ -1269,7 +1284,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         )
 
     async def _initialize(self) -> None:
-        await self._start_playwright()
+        with log_duration(logger, "start", "start_playwright"):
+            await self._start_playwright()
         if self._attach_to_existing:
             await self._initialize_in_existing_browser_window()
         else:
@@ -1338,14 +1354,16 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
     async def _open_and_initialize_browser_window(self) -> None:
         assert self._playwright is not None
-        launch_browser_result = await self._launch_browser(
-            self._playwright, self._config
-        )
+        with log_duration(logger, "start", "launch_browser"):
+            launch_browser_result = await self._launch_browser(
+                self._playwright, self._config
+            )
 
-        await self._fix_download_behavior(
-            launch_browser_result.browser_context,
-            launch_browser_result.side_panel_match,
-        )
+        with log_duration(logger, "start", "fix_download_behavior"):
+            await self._fix_download_behavior(
+                launch_browser_result.browser_context,
+                launch_browser_result.side_panel_match,
+            )
 
         self._browser_process_id = launch_browser_result.browser_process_id
         self._browser_window_id = launch_browser_result.browser_window_id
@@ -1367,7 +1385,10 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 "Chrome. Use `BrowserEnvironment` without `attach_to_existing` instead."
             )
 
-        browser = await self._playwright.chromium.connect_over_cdp(self._config.cdp_url)
+        with log_duration(logger, "start", "connect_cdp"):
+            browser = await self._playwright.chromium.connect_over_cdp(
+                self._config.cdp_url
+            )
 
         # Generate a unique tag for the initialization URL
         window_tag = uuid4().hex
@@ -1375,31 +1396,38 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
-        initialization_page = await context.new_page()
-        await _BrowserInitializationHelper.install_browser_window_id_observer(
-            initialization_page
-        )
-        await initialization_page.goto(tagged_initialization_url)
+        with log_duration(logger, "start", "open_initialization_page"):
+            initialization_page = await context.new_page()
+            await _BrowserInitializationHelper.install_browser_window_id_observer(
+                initialization_page
+            )
+            await initialization_page.goto(tagged_initialization_url)
 
-        browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
-            initialization_page,
-            self._config,
-            tagged_initialization_url,
-        )
+        with log_duration(logger, "start", "wait_for_browser_window_id"):
+            browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
+                initialization_page,
+                self._config,
+                tagged_initialization_url,
+            )
 
         # Playwright seems unable to pick up the side panel page that is automatically opened by the
         # initialization page. We need to establish a new CDP connection to the browser *after* the
         # side panel page is opened for Playwright to see it.
-        await browser.close()
-        browser = await self._playwright.chromium.connect_over_cdp(self._config.cdp_url)
-        context = browser.contexts[0]
+        with log_duration(logger, "start", "reconnect_cdp"):
+            await browser.close()
+            browser = await self._playwright.chromium.connect_over_cdp(
+                self._config.cdp_url
+            )
+            context = browser.contexts[0]
 
         side_panel_url = create_side_panel_url(self._config, browser_window_id)
-        side_panel_match = await _find_side_panel_match(browser, side_panel_url)
+        with log_duration(logger, "start", "find_side_panel"):
+            side_panel_match = await _find_side_panel_match(browser, side_panel_url)
         if side_panel_match is None:
             raise NaradaTimeoutError("Timed out waiting for Narada side panel page")
 
-        await self._fix_download_behavior(context, side_panel_match)
+        with log_duration(logger, "start", "fix_download_behavior"):
+            await self._fix_download_behavior(context, side_panel_match)
 
         if self._config.interactive:
             self._print_success_message(browser_window_id)
@@ -1484,24 +1512,25 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
         # Launch an independent browser process which will not be killed when the current program
         # exits.
-        if sys.platform == "win32":
-            browser_process = subprocess.Popen(
-                [config.executable_path, *browser_args],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.DETACHED_PROCESS,
-            )
-        else:
-            browser_process = await asyncio.create_subprocess_exec(
-                config.executable_path,
-                *browser_args,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        with log_duration(logger, "start", "launch_chrome"):
+            if sys.platform == "win32":
+                browser_process = subprocess.Popen(
+                    [config.executable_path, *browser_args],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS,
+                )
+            else:
+                browser_process = await asyncio.create_subprocess_exec(
+                    config.executable_path,
+                    *browser_args,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    start_new_session=True,
+                )
 
         try:
             return await self._initialize_launched_browser(
@@ -1516,11 +1545,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             if not restart_on_autoload_failure:
                 raise
 
-            await self._close_browser_for_autoload_restart(
-                playwright,
-                config,
-                cast(subprocess.Popen[bytes], browser_process),
-            )
+            with log_duration(logger, "start", "close_browser_for_restart"):
+                await self._close_browser_for_autoload_restart(
+                    playwright,
+                    config,
+                    cast(subprocess.Popen[bytes], browser_process),
+                )
             raise
 
     async def _initialize_launched_browser(
@@ -1552,7 +1582,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
         for attempt in range(max_cdp_connect_attempts):
             try:
-                browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
+                with log_duration(logger, "start", "connect_cdp", attempt=attempt + 1):
+                    browser = await playwright.chromium.connect_over_cdp(config.cdp_url)
             except Exception:
                 # The browser process might not be immediately ready to accept CDP connections.
                 # Retry a few times before giving up.
@@ -1565,7 +1596,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
             if browser_window_id is not None:
                 side_panel_url = create_side_panel_url(config, browser_window_id)
-                side_panel_match = await _find_side_panel_match(browser, side_panel_url)
+                with log_duration(
+                    logger, "start", "find_side_panel", attempt=attempt + 1
+                ):
+                    side_panel_match = await _find_side_panel_match(
+                        browser, side_panel_url
+                    )
                 if side_panel_match is not None:
                     break
 
@@ -1607,14 +1643,20 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             )
             if initialization_page is not None:
                 try:
-                    browser_window_id = (
-                        await self._wait_for_browser_window_id_with_lazy_login(
-                            initialization_page,
-                            config,
-                            tagged_initialization_url,
-                            restart_on_autoload_failure=restart_on_autoload_failure,
+                    with log_duration(
+                        logger,
+                        "start",
+                        "wait_for_browser_window_id",
+                        attempt=attempt + 1,
+                    ):
+                        browser_window_id = (
+                            await self._wait_for_browser_window_id_with_lazy_login(
+                                initialization_page,
+                                config,
+                                tagged_initialization_url,
+                                restart_on_autoload_failure=restart_on_autoload_failure,
+                            )
                         )
-                    )
                 except NaradaTimeoutError:
                     browser_window_id_timeout_count += 1
                     if (
@@ -1639,7 +1681,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                     continue
 
                 side_panel_url = create_side_panel_url(config, browser_window_id)
-                side_panel_match = await _find_side_panel_match(browser, side_panel_url)
+                with log_duration(
+                    logger, "start", "find_side_panel", attempt=attempt + 1
+                ):
+                    side_panel_match = await _find_side_panel_match(
+                        browser, side_panel_url
+                    )
                 if side_panel_match is not None:
                     break
 
@@ -1799,20 +1846,22 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "credentials...[/bold blue]\n",
                         )
 
-                    custom_token = await self._fetch_browser_login_token()
-                    await initialization_page.goto(
-                        _with_query_params(
-                            initialization_url,
-                            {"customToken": custom_token},
-                        ),
-                        timeout=15_000,
-                        wait_until="domcontentloaded",
-                    )
+                    with log_duration(
+                        logger, "start", "sign_in", attempt=login_attempts
+                    ):
+                        custom_token = await self._fetch_browser_login_token()
+                        await initialization_page.goto(
+                            _with_query_params(
+                                initialization_url,
+                                {"customToken": custom_token},
+                            ),
+                            timeout=15_000,
+                            wait_until="domcontentloaded",
+                        )
 
         except PlaywrightError as error:
-            self._console.print(
-                "\n[bold red]> Playwright error:[/bold red]",
-                error,
+            logger.warning(
+                "Playwright error while waiting for the browser window ID: %s", error
             )
             if restart_on_autoload_failure:
                 raise _BrowserAutoloadRestartRequired(
@@ -1866,9 +1915,9 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         },
                     },
                 )
-                logging.debug("Browser-level proxy authentication credentials provided")
+                logger.debug("Browser-level proxy authentication credentials provided")
             except Exception as e:
-                logging.error("Failed to respond to proxy auth challenge: %s", e)
+                logger.error("Failed to respond to proxy auth challenge: %s", e)
 
         async def handle_request_paused(params: dict[str, Any]) -> None:
             # Continue all paused requests immediately
@@ -2358,7 +2407,8 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 await asyncio.sleep(retry_backoff_with_jitter)
 
     async def _initialize_once(self) -> None:
-        await self._start_playwright()
+        with log_duration(logger, "start", "start_playwright"):
+            await self._start_playwright()
         request_body = {
             "require_extension": True,
             "session_name": self._session_name,
@@ -2366,27 +2416,28 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         }
         endpoint_url = f"{self._base_url}/cloud-browser/create-cloud-browser-session"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                endpoint_url,
-                headers=self._auth_headers,
-                json=request_body,
-                timeout=aiohttp.ClientTimeout(
-                    total=180
-                ),  # 3 minutes for session startup
-            ) as resp:
-                if not resp.ok:
-                    error_text = await resp.text()
-                    err = RuntimeError(
-                        f"Failed to create cloud browser session: {resp.status} {error_text}\n"
-                        f"Endpoint URL: {endpoint_url}"
-                    )
-                    err.status_code = resp.status  # type: ignore[attr-defined]
-                    if resp.status == HTTPStatus.FORBIDDEN:
-                        error = ApiErrorPayload.from_error_text(error_text)
-                        err.detail = error.detail  # type: ignore[attr-defined]
-                    raise err
-                response_data = await resp.json()
+        with log_duration(logger, "start", "create_session"):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint_url,
+                    headers=self._auth_headers,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(
+                        total=180
+                    ),  # 3 minutes for session startup
+                ) as resp:
+                    if not resp.ok:
+                        error_text = await resp.text()
+                        err = RuntimeError(
+                            f"Failed to create cloud browser session: {resp.status} {error_text}\n"
+                            f"Endpoint URL: {endpoint_url}"
+                        )
+                        err.status_code = resp.status  # type: ignore[attr-defined]
+                        if resp.status == HTTPStatus.FORBIDDEN:
+                            error = ApiErrorPayload.from_error_text(error_text)
+                            err.detail = error.detail  # type: ignore[attr-defined]
+                        raise err
+                    response_data = await resp.json()
 
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
@@ -2509,9 +2560,10 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         assert self._playwright is not None
 
         # Connect to browser via CDP with authentication headers
-        browser = await self._playwright.chromium.connect_over_cdp(
-            cdp_websocket_url, headers=cdp_auth_headers
-        )
+        with log_duration(logger, "start", "connect_cdp"):
+            browser = await self._playwright.chromium.connect_over_cdp(
+                cdp_websocket_url, headers=cdp_auth_headers
+            )
         self._playwright_browser = browser
 
         # Navigate to login URL (provided by backend with custom token)
@@ -2534,28 +2586,32 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                     }})();
                 """
             )
-        await _BrowserInitializationHelper.install_browser_window_id_observer(
-            initialization_page
-        )
-        await initialization_page.goto(
-            login_url, timeout=15_000, wait_until="domcontentloaded"
-        )
+        with log_duration(logger, "start", "open_login_page"):
+            await _BrowserInitializationHelper.install_browser_window_id_observer(
+                initialization_page
+            )
+            await initialization_page.goto(
+                login_url, timeout=15_000, wait_until="domcontentloaded"
+            )
 
         # Wait for browser window ID. The extension can take a bit to be installed, so we retry a
         # few times.
         max_attempts = 10
         for attempt in range(max_attempts):
             try:
-                browser_window_id = await self._wait_for_cloud_browser_window_id(
-                    initialization_page,
-                    self._config,
-                    timeout=30_000,
-                )
+                with log_duration(
+                    logger, "start", "wait_for_browser_window_id", attempt=attempt + 1
+                ):
+                    browser_window_id = await self._wait_for_cloud_browser_window_id(
+                        initialization_page,
+                        self._config,
+                        timeout=30_000,
+                    )
                 break
             except NaradaExtensionMissingError:
                 if attempt == max_attempts - 1:
                     raise
-                logging.info("Waiting for Narada extension to be installed...")
+                logger.info("Waiting for Narada extension to be installed...")
                 await asyncio.sleep(1)
             except (NaradaTimeoutError, NaradaExtensionUnauthenticatedError):
                 if attempt == max_attempts - 1:
@@ -2663,30 +2719,31 @@ class LambdaEnvironment(Environment):
             "session_name": self._session_name,
             "session_timeout": self._session_timeout,
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                endpoint_url,
-                headers=self._auth_headers,
-                json=request_body,
-                timeout=aiohttp.ClientTimeout(total=180),
-            ) as resp:
-                if not resp.ok:
-                    error_text = await resp.text()
-                    if resp.status == HTTPStatus.FORBIDDEN:
-                        error = ApiErrorPayload.from_error_text(error_text)
-                        err = RuntimeError(
+        with log_duration(logger, "start", "create_session"):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint_url,
+                    headers=self._auth_headers,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(total=180),
+                ) as resp:
+                    if not resp.ok:
+                        error_text = await resp.text()
+                        if resp.status == HTTPStatus.FORBIDDEN:
+                            error = ApiErrorPayload.from_error_text(error_text)
+                            err = RuntimeError(
+                                f"Failed to create lambda environment: {resp.status} {error_text}\n"
+                                f"Endpoint URL: {endpoint_url}"
+                            )
+                            # type: ignore[attr-defined]
+                            err.status_code = resp.status
+                            err.detail = error.detail  # type: ignore[attr-defined]
+                            raise err
+                        raise RuntimeError(
                             f"Failed to create lambda environment: {resp.status} {error_text}\n"
                             f"Endpoint URL: {endpoint_url}"
                         )
-                        # type: ignore[attr-defined]
-                        err.status_code = resp.status
-                        err.detail = error.detail  # type: ignore[attr-defined]
-                        raise err
-                    raise RuntimeError(
-                        f"Failed to create lambda environment: {resp.status} {error_text}\n"
-                        f"Endpoint URL: {endpoint_url}"
-                    )
-                response_data = await resp.json()
+                    response_data = await resp.json()
 
         self._browser_window_id = response_data["browser_window_id"]
         self._session_id = response_data["session_id"]
@@ -2850,7 +2907,7 @@ async def _find_side_panel_match(
 ) -> _SidePanelMatch | None:
     side_panel_page = _find_page_by_url(browser, side_panel_url)
     if side_panel_page is not None:
-        print("Narada side panel found via Playwright.")  # TODO: remove
+        logger.debug("Narada side panel found via Playwright")
         return _SidePanelMatch(
             page=side_panel_page,
             target_id=None,
@@ -2866,7 +2923,7 @@ async def _find_side_panel_match(
             continue
 
         browser_context_id = target_info.get("browserContextId")
-        print("Narada side panel found via raw CDP.")  # TODO: remove
+        logger.debug("Narada side panel found via raw CDP")
         return _SidePanelMatch(
             page=None,
             target_id=target_id,
