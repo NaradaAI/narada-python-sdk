@@ -341,7 +341,7 @@ async def test_agentic_selector_serializes_press_enter_for_fill(
         fallback_operator_query="Fill the search box and press Enter",
     )
 
-    assert fake_session.post_bodies[0]["action"]["action"] == {
+    assert fake_session.post_bodies[0]["action"]["actions"][0]["action"] == {
         "type": "fill",
         "value": "Narada AI",
         "pressEnter": True,
