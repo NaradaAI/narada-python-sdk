@@ -9,6 +9,10 @@ _AGENTCORE_DOMAIN_PATTERN = re.compile(
     r"(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*"
 )
 _AGENTCORE_DEFAULT_PROXY_BYPASS_PATTERNS = (".narada.ai",)
+# AgentCore Browser's documented proxy credential character sets.
+_PROXY_USERNAME_PATTERN = re.compile(r"[a-zA-Z0-9@._+=-]+")
+_PROXY_PASSWORD_PATTERN = re.compile(r"[a-zA-Z0-9@._+=\-!#$%*]+")
+_MAX_PROXY_CREDENTIAL_LENGTH = 256
 
 
 def _validate_agentcore_bypass_patterns(bypass: str | None) -> list[str]:
@@ -55,8 +59,10 @@ class ProxyConfig:
         server: Proxy server URL. Local browsers support HTTP and SOCKS proxies, for
             example "http://myproxy.com:3128" or "socks5://myproxy.com:3128". Cloud
             browsers support the HTTP proxy endpoints accepted by AgentCore Browser.
-        username: Optional username for proxy authentication.
-        password: Optional password for proxy authentication.
+        username: Optional username for proxy authentication. Up to 256 letters, digits,
+            and ``@ . _ + = -``.
+        password: Optional password for proxy authentication. Up to 256 letters, digits,
+            and ``@ . _ + = - ! # $ % *``.
         bypass: Optional comma-separated domains to bypass proxy,
                 for example ".example.com, chromium.org". Cloud sessions always bypass
                 Narada's domains so the extension can reach the Narada API.
@@ -69,6 +75,22 @@ class ProxyConfig:
     password: str | None = None
     bypass: str | None = None
     ignore_cert_errors: bool = False
+
+    def __post_init__(self) -> None:
+        if self.username is not None and (
+            len(self.username) > _MAX_PROXY_CREDENTIAL_LENGTH
+            or _PROXY_USERNAME_PATTERN.fullmatch(self.username) is None
+        ):
+            raise ValueError(
+                "Proxy username must be 1-256 letters, digits, or @ . _ + = -"
+            )
+        if self.password is not None and (
+            len(self.password) > _MAX_PROXY_CREDENTIAL_LENGTH
+            or _PROXY_PASSWORD_PATTERN.fullmatch(self.password) is None
+        ):
+            raise ValueError(
+                "Proxy password must be 1-256 letters, digits, or @ . _ + = - ! # $ % *"
+            )
 
     @property
     def requires_authentication(self) -> bool:
