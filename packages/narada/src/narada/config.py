@@ -54,14 +54,9 @@ class ProxyConfig:
     Args:
         server: Proxy server URL. Local browsers support HTTP and SOCKS proxies, for
             example "http://myproxy.com:3128" or "socks5://myproxy.com:3128". Cloud
-            browsers accept an HTTP proxy endpoint ("http://myproxy.com:3128" or
-            "myproxy.com:3128").
+            browsers support the HTTP proxy endpoints accepted by AgentCore Browser.
         username: Optional username for proxy authentication.
         password: Optional password for proxy authentication.
-        credentials_secret_arn: AWS Secrets Manager secret ARN containing ``username``
-            and ``password`` keys. Used only by ``CloudBrowserEnvironment`` because
-            AgentCore Browser reads proxy credentials from Secrets Manager instead of
-            accepting them inline.
         bypass: Optional comma-separated domains to bypass proxy,
                 for example ".example.com, chromium.org". Cloud sessions always bypass
                 Narada's domains so the extension can reach the Narada API.
@@ -74,7 +69,6 @@ class ProxyConfig:
     password: str | None = None
     bypass: str | None = None
     ignore_cert_errors: bool = False
-    credentials_secret_arn: str | None = None
 
     @property
     def requires_authentication(self) -> bool:
@@ -96,12 +90,6 @@ class ProxyConfig:
                 "Both username and password must be provided for proxy authentication, "
                 "or neither should be provided"
             )
-
-        if (
-            self.credentials_secret_arn is not None
-            and not self.credentials_secret_arn.strip()
-        ):
-            raise ValueError("Proxy credentials secret ARN cannot be empty")
 
     def _cloud_browser_payload(self) -> dict[str, str]:
         """Return the proxy fields supported by an AgentCore Browser session."""
@@ -152,13 +140,6 @@ class ProxyConfig:
                 "ignore_cert_errors is not supported by CloudBrowserEnvironment "
                 "proxy settings"
             )
-        if self.requires_authentication and not self.credentials_secret_arn:
-            raise ValueError(
-                "CloudBrowserEnvironment proxy authentication requires "
-                "credentials_secret_arn; "
-                "request an organization-scoped credential secret from Narada Ops"
-            )
-
         bypass_patterns = list(
             dict.fromkeys(
                 (
@@ -168,8 +149,9 @@ class ProxyConfig:
             )
         )
         payload = {"server": self.server.strip()}
-        if self.credentials_secret_arn is not None:
-            payload["credentials_secret_arn"] = self.credentials_secret_arn.strip()
+        if self.requires_authentication:
+            payload["username"] = self.username or ""
+            payload["password"] = self.password or ""
         payload["bypass"] = ",".join(bypass_patterns)
         return payload
 

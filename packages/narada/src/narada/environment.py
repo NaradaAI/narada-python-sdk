@@ -1502,15 +1502,6 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         # Add proxy arguments if configured.
         if config.proxy is not None:
             config.proxy.validate()
-            if (
-                config.proxy.credentials_secret_arn is not None
-                and not config.proxy.requires_authentication
-            ):
-                raise ValueError(
-                    "credentials_secret_arn is only supported by "
-                    "CloudBrowserEnvironment; "
-                    "local BrowserEnvironment requires proxy username and password"
-                )
             browser_args.append(f"--proxy-server={config.proxy.server}")
 
             if config.proxy.bypass:

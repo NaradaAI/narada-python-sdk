@@ -5,11 +5,12 @@ from narada import Agent, BrowserConfig, CloudBrowserEnvironment, ProxyConfig
 
 
 async def main() -> None:
-    # For an authenticated proxy, ask Narada Ops to provision a credential secret
-    # for your organization and provide its full ARN, including the generated suffix.
+    # The SDK sends proxy credentials over the authenticated Narada API. Caddie
+    # stores them in a temporary AWS Secrets Manager secret for AgentCore startup.
     proxy = ProxyConfig(
         server=os.environ["NARADA_PROXY_SERVER"],
-        credentials_secret_arn=os.getenv("NARADA_PROXY_CREDENTIALS_SECRET_ARN"),
+        username=os.getenv("NARADA_PROXY_USERNAME"),
+        password=os.getenv("NARADA_PROXY_PASSWORD"),
         bypass=os.getenv("NARADA_PROXY_BYPASS"),
     )
     env = CloudBrowserEnvironment(config=BrowserConfig(proxy=proxy))
