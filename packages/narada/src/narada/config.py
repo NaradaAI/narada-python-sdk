@@ -148,7 +148,7 @@ class ProxyConfig:
             raise ValueError(
                 "CloudBrowserEnvironment proxy authentication requires "
                 "credentials_secret_arn; "
-                "store the credentials in AWS Secrets Manager"
+                "request an organization-scoped credential secret from Narada Ops"
             )
 
         bypass_patterns = _validate_agentcore_bypass_patterns(self.bypass)

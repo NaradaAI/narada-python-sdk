@@ -5,8 +5,8 @@ from narada import Agent, BrowserConfig, CloudBrowserEnvironment, ProxyConfig
 
 
 async def main() -> None:
-    # For an authenticated proxy, store username/password JSON under
-    # narada-cloud-browser-proxy/<organization_id>/ in the backend AWS account.
+    # For an authenticated proxy, ask Narada Ops to provision a credential secret
+    # for your organization and provide its full ARN, including the generated suffix.
     proxy = ProxyConfig(
         server=os.environ["NARADA_PROXY_SERVER"],
         credentials_secret_arn=os.getenv("NARADA_PROXY_CREDENTIALS_SECRET_ARN"),
