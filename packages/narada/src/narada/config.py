@@ -8,18 +8,25 @@ _AGENTCORE_DOMAIN_PATTERN = re.compile(
     r"(\.)?[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
     r"(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*"
 )
+_AGENTCORE_DEFAULT_PROXY_BYPASS_PATTERNS = (".narada.ai",)
 
 
 def _validate_agentcore_bypass_patterns(bypass: str | None) -> list[str]:
     patterns = [pattern.strip() for pattern in (bypass or "").split(",")]
     patterns = [pattern for pattern in patterns if pattern]
-    if len(patterns) > 100:
-        raise ValueError("AgentCore Browser allows at most 100 proxy bypass patterns")
     for pattern in patterns:
         if len(pattern) > 253 or _AGENTCORE_DOMAIN_PATTERN.fullmatch(pattern) is None:
             raise ValueError(
                 f"Invalid AgentCore Browser proxy bypass pattern: {pattern!r}"
             )
+    effective_patterns = dict.fromkeys(
+        (*_AGENTCORE_DEFAULT_PROXY_BYPASS_PATTERNS, *patterns)
+    )
+    if len(effective_patterns) > 100:
+        raise ValueError(
+            "AgentCore Browser allows at most 99 custom proxy bypass patterns; "
+            "Narada domains are bypassed automatically"
+        )
     return patterns
 
 
@@ -56,7 +63,8 @@ class ProxyConfig:
             AgentCore Browser reads proxy credentials from Secrets Manager instead of
             accepting them inline.
         bypass: Optional comma-separated domains to bypass proxy,
-                for example ".com, chromium.org, .domain.com".
+                for example ".example.com, chromium.org". Cloud sessions always bypass
+                Narada's domains so the extension can reach the Narada API.
         ignore_cert_errors: If True, ignore SSL certificate errors. Required for proxies that
             perform HTTPS inspection (MITM) in local Chrome. Use with caution.
     """
@@ -151,12 +159,18 @@ class ProxyConfig:
                 "request an organization-scoped credential secret from Narada Ops"
             )
 
-        bypass_patterns = _validate_agentcore_bypass_patterns(self.bypass)
+        bypass_patterns = list(
+            dict.fromkeys(
+                (
+                    *_AGENTCORE_DEFAULT_PROXY_BYPASS_PATTERNS,
+                    *_validate_agentcore_bypass_patterns(self.bypass),
+                )
+            )
+        )
         payload = {"server": self.server.strip()}
         if self.credentials_secret_arn is not None:
             payload["credentials_secret_arn"] = self.credentials_secret_arn.strip()
-        if bypass_patterns:
-            payload["bypass"] = ",".join(bypass_patterns)
+        payload["bypass"] = ",".join(bypass_patterns)
         return payload
 
 
