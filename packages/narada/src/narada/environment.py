@@ -1404,7 +1404,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             await initialization_page.goto(tagged_initialization_url)
 
         with log_duration(logger, "start", "wait_for_browser_window_id"):
-            browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
+            browser_window_id = await self._bootstrap_browser_window(
                 initialization_page,
                 self._config,
                 tagged_initialization_url,
@@ -1649,13 +1649,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         "wait_for_browser_window_id",
                         attempt=attempt + 1,
                     ):
-                        browser_window_id = (
-                            await self._wait_for_browser_window_id_with_lazy_login(
-                                initialization_page,
-                                config,
-                                tagged_initialization_url,
-                                restart_on_autoload_failure=restart_on_autoload_failure,
-                            )
+                        browser_window_id = await self._bootstrap_browser_window(
+                            initialization_page,
+                            config,
+                            tagged_initialization_url,
+                            restart_on_autoload_failure=restart_on_autoload_failure,
                         )
                 except NaradaTimeoutError:
                     browser_window_id_timeout_count += 1
@@ -1785,7 +1783,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
                 return _CustomTokenResponse.model_validate(await resp.json()).token
 
-    async def _wait_for_browser_window_id_with_lazy_login(
+    async def _bootstrap_browser_window(
         self,
         initialization_page: Page,
         config: BrowserConfig,
@@ -1796,11 +1794,34 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
+        sign_in_required = True
         extension_missing_retry_attempts = 0
         extension_autoload_used = is_win_extension_autoload_used(config.extension_id)
 
         try:
             while True:
+                if sign_in_required:
+                    login_attempts += 1
+                    if config.interactive:
+                        self._console.print(
+                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
+                            "credentials...[/bold blue]\n",
+                        )
+
+                    with log_duration(
+                        logger, "start", "sign_in", attempt=login_attempts
+                    ):
+                        custom_token = await self._fetch_browser_login_token()
+                        await initialization_page.goto(
+                            _with_query_params(
+                                initialization_url,
+                                {"customToken": custom_token, "authSource": "sdk"},
+                            ),
+                            timeout=15_000,
+                            wait_until="domcontentloaded",
+                        )
+                    sign_in_required = False
+
                 try:
                     return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
                         initialization_page,
@@ -1839,25 +1860,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Automatic sign-in with SDK credentials did not complete"
                         ) from error
 
-                    login_attempts += 1
-                    if config.interactive:
-                        self._console.print(
-                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
-                            "credentials...[/bold blue]\n",
-                        )
-
-                    with log_duration(
-                        logger, "start", "sign_in", attempt=login_attempts
-                    ):
-                        custom_token = await self._fetch_browser_login_token()
-                        await initialization_page.goto(
-                            _with_query_params(
-                                initialization_url,
-                                {"customToken": custom_token},
-                            ),
-                            timeout=15_000,
-                            wait_until="domcontentloaded",
-                        )
+                    sign_in_required = True
 
         except PlaywrightError as error:
             logger.warning(
