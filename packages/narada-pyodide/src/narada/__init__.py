@@ -1,4 +1,6 @@
 from narada_core.actions.models import (
+    AgenticSelectorBatchResponse,
+    AgenticSelectorTarget,
     CriticResult,
     HitlInputMetadata,
     PressKeyEventItem,
@@ -41,6 +43,8 @@ from narada.version import __version__
 
 __all__ = [
     "__version__",
+    "AgenticSelectorBatchResponse",
+    "AgenticSelectorTarget",
     "HitlInputMetadata",
     "Agent",
     "AgentKind",

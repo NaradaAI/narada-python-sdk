@@ -244,6 +244,76 @@ class AgenticSelectorResponse(BaseModel):
     verified: bool | None = None
 
 
+class AgenticSelectorTarget(TypedDict):
+    action: AgenticSelectorAction
+    selectors: AgenticSelectors
+    nth_match: NotRequired[str]
+
+
+class AgenticSelectorBatchRequest(BaseModel):
+    """Run ordered selector actions with one shared Operator fallback."""
+
+    name: Literal["agentic_selector"] = "agentic_selector"
+    actions: list[AgenticSelectorTarget] = Field(min_length=1)
+    fallback_operator_query: str
+    verification_description: str | None = None
+    verification_delay_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _normalize_verification_fields(self) -> Self:
+        # A delay is meaningful only when a non-empty description enables verification.
+        if self.verification_description is None:
+            self.verification_delay_ms = None
+            return self
+
+        verification_description = self.verification_description.strip()
+        if not verification_description:
+            self.verification_description = None
+            self.verification_delay_ms = None
+            return self
+
+        self.verification_description = verification_description
+        return self
+
+    @override
+    def model_dump(self) -> dict[str, Any]:
+        result = {
+            "name": self.name,
+            "actions": [
+                {
+                    "action": _dump_agentic_selector_action(target["action"]),
+                    "selectors": _dump_agentic_selectors(target["selectors"]),
+                    **(
+                        {"nth_match": target["nth_match"]}
+                        if "nth_match" in target
+                        else {}
+                    ),
+                }
+                for target in self.actions
+            ],
+            "fallback_operator_query": self.fallback_operator_query,
+        }
+        if self.verification_description is not None:
+            result["verification_description"] = self.verification_description
+            result["verification_delay_ms"] = self.verification_delay_ms
+        return result
+
+
+class AgenticSelectorBatchResponse(BaseModel):
+    """Return one value per action, in request order, and shared verification."""
+
+    values: list[str | None]
+    verified: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_single_value(cls, value: Any) -> Any:
+        # The frontend retains {value: ...} for one target so older SDKs can parse it.
+        if isinstance(value, dict) and "values" not in value and "value" in value:
+            return {**value, "values": [value["value"]]}
+        return value
+
+
 class AgenticMatchingSelectorsFinderRequest(BaseModel):
     name: Literal["agentic_matching_selectors_finder"] = (
         "agentic_matching_selectors_finder"
@@ -586,6 +656,7 @@ type ExtensionActionRequest = (
     AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
+    | AgenticSelectorBatchRequest
     | CloseTabRequest
     | AppendGoogleSheetRowRequest
     | CloseWindowRequest
