@@ -7,11 +7,12 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call
+from urllib.parse import parse_qs, urlsplit
 
 import narada.environment as environment_module
 import pytest
 from narada import Agent, BrowserEnvironment
-from narada.config import BrowserConfig
+from narada.config import BrowserConfig, ProxyConfig
 from narada.environment import create_side_panel_url
 from narada_core.actions.models import (
     CloseTabRequest,
@@ -442,7 +443,7 @@ async def test_browser_environment_signs_in_before_accepting_authenticated_brows
     browser_window_id = await env._bootstrap_browser_window(
         page,
         env._config,
-        "https://app.narada.ai/initialize?t=window-tag",
+        "https://app.narada.ai/initialize?t=window-tag&sdkAuthPending=true",
     )
 
     assert browser_window_id == "browser-window-123"
@@ -488,7 +489,7 @@ async def test_browser_environment_retries_sign_in_after_unauthenticated_state(
     bootstrap = env._bootstrap_browser_window(
         page,
         env._config,
-        "https://app.narada.ai/initialize?t=window-tag",
+        "https://app.narada.ai/initialize?t=window-tag&sdkAuthPending=true",
     )
     if retry_succeeds:
         assert await bootstrap == "browser-window-123"
@@ -541,15 +542,23 @@ async def test_browser_environment_token_failure_does_not_accept_existing_sessio
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("attach_to_existing", [False, True])
+@pytest.mark.parametrize("mode", ["launch", "attach", "proxy"])
 async def test_browser_environment_launch_and_attach_bootstrap_before_readiness(
     monkeypatch: pytest.MonkeyPatch,
     browser_login_token: AsyncMock,
-    attach_to_existing: bool,
+    mode: str,
 ) -> None:
-    initialization_url = "https://app.narada.ai/initialize?t=window-tag"
+    initialization_url = (
+        "https://app.narada.ai/initialize?option=value&empty="
+        "&t=window-tag&sdkAuthPending=true#initialize"
+    )
     page = AsyncMock()
-    page.url = initialization_url
+    page.url = "about:blank"
+
+    async def navigate(url: str, **kwargs: object) -> None:
+        page.url = url
+
+    page.goto.side_effect = navigate
     context = SimpleNamespace(pages=[page], new_page=AsyncMock(return_value=page))
     browser = SimpleNamespace(contexts=[context], close=AsyncMock())
     playwright = SimpleNamespace(
@@ -559,6 +568,17 @@ async def test_browser_environment_launch_and_attach_bootstrap_before_readiness(
         environment_module, "uuid4", lambda: SimpleNamespace(hex="window-tag")
     )
     monkeypatch.setattr(environment_module.asyncio, "sleep", AsyncMock())
+    monkeypatch.setattr(environment_module.sys, "platform", "linux")
+    monkeypatch.setattr(
+        environment_module, "is_win_extension_autoload_used", lambda _: False
+    )
+
+    async def launch_browser(*args: str, **kwargs: object) -> SimpleNamespace:
+        page.url = args[args.index("--new-window") + 1]
+        return SimpleNamespace(pid=123)
+
+    launch = AsyncMock(side_effect=launch_browser)
+    monkeypatch.setattr(environment_module.asyncio, "create_subprocess_exec", launch)
     wait_for_browser_window_id = AsyncMock(return_value="browser-window-123")
     monkeypatch.setattr(
         environment_module._BrowserInitializationHelper,
@@ -572,37 +592,63 @@ async def test_browser_environment_launch_and_attach_bootstrap_before_readiness(
     monkeypatch.setattr(environment_module, "_find_side_panel_match", find_side_panel)
     env = BrowserEnvironment(
         auth_headers={"x-api-key": "test-key"},
-        config=BrowserConfig(interactive=False),
-        attach_to_existing=attach_to_existing,
+        config=BrowserConfig(
+            interactive=False,
+            initialization_url="https://app.narada.ai/initialize?option=value&empty=#initialize",
+            proxy=ProxyConfig(
+                server="http://proxy.example:8080",
+                username="username",
+                password="password",
+            )
+            if mode == "proxy"
+            else None,
+        ),
+        attach_to_existing=mode == "attach",
     )
     monkeypatch.setattr(env, "_fix_download_behavior", AsyncMock())
+    proxy_session = SimpleNamespace(detach=AsyncMock())
+    setup_proxy_auth = AsyncMock(return_value=proxy_session)
+    monkeypatch.setattr(
+        env, "_setup_proxy_authentication_browser_level", setup_proxy_auth
+    )
     bootstrap_calls = MagicMock()
     bootstrap_calls.attach_mock(browser_login_token, "fetch_token")
     bootstrap_calls.attach_mock(page.goto, "navigate")
     bootstrap_calls.attach_mock(wait_for_browser_window_id, "wait_for_readiness")
     bootstrap_calls.attach_mock(find_side_panel, "find_side_panel")
+    bootstrap_calls.attach_mock(setup_proxy_auth, "setup_proxy_auth")
+    bootstrap_calls.attach_mock(proxy_session.detach, "detach_proxy_auth")
 
-    if attach_to_existing:
+    if mode == "attach":
         monkeypatch.setattr(env, "_playwright", playwright)
         await env._initialize_in_existing_browser_window()
         assert env.browser_window_id == "browser-window-123"
+        launch.assert_not_awaited()
     else:
-        result = await env._initialize_launched_browser(
+        result = await env._launch_browser(
             playwright,  # type: ignore[arg-type]
             env._config,
-            browser_process_id=123,
-            tagged_initialization_url=initialization_url,
-            proxy_requires_auth=False,
-            restart_on_autoload_failure=False,
         )
         assert result.browser_window_id == "browser-window-123"
+        startup_args = launch.await_args.args
+        assert startup_args[startup_args.index("--new-window") + 1] == (
+            "about:blank" if mode == "proxy" else initialization_url
+        )
+        assert all("customToken" not in arg for arg in startup_args)
 
-    expected_calls = [call.navigate(initialization_url)] if attach_to_existing else []
+    expected_calls = []
+    if mode == "proxy":
+        expected_calls.append(call.setup_proxy_auth(browser, env._config.proxy))
+    if mode in ("attach", "proxy"):
+        expected_calls.append(call.navigate(initialization_url))
+    if mode == "proxy":
+        expected_calls.append(call.detach_proxy_auth())
     expected_calls.extend(
         [
             call.fetch_token(),
             call.navigate(
-                f"{initialization_url}&customToken=custom+token&authSource=sdk",
+                "https://app.narada.ai/initialize?option=value&empty="
+                "&t=window-tag&customToken=custom+token&authSource=sdk#initialize",
                 timeout=15_000,
                 wait_until="domcontentloaded",
             ),
@@ -2423,6 +2469,8 @@ async def test_launch_browser_limits_browser_window_id_timeout_retries(
 ) -> None:
     import narada.environment as environment_module
 
+    navigations: list[str] = []
+
     class BrowserProcess:
         pid = 123
 
@@ -2439,6 +2487,7 @@ async def test_launch_browser_limits_browser_window_id_timeout_retries(
 
         async def goto(self, url: str, *, timeout: int, wait_until: str) -> None:
             self._state["initialization_url"] = url
+            navigations.append(url)
 
     class Context:
         def __init__(self, state: dict[str, str]) -> None:
@@ -2473,6 +2522,7 @@ async def test_launch_browser_limits_browser_window_id_timeout_retries(
         **kwargs: object,
     ) -> BrowserProcess:
         state["initialization_url"] = browser_args[-1]
+        navigations.append(browser_args[-1])
         return BrowserProcess()
 
     monkeypatch.setattr(
@@ -2501,6 +2551,10 @@ async def test_launch_browser_limits_browser_window_id_timeout_retries(
 
     assert wait_for_browser_window_id.await_count == 2
     assert playwright.chromium.connect_count == 2
+    assert len(navigations) == 2
+    assert navigations[0] == navigations[1]
+    assert parse_qs(urlsplit(navigations[0]).query)["sdkAuthPending"] == ["true"]
+    assert all("customToken" not in url for url in navigations)
 
 
 @pytest.mark.asyncio

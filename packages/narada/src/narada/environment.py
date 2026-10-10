@@ -427,12 +427,16 @@ class _SidePanelMatch:
     browser_context_id: str | None
 
 
-def _with_query_params(url: str, params: Mapping[str, str]) -> str:
+def _with_query_params(url: str, params: Mapping[str, str | None]) -> str:
     parsed_url = urlsplit(url)
     query_params = [
-        *parse_qsl(parsed_url.query, keep_blank_values=True),
-        *params.items(),
+        (key, value)
+        for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+        if key not in params
     ]
+    query_params.extend(
+        (key, value) for key, value in params.items() if value is not None
+    )
     return urlunsplit(
         (
             parsed_url.scheme,
@@ -1390,9 +1394,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 self._config.cdp_url
             )
 
-        # Generate a unique tag for the initialization URL
+        # Keep the tagged page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{self._config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            self._config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
@@ -1479,8 +1486,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         # A unique tag is appended to the initialization URL so that we can find the new page that
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
+        # Keep that page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
         # We'll set up the CDP auth handler and then navigate to the init URL.
@@ -1815,7 +1826,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         await initialization_page.goto(
                             _with_query_params(
                                 initialization_url,
-                                {"customToken": custom_token, "authSource": "sdk"},
+                                {
+                                    "customToken": custom_token,
+                                    "authSource": "sdk",
+                                    "sdkAuthPending": None,
+                                },
                             ),
                             timeout=15_000,
                             wait_until="domcontentloaded",
