@@ -427,12 +427,16 @@ class _SidePanelMatch:
     browser_context_id: str | None
 
 
-def _with_query_params(url: str, params: Mapping[str, str]) -> str:
+def _with_query_params(url: str, params: Mapping[str, str | None]) -> str:
     parsed_url = urlsplit(url)
     query_params = [
-        *parse_qsl(parsed_url.query, keep_blank_values=True),
-        *params.items(),
+        (key, value)
+        for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+        if key not in params
     ]
+    query_params.extend(
+        (key, value) for key, value in params.items() if value is not None
+    )
     return urlunsplit(
         (
             parsed_url.scheme,
@@ -1390,9 +1394,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 self._config.cdp_url
             )
 
-        # Generate a unique tag for the initialization URL
+        # Keep the tagged page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{self._config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            self._config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
@@ -1404,7 +1411,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             await initialization_page.goto(tagged_initialization_url)
 
         with log_duration(logger, "start", "wait_for_browser_window_id"):
-            browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
+            browser_window_id = await self._bootstrap_browser_window(
                 initialization_page,
                 self._config,
                 tagged_initialization_url,
@@ -1479,8 +1486,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         # A unique tag is appended to the initialization URL so that we can find the new page that
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
+        # Keep that page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
         # We'll set up the CDP auth handler and then navigate to the init URL.
@@ -1649,13 +1660,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         "wait_for_browser_window_id",
                         attempt=attempt + 1,
                     ):
-                        browser_window_id = (
-                            await self._wait_for_browser_window_id_with_lazy_login(
-                                initialization_page,
-                                config,
-                                tagged_initialization_url,
-                                restart_on_autoload_failure=restart_on_autoload_failure,
-                            )
+                        browser_window_id = await self._bootstrap_browser_window(
+                            initialization_page,
+                            config,
+                            tagged_initialization_url,
+                            restart_on_autoload_failure=restart_on_autoload_failure,
                         )
                 except NaradaTimeoutError:
                     browser_window_id_timeout_count += 1
@@ -1785,7 +1794,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
                 return _CustomTokenResponse.model_validate(await resp.json()).token
 
-    async def _wait_for_browser_window_id_with_lazy_login(
+    async def _bootstrap_browser_window(
         self,
         initialization_page: Page,
         config: BrowserConfig,
@@ -1796,11 +1805,38 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
+        sign_in_required = True
         extension_missing_retry_attempts = 0
         extension_autoload_used = is_win_extension_autoload_used(config.extension_id)
 
         try:
             while True:
+                if sign_in_required:
+                    login_attempts += 1
+                    if config.interactive:
+                        self._console.print(
+                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
+                            "credentials...[/bold blue]\n",
+                        )
+
+                    with log_duration(
+                        logger, "start", "sign_in", attempt=login_attempts
+                    ):
+                        custom_token = await self._fetch_browser_login_token()
+                        await initialization_page.goto(
+                            _with_query_params(
+                                initialization_url,
+                                {
+                                    "customToken": custom_token,
+                                    "authSource": "sdk",
+                                    "sdkAuthPending": None,
+                                },
+                            ),
+                            timeout=15_000,
+                            wait_until="domcontentloaded",
+                        )
+                    sign_in_required = False
+
                 try:
                     return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
                         initialization_page,
@@ -1839,25 +1875,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Automatic sign-in with SDK credentials did not complete"
                         ) from error
 
-                    login_attempts += 1
-                    if config.interactive:
-                        self._console.print(
-                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
-                            "credentials...[/bold blue]\n",
-                        )
-
-                    with log_duration(
-                        logger, "start", "sign_in", attempt=login_attempts
-                    ):
-                        custom_token = await self._fetch_browser_login_token()
-                        await initialization_page.goto(
-                            _with_query_params(
-                                initialization_url,
-                                {"customToken": custom_token},
-                            ),
-                            timeout=15_000,
-                            wait_until="domcontentloaded",
-                        )
+                    sign_in_required = True
 
         except PlaywrightError as error:
             logger.warning(
