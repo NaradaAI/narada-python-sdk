@@ -39,8 +39,10 @@ from narada_core.actions.models import (
 from narada_core.errors import (
     NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE,
     NaradaError,
+    NaradaQuotaExceededError,
     NaradaTimeoutError,
     UserAbortedError,
+    is_quota_exceeded_error_payload,
 )
 from narada_core.models import (
     AgentKind,
@@ -626,6 +628,12 @@ class Environment(ABC):
                 if not fetch_response.ok:
                     status = fetch_response.status
                     text = await fetch_response.text()
+                    try:
+                        error_payload = json.loads(text)
+                    except json.JSONDecodeError:
+                        error_payload = None
+                    if is_quota_exceeded_error_payload(error_payload):
+                        raise NaradaQuotaExceededError()
                     raise NaradaError(f"Failed to dispatch request: {status} {text}")
 
                 request_id = (await fetch_response.json())["requestId"]

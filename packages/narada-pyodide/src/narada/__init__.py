@@ -5,6 +5,7 @@ from narada_core.actions.models import (
 )
 from narada_core.errors import (
     NaradaError,
+    NaradaQuotaExceededError,
     NaradaTimeoutError,
 )
 from narada_core.models import (
@@ -65,6 +66,7 @@ __all__ = [
     "LOG_FORMAT",
     "ManagedVectorStore",
     "NaradaError",
+    "NaradaQuotaExceededError",
     "NaradaTimeoutError",
     "PressKeyEventItem",
     "ReasoningEffort",

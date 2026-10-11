@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 import narada.environment as environment_module
 import pytest
-from narada import CloudBrowserEnvironment, RemoteBrowserEnvironment
+from narada import (
+    CloudBrowserEnvironment,
+    NaradaQuotaExceededError,
+    RemoteBrowserEnvironment,
+)
 from narada.config import BrowserConfig
 
 
@@ -96,6 +100,29 @@ class _FakeRemoteDispatchGetResponse:
         }
 
 
+class _FakeQuotaExceededResponse:
+    ok = False
+    status = 403
+
+    async def __aenter__(self) -> _FakeQuotaExceededResponse:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        raise AssertionError("Structured quota errors must be mapped before this call")
+
+    async def json(self) -> dict[str, object]:
+        return {
+            "detail": {
+                "code": 0,
+                "userEmail": "user@example.com",
+                "resourceName": "naradaCredits",
+            }
+        }
+
+
 class _FakeRemoteDispatchSession:
     post_calls: list[dict[str, object]] = []
     get_calls: list[dict[str, object]] = []
@@ -113,6 +140,17 @@ class _FakeRemoteDispatchSession:
     def get(self, url: str, **kwargs: object) -> _FakeRemoteDispatchGetResponse:
         self.get_calls.append({"url": url, **kwargs})
         return _FakeRemoteDispatchGetResponse()
+
+
+class _FakeQuotaExceededSession:
+    async def __aenter__(self) -> _FakeQuotaExceededSession:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    def post(self, *_args: object, **_kwargs: object) -> _FakeQuotaExceededResponse:
+        return _FakeQuotaExceededResponse()
 
 
 @pytest.mark.asyncio
@@ -188,3 +226,22 @@ async def test_remote_dispatch_forwards_managed_cloud_browser_request(
         "timeZone": "America/Los_Angeles",
         "cloudBrowserSessionId": "cloud-session-123",
     }
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_maps_quota_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", _FakeQuotaExceededSession
+    )
+    env = RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        auth_headers={"x-test": "true"},
+    )
+
+    with pytest.raises(
+        NaradaQuotaExceededError,
+        match="You have run out of credits",
+    ):
+        await env._dispatch_request(prompt="Test exhausted quota", timeout=30)
