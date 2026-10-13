@@ -2260,10 +2260,10 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
 
 
 class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
-    """A browser environment that connects to a backend-cloud browser session via CDP.
+    """A cloud browser environment that routes agent actions to its frontend.
 
-    This class connects to a cloud browser session created by the backend API and provides
-    the same transport semantics as other browser environments for agent operations.
+    Cold sessions use CDP for initialization. Ready warm sessions use the returned
+    browser window ID without opening another CDP connection.
     """
 
     def __init__(
@@ -2309,32 +2309,27 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        async with self._acquire_playwright_lifecycle_lock():
-            try:
-                await self._ensure_playwright_connected()
-                assert self._playwright_browser is not None
-                side_panel_url = create_side_panel_url(
-                    self._config, self.browser_window_id
-                )
-                side_panel_page = _find_page_by_url(
-                    self._playwright_browser, side_panel_url
-                )
-                if side_panel_page is None:
-                    raise NaradaInitializationError(
-                        "Narada side panel is no longer available"
-                    )
-
-                # Reloading cancels any in-flight Narada operations.
-                await side_panel_page.reload()
-            finally:
-                await self._stop_playwright()
+        async with (
+            self._acquire_initialization_lock(),
+            aiohttp.ClientSession() as session,
+        ):
+            async with session.post(
+                f"{self._base_url}/cloud-browser/reset-agent-state",
+                headers=self._auth_headers,
+                json={
+                    "session_id": self.cloud_browser_session_id,
+                    "browser_window_id": self.browser_window_id,
+                },
+                timeout=aiohttp.ClientTimeout(total=45),
+            ) as response:
+                response.raise_for_status()
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
         Retry up to 3 times on error.
 
         Calls ``POST /cloud-browser/create-cloud-browser-session`` with warm reuse enabled.
-        A ready warm browser can be attached over CDP. A cold browser still uses
+        A ready warm browser provides its routing ID without CDP. A cold browser uses
         ``login_url`` and waits for ``#narada-browser-window-id``.
         """
         max_attempts = 3
@@ -2357,7 +2352,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 await asyncio.sleep(retry_backoff_with_jitter)
 
     async def _initialize_once(self) -> None:
-        await self._start_playwright()
         request_body = {
             "require_extension": True,
             "session_name": self._session_name,
@@ -2397,18 +2391,13 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
 
         browser_window_id = response_data.get("browser_window_id")
         if browser_window_id is not None:
-            assert self._playwright is not None
-            # Warm session already has an initialized, signed-in browser window.
-            browser = await self._playwright.chromium.connect_over_cdp(
-                cdp_websocket_url, headers=cdp_auth_headers
-            )
-            self._playwright_browser = browser
-            self._context = browser.contexts[0]
+            # The frontend download relay owns CDP; SDK actions use this routing ID.
             self._browser_window_id = browser_window_id
             if self._config.interactive:
                 self._print_success_message(browser_window_id)
         else:
             # Cold start: connect to browser via CDP with authentication headers and log the user in.
+            await self._start_playwright()
             await self._initialize_cloud_browser_window(
                 cdp_websocket_url=cdp_websocket_url,
                 session_id=session_id,
