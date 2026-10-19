@@ -2,6 +2,10 @@ from narada_core.actions.models import (
     CriticResult,
     HitlInputMetadata,
     PressKeyEventItem,
+    TrajectoryGifDelegated,
+    TrajectoryGifError,
+    TrajectoryGifResult,
+    TrajectoryGifSuccess,
 )
 from narada_core.errors import (
     NaradaError,
@@ -85,5 +89,9 @@ __all__ = [
     "Response",
     "ResponseContent",
     "SessionDownloadItem",
+    "TrajectoryGifDelegated",
+    "TrajectoryGifError",
+    "TrajectoryGifResult",
+    "TrajectoryGifSuccess",
     "UserAbortedError",
 ]

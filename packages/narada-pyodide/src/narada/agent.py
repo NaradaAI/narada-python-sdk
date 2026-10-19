@@ -65,6 +65,7 @@ from narada_core.models import (
     Response,
     UserResourceCredentials,
     VectorStore,
+    parse_trajectory_gif_result,
 )
 from narada_core.tracing.model import parse_action_trace
 from pydantic import BaseModel
@@ -240,6 +241,9 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            trajectory_gif=parse_trajectory_gif_result(
+                response_content.get("trajectoryGif")
+            ),
         )
 
     async def _dispatch_request(

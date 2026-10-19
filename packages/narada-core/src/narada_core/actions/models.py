@@ -58,6 +58,50 @@ class CriticResult(BaseModel):
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
 
 
+class TrajectoryGifSuccess(BaseModel):
+    """A trajectory download was accepted, and optionally confirmed complete."""
+
+    model_config = ConfigDict(populate_by_name=True, strict=True)
+
+    status: Literal["success"]
+    frame_count: int = Field(alias="frameCount", ge=0)
+    completion_confirmed: bool = Field(alias="completionConfirmed")
+
+
+class TrajectoryGifError(BaseModel):
+    """A trajectory export failed independently of the agent's task result."""
+
+    model_config = ConfigDict(populate_by_name=True, strict=True)
+
+    status: Literal["error"]
+    frame_count: int = Field(alias="frameCount", ge=0)
+    stage: Literal["capture", "encoding", "download"]
+    code: Literal[
+        "no_frames",
+        "unavailable",
+        "timeout",
+        "aborted",
+        "encoding_failed",
+        "download_failed",
+    ]
+    message: str
+
+
+class TrajectoryGifDelegated(BaseModel):
+    """An ancestor run owns the trajectory containing this run's frames."""
+
+    model_config = ConfigDict(populate_by_name=True, strict=True)
+
+    status: Literal["delegated"]
+    owner_request_id: str = Field(alias="ownerRequestId")
+
+
+TrajectoryGifResult = Annotated[
+    TrajectoryGifSuccess | TrajectoryGifError | TrajectoryGifDelegated,
+    Field(discriminator="status"),
+]
+
+
 class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -73,6 +117,9 @@ class AgentResponse(BaseModel, Generic[_StructuredOutputT]):
     action_trace: tracing_model.ActionTrace | None = None
     workflow_trace: dict[str, Any] | None = Field(default=None, alias="workflowTrace")
     critic_result: CriticResult | None = None
+    trajectory_gif: TrajectoryGifResult | None = Field(
+        default=None, alias="trajectoryGif"
+    )
     execution_trace_context: dict[str, Any] | None = Field(
         default=None, alias="executionTraceContext"
     )
