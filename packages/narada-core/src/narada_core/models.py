@@ -39,6 +39,14 @@ class ReasoningEffort(StrEnum):
     HIGH = "high"
 
 
+class AgentSpeed(StrEnum):
+    """Controls the processing tier used for built-in Narada agent responses."""
+
+    STANDARD = "standard"
+    FAST = "fast"
+    ULTRAFAST = "ultrafast"
+
+
 class UserResourceCredentials(TypedDict, total=False):
     salesforce: dict[str, str]
     jira: dict[str, str]
