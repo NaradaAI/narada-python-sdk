@@ -9,6 +9,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     CriticConfig,
@@ -44,6 +45,7 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "AgentSpeed",
     "BedrockConnectionConfig",
     "BedrockCredentials",
     "BaseBrowserEnvironment",
