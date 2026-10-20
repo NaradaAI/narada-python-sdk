@@ -4,9 +4,9 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field
 
-from narada_core.actions.models import HitlInputMetadata, TrajectoryGifResult
+from narada_core.actions.models import HitlInputMetadata
 
 
 class AgentKind(Enum):
@@ -472,48 +472,6 @@ class StructuredResponseOutput(TypedDict, Generic[_MaybeStructuredOutput]):
     content: _MaybeStructuredOutput
 
 
-class TrajectoryGifSuccessContent(TypedDict):
-    status: Literal["success"]
-    frameCount: int
-    completionConfirmed: bool
-
-
-class TrajectoryGifErrorContent(TypedDict):
-    status: Literal["error"]
-    frameCount: int
-    stage: Literal["capture", "encoding", "download"]
-    code: Literal[
-        "no_frames",
-        "unavailable",
-        "timeout",
-        "aborted",
-        "encoding_failed",
-        "download_failed",
-    ]
-    message: str
-
-
-class TrajectoryGifDelegatedContent(TypedDict):
-    status: Literal["delegated"]
-    ownerRequestId: str
-
-
-TrajectoryGifResultContent = (
-    TrajectoryGifSuccessContent
-    | TrajectoryGifErrorContent
-    | TrajectoryGifDelegatedContent
-)
-
-
-_TRAJECTORY_GIF_RESULT_ADAPTER = TypeAdapter(TrajectoryGifResult | None)
-
-
-def parse_trajectory_gif_result(
-    value: TrajectoryGifResultContent | None,
-) -> TrajectoryGifResult | None:
-    return _TRAJECTORY_GIF_RESULT_ADAPTER.validate_python(value)
-
-
 class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     text: str
     output: TextResponseOutput | StructuredResponseOutput[_MaybeStructuredOutput]
@@ -521,7 +479,6 @@ class ResponseContent(TypedDict, Generic[_MaybeStructuredOutput]):
     actionTrace: NotRequired[ActionTrace]
     executionTraceContext: NotRequired[dict[str, object]]
     workflowTrace: NotRequired[dict[str, Any]]
-    trajectoryGif: NotRequired[TrajectoryGifResultContent]
 
 
 class Usage(TypedDict):
