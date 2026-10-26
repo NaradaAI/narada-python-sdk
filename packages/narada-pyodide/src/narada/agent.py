@@ -307,21 +307,34 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
+        """Performs an action on an element specified by the given selectors, falling back to the
+        configured Operator agent and speed if the selectors fail to match a unique element.
 
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
         """
+        if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
+            raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
+        if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         request = AgenticSelectorRequest(
             action=action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
+            fallback_agent_type=(
+                "operatorMini"
+                if fallback_agent is AgentKind.OPERATOR_MINI
+                else "operator"
+            ),
+            fallback_speed=fallback_speed,
             verification_description=verification_description,
             verification_delay_ms=verification_delay_ms,
         )
