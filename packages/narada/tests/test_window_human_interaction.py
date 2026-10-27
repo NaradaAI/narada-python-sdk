@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from narada import Agent, RemoteBrowserEnvironment
+from narada import Agent, AgentKind, RemoteBrowserEnvironment
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
     PromptForUserInputVariable,
@@ -309,8 +309,69 @@ async def test_agentic_selector_returns_verification_status(
             "tagName": {"value": "button"},
         },
         "fallback_operator_query": "Click the submit button",
+        "fallback_agent_type": "operator",
+        "fallback_speed": "standard",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_serializes_fallback_model_and_speed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    await agent.agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button"},
+        fallback_operator_query="Click the submit button",
+        fallback_agent=AgentKind.OPERATOR_MINI,
+        fallback_speed="fast",
+    )
+
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "click"},
+        "selectors": {"tagName": {"value": "button"}},
+        "fallback_operator_query": "Click the submit button",
+        "fallback_agent_type": "operatorMini",
+        "fallback_speed": "fast",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_serializes_press_enter_for_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    await agent.agentic_selector(
+        action={"type": "fill", "value": "Narada AI", "press_enter": True},
+        selectors={"name": "q"},
+        fallback_operator_query="Fill the search box and press Enter",
+    )
+
+    assert fake_session.post_bodies[0]["action"]["action"] == {
+        "type": "fill",
+        "value": "Narada AI",
+        "pressEnter": True,
     }
 
 

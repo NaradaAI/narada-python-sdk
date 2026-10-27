@@ -97,6 +97,7 @@ class AgenticSelectorHoverAction(TypedDict):
 class AgenticSelectorFillAction(TypedDict):
     type: Literal["fill"]
     value: str
+    press_enter: NotRequired[bool]
 
 
 class AgenticSelectorSelectOptionByIndexAction(TypedDict):
@@ -142,7 +143,11 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "hover":
             return {"type": "hover"}
         case "fill":
-            return cast(dict[str, Any], action)
+            return {
+                "type": "fill",
+                "value": action["value"],
+                "pressEnter": action.get("press_enter", False),
+            }
         case "select_option_by_index":
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
@@ -202,11 +207,19 @@ class AgenticSelectorRequest(BaseModel):
     action: AgenticSelectorAction
     selectors: AgenticSelectors
     fallback_operator_query: str
+    fallback_agent_type: Literal["operator", "operatorMini"] = "operator"
+    fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard"
     verification_description: str | None = None
     verification_delay_ms: int | None = None
 
     @model_validator(mode="after")
     def _normalize_verification_fields(self) -> Self:
+        if (
+            self.fallback_agent_type == "operatorMini"
+            and self.fallback_speed == "ultrafast"
+        ):
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         if self.verification_description is None:
             self.verification_delay_ms = None
             return self
@@ -227,6 +240,8 @@ class AgenticSelectorRequest(BaseModel):
             "action": _dump_agentic_selector_action(self.action),
             "selectors": _dump_agentic_selectors(self.selectors),
             "fallback_operator_query": self.fallback_operator_query,
+            "fallback_agent_type": self.fallback_agent_type,
+            "fallback_speed": self.fallback_speed,
         }
         if self.verification_description is not None:
             result["verification_description"] = self.verification_description
