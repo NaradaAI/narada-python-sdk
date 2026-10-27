@@ -1,7 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from narada import (
@@ -11,7 +11,6 @@ from narada import (
     RemoteBrowserEnvironment,
 )
 from narada.config import BrowserConfig
-from narada.environment import create_side_panel_url
 from narada_core.errors import NaradaInitializationError, NaradaTimeoutError
 
 
@@ -407,7 +406,7 @@ async def test_cloud_browser_environment_detach_releases_playwright_without_stop
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_environment_reset_agent_state_reconnects_after_detach(
+async def test_cloud_browser_environment_reset_agent_state_uses_backend_without_cdp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import narada.environment as environment_module
@@ -417,52 +416,29 @@ async def test_cloud_browser_environment_reset_agent_state_reconnects_after_deta
     env._initialized = True
     env._session_id = "session-123"
     env._browser_window_id = "browser-window-123"
-    env._cdp_websocket_url = "wss://agentcore.example.test/session-123"
-    fake_session = _FakeClientSession(
-        {
-            "auth_headers": {"Authorization": "fresh-cdp"},
-            "cloud_browser_session_id": "session-123",
-        }
-    )
+    fake_session = _FakeClientSession({})
     monkeypatch.setattr(
         environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
 
-    page = SimpleNamespace(
-        url=create_side_panel_url(config, "browser-window-123"),
-        reload=AsyncMock(),
-    )
-    browser = SimpleNamespace(
-        contexts=[SimpleNamespace(pages=[page])],
-        close=AsyncMock(),
-    )
-    connect_over_cdp = AsyncMock(return_value=browser)
-    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
-
-    async def start_playwright() -> None:
-        env._playwright_context_manager = playwright_context_manager
-        env._playwright = SimpleNamespace(
-            chromium=SimpleNamespace(connect_over_cdp=connect_over_cdp)
-        )
-
+    start_playwright = AsyncMock()
+    connect_playwright_browser = AsyncMock()
     monkeypatch.setattr(env, "_start_playwright", start_playwright)
+    monkeypatch.setattr(env, "_connect_playwright_browser", connect_playwright_browser)
 
-    await env.reset_agent_state()
+    await asyncio.wait_for(env.reset_agent_state(), timeout=1)
 
-    connect_over_cdp.assert_awaited_once_with(
-        "wss://agentcore.example.test/session-123",
-        headers={"Authorization": "fresh-cdp"},
-    )
+    start_playwright.assert_not_awaited()
+    connect_playwright_browser.assert_not_awaited()
     assert len(fake_session.posts) == 1
     post = fake_session.posts[0]
-    assert post["url"].endswith("/cloud-browser/generate-cdp-auth-headers")
+    assert post["url"] == f"{env._base_url}/cloud-browser/reset-agent-state"
     assert post["headers"] == {"x-api-key": "test-key"}
     assert post["json"] == {
-        "cdp_websocket_url": "wss://agentcore.example.test/session-123"
+        "session_id": "session-123",
+        "browser_window_id": "browser-window-123",
     }
-    page.reload.assert_awaited_once()
-    browser.close.assert_awaited_once()
-    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    assert post["timeout"].total == 45
     assert env.browser_window_id == "browser-window-123"
     assert env.cloud_browser_session_id == "session-123"
     assert env._playwright_browser is None
@@ -498,9 +474,11 @@ async def test_cloud_browser_environment_rejects_auth_headers_for_another_sessio
 
 
 @pytest.mark.asyncio
-async def test_cloud_browser_environment_reset_cleans_up_when_reconnect_is_cancelled(
+async def test_cloud_browser_environment_reset_cleans_up_when_request_is_cancelled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import narada.environment as environment_module
+
     env = CloudBrowserEnvironment(
         auth_headers={"x-api-key": "test-key"},
         config=BrowserConfig(interactive=False),
@@ -508,29 +486,39 @@ async def test_cloud_browser_environment_reset_cleans_up_when_reconnect_is_cance
     env._initialized = True
     env._session_id = "session-123"
     env._browser_window_id = "browser-window-123"
-    env._cdp_websocket_url = "wss://agentcore.example.test/session-123"
-    reconnect_started = asyncio.Event()
-    playwright_context_manager = SimpleNamespace(__aexit__=AsyncMock())
+    request_started = asyncio.Event()
 
-    async def start_playwright() -> None:
-        env._playwright_context_manager = playwright_context_manager
-        env._playwright = object()
-
-    async def connect_playwright_browser() -> None:
-        reconnect_started.set()
+    async def enter_request():
+        request_started.set()
         await asyncio.Future()
 
+    request_context = AsyncMock()
+    request_context.__aenter__.side_effect = enter_request
+    fake_session = AsyncMock()
+    fake_session.__aenter__.return_value = fake_session
+    fake_session.post = Mock(return_value=request_context)
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+    start_playwright = AsyncMock()
     monkeypatch.setattr(env, "_start_playwright", start_playwright)
-    monkeypatch.setattr(env, "_connect_playwright_browser", connect_playwright_browser)
 
     reset_task = asyncio.create_task(env.reset_agent_state())
-    await reconnect_started.wait()
-    reset_task.cancel()
+    try:
+        await asyncio.wait_for(request_started.wait(), timeout=1)
+        reset_task.cancel()
 
-    with pytest.raises(asyncio.CancelledError):
-        await reset_task
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(reset_task, timeout=1)
+    finally:
+        reset_task.cancel()
+        await asyncio.gather(reset_task, return_exceptions=True)
 
-    playwright_context_manager.__aexit__.assert_awaited_once_with(None, None, None)
+    fake_session.__aexit__.assert_awaited_once()
+    start_playwright.assert_not_awaited()
+    assert not env._acquire_initialization_lock().locked()
+    assert env.cloud_browser_session_id == "session-123"
+    assert env.browser_window_id == "browser-window-123"
     assert env._playwright_browser is None
     assert env._context is None
     assert env._playwright is None
