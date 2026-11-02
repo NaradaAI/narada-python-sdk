@@ -310,6 +310,8 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         timeout: int | None = 300,
@@ -321,6 +323,8 @@ class Agent(Generic[_StructuredOutput]):
         *,
         actions: list[AgenticSelectorTarget],
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         timeout: int | None = 300,
@@ -333,16 +337,28 @@ class Agent(Generic[_StructuredOutput]):
         selectors: AgenticSelectors | None = None,
         actions: list[AgenticSelectorTarget] | None = None,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse | AgenticSelectorBatchResponse:
-        """Perform one or more selector actions with one shared Operator fallback."""
+        """Perform one or more selector actions with one shared configured Operator fallback."""
+        if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
+            raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
+        if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
+        fallback_agent_type = (
+            "operatorMini" if fallback_agent is AgentKind.OPERATOR_MINI else "operator"
+        )
         if actions is None and action is not None and selectors is not None:
             request = AgenticSelectorBatchRequest(
                 actions=[{"action": action, "selectors": selectors}],
                 fallback_operator_query=fallback_operator_query,
+                fallback_agent_type=fallback_agent_type,
+                fallback_speed=fallback_speed,
                 verification_description=verification_description,
                 verification_delay_ms=verification_delay_ms,
             )
@@ -363,10 +379,12 @@ class Agent(Generic[_StructuredOutput]):
                 return AgenticSelectorResponse(value=None)
             return result
 
-        elif actions and action is None and selectors is None:
+        if actions and action is None and selectors is None:
             request = AgenticSelectorBatchRequest(
                 actions=actions,
                 fallback_operator_query=fallback_operator_query,
+                fallback_agent_type=fallback_agent_type,
+                fallback_speed=fallback_speed,
                 verification_description=verification_description,
                 verification_delay_ms=verification_delay_ms,
             )
@@ -376,10 +394,9 @@ class Agent(Generic[_StructuredOutput]):
                 timeout=timeout,
             )
 
-        else:
-            raise ValueError(
-                "Provide either action and selectors or a non-empty actions list"
-            )
+        raise ValueError(
+            "Provide either action and selectors or a non-empty actions list"
+        )
 
     async def agentic_matching_selectors_finder(
         self,

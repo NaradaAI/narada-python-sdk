@@ -427,12 +427,16 @@ class _SidePanelMatch:
     browser_context_id: str | None
 
 
-def _with_query_params(url: str, params: Mapping[str, str]) -> str:
+def _with_query_params(url: str, params: Mapping[str, str | None]) -> str:
     parsed_url = urlsplit(url)
     query_params = [
-        *parse_qsl(parsed_url.query, keep_blank_values=True),
-        *params.items(),
+        (key, value)
+        for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+        if key not in params
     ]
+    query_params.extend(
+        (key, value) for key, value in params.items() if value is not None
+    )
     return urlunsplit(
         (
             parsed_url.scheme,
@@ -1390,9 +1394,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                 self._config.cdp_url
             )
 
-        # Generate a unique tag for the initialization URL
+        # Keep the tagged page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{self._config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            self._config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # Open the initialization page in a new tab in the default context.
         context = browser.contexts[0]
@@ -1404,7 +1411,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             await initialization_page.goto(tagged_initialization_url)
 
         with log_duration(logger, "start", "wait_for_browser_window_id"):
-            browser_window_id = await self._wait_for_browser_window_id_with_lazy_login(
+            browser_window_id = await self._bootstrap_browser_window(
                 initialization_page,
                 self._config,
                 tagged_initialization_url,
@@ -1479,8 +1486,12 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         # A unique tag is appended to the initialization URL so that we can find the new page that
         # was opened, since otherwise when more than one initialization page is opened in the same
         # browser instance, we wouldn't be able to tell them apart.
+        # Keep that page pending until SDK credentials arrive over CDP.
         window_tag = uuid4().hex
-        tagged_initialization_url = f"{config.initialization_url}?t={window_tag}"
+        tagged_initialization_url = _with_query_params(
+            config.initialization_url,
+            {"t": window_tag, "sdkAuthPending": "true"},
+        )
 
         # When proxy auth is needed, launch with about:blank to avoid Chrome's startup auth prompt.
         # We'll set up the CDP auth handler and then navigate to the init URL.
@@ -1649,13 +1660,11 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         "wait_for_browser_window_id",
                         attempt=attempt + 1,
                     ):
-                        browser_window_id = (
-                            await self._wait_for_browser_window_id_with_lazy_login(
-                                initialization_page,
-                                config,
-                                tagged_initialization_url,
-                                restart_on_autoload_failure=restart_on_autoload_failure,
-                            )
+                        browser_window_id = await self._bootstrap_browser_window(
+                            initialization_page,
+                            config,
+                            tagged_initialization_url,
+                            restart_on_autoload_failure=restart_on_autoload_failure,
                         )
                 except NaradaTimeoutError:
                     browser_window_id_timeout_count += 1
@@ -1785,7 +1794,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
                 return _CustomTokenResponse.model_validate(await resp.json()).token
 
-    async def _wait_for_browser_window_id_with_lazy_login(
+    async def _bootstrap_browser_window(
         self,
         initialization_page: Page,
         config: BrowserConfig,
@@ -1796,11 +1805,38 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
     ) -> str:
         login_attempts = 0
         max_login_attempts = 2
+        sign_in_required = True
         extension_missing_retry_attempts = 0
         extension_autoload_used = is_win_extension_autoload_used(config.extension_id)
 
         try:
             while True:
+                if sign_in_required:
+                    login_attempts += 1
+                    if config.interactive:
+                        self._console.print(
+                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
+                            "credentials...[/bold blue]\n",
+                        )
+
+                    with log_duration(
+                        logger, "start", "sign_in", attempt=login_attempts
+                    ):
+                        custom_token = await self._fetch_browser_login_token()
+                        await initialization_page.goto(
+                            _with_query_params(
+                                initialization_url,
+                                {
+                                    "customToken": custom_token,
+                                    "authSource": "sdk",
+                                    "sdkAuthPending": None,
+                                },
+                            ),
+                            timeout=15_000,
+                            wait_until="domcontentloaded",
+                        )
+                    sign_in_required = False
+
                 try:
                     return await _BrowserInitializationHelper.wait_for_browser_window_id_silently(
                         initialization_page,
@@ -1839,25 +1875,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Automatic sign-in with SDK credentials did not complete"
                         ) from error
 
-                    login_attempts += 1
-                    if config.interactive:
-                        self._console.print(
-                            "\n[bold]>[/bold] [bold blue]Signing in to Narada with your SDK "
-                            "credentials...[/bold blue]\n",
-                        )
-
-                    with log_duration(
-                        logger, "start", "sign_in", attempt=login_attempts
-                    ):
-                        custom_token = await self._fetch_browser_login_token()
-                        await initialization_page.goto(
-                            _with_query_params(
-                                initialization_url,
-                                {"customToken": custom_token},
-                            ),
-                            timeout=15_000,
-                            wait_until="domcontentloaded",
-                        )
+                    sign_in_required = True
 
         except PlaywrightError as error:
             logger.warning(
@@ -2309,10 +2327,10 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
 
 
 class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
-    """A browser environment that connects to a backend-cloud browser session via CDP.
+    """A cloud browser environment that routes agent actions to its frontend.
 
-    This class connects to a cloud browser session created by the backend API and provides
-    the same transport semantics as other browser environments for agent operations.
+    Cold sessions use CDP for initialization. Ready warm sessions use the returned
+    browser window ID without opening another CDP connection.
     """
 
     def __init__(
@@ -2358,34 +2376,28 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        async with self._acquire_playwright_lifecycle_lock():
-            try:
-                await self._ensure_playwright_connected()
-                assert self._playwright_browser is not None
-                side_panel_url = create_side_panel_url(
-                    self._config, self.browser_window_id
-                )
-                side_panel_page = _find_page_by_url(
-                    self._playwright_browser, side_panel_url
-                )
-                if side_panel_page is None:
-                    raise NaradaInitializationError(
-                        "Narada side panel is no longer available"
-                    )
-
-                # Reloading cancels any in-flight Narada operations.
-                await side_panel_page.reload()
-            finally:
-                await self._stop_playwright()
+        async with (
+            self._acquire_initialization_lock(),
+            aiohttp.ClientSession() as session,
+        ):
+            async with session.post(
+                f"{self._base_url}/cloud-browser/reset-agent-state",
+                headers=self._auth_headers,
+                json={
+                    "session_id": self.cloud_browser_session_id,
+                    "browser_window_id": self.browser_window_id,
+                },
+                timeout=aiohttp.ClientTimeout(total=45),
+            ) as response:
+                response.raise_for_status()
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
         Retry up to 3 times on error.
 
-        Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
-        Playwright over CDP, opens ``login_url``, and waits for
-        ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
-        interactive prompts and related behavior.
+        Calls ``POST /cloud-browser/create-cloud-browser-session`` with warm reuse enabled.
+        A ready warm browser provides its routing ID without CDP. A cold browser uses
+        ``login_url`` and waits for ``#narada-browser-window-id``.
         """
         max_attempts = 3
         for attempt in range(max_attempts):
@@ -2407,13 +2419,14 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 await asyncio.sleep(retry_backoff_with_jitter)
 
     async def _initialize_once(self) -> None:
-        with log_duration(logger, "start", "start_playwright"):
-            await self._start_playwright()
-        request_body = {
+        request_body: dict[str, Any] = {
             "require_extension": True,
             "session_name": self._session_name,
             "session_timeout": self._session_timeout,
         }
+        if self._config.proxy is not None:
+            request_body["proxy"] = self._config.proxy._cloud_browser_payload()
+
         endpoint_url = f"{self._base_url}/cloud-browser/create-cloud-browser-session"
 
         with log_duration(logger, "start", "create_session"):
@@ -2421,6 +2434,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 async with session.post(
                     endpoint_url,
                     headers=self._auth_headers,
+                    params={"allow_warm_session": "true"},
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(
                         total=180
@@ -2446,13 +2460,22 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._session_id = session_id
         self._cdp_websocket_url = cdp_websocket_url
 
-        # Connect to browser via CDP with authentication headers and log the user in.
-        await self._initialize_cloud_browser_window(
-            cdp_websocket_url=cdp_websocket_url,
-            session_id=session_id,
-            login_url=login_url,
-            cdp_auth_headers=cdp_auth_headers,
-        )
+        browser_window_id = response_data.get("browser_window_id")
+        if browser_window_id is not None:
+            # The frontend download relay owns CDP; SDK actions use this routing ID.
+            self._browser_window_id = browser_window_id
+            if self._config.interactive:
+                self._print_success_message(browser_window_id)
+        else:
+            # Cold start: connect to browser via CDP with authentication headers and log the user in.
+            with log_duration(logger, "start", "start_playwright"):
+                await self._start_playwright()
+            await self._initialize_cloud_browser_window(
+                cdp_websocket_url=cdp_websocket_url,
+                session_id=session_id,
+                login_url=login_url,
+                cdp_auth_headers=cdp_auth_headers,
+            )
 
     @staticmethod
     def _is_non_retryable_initialization_error(error: Exception) -> bool:

@@ -7,7 +7,7 @@ async def main() -> None:
     # Create a cloud browser environment. It initializes lazily on the first action.
     env = CloudBrowserEnvironment(
         session_name="my-cloud-browser-session",  # Optional: label the session
-        session_timeout=3600,  # Optional: session timeout in seconds
+        session_timeout=1800,  # Optional: session timeout in seconds
     )
     agent = Agent(environment=env)
 
