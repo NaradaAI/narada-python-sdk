@@ -57,6 +57,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     CriticConfig,
     File,
     McpServer,
@@ -94,6 +95,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -121,6 +123,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -147,6 +150,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -173,6 +177,11 @@ class Agent(Generic[_StructuredOutput]):
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
             )
+        if speed is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`speed` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own speed per workflow step"
+            )
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
             clear_chat=clear_chat,
@@ -193,6 +202,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            speed=speed,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -240,6 +250,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -265,6 +276,7 @@ class Agent(Generic[_StructuredOutput]):
             prompt=prompt,
             agent=dispatch_agent,
             reasoning=reasoning,
+            speed=speed,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,

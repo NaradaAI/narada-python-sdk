@@ -15,7 +15,7 @@ from narada_core.actions.models import (
     AppendGoogleSheetRowResponse,
     PromptForUserInputVariable,
 )
-from narada_core.models import AgentKind, ReasoningEffort
+from narada_core.models import AgentKind, AgentSpeed, ReasoningEffort
 from packaging.version import InvalidVersion
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -834,6 +834,60 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent(
         await narada_pkg.Agent(environment=env, kind="/owner/custom-agent").run(
             "analyze",
             reasoning=narada_pkg.ReasoningEffort.HIGH,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speed", list(AgentSpeed))
+async def test_agent_run_forwards_speed(
+    monkeypatch: pytest.MonkeyPatch,
+    speed: AgentSpeed,
+) -> None:
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "child-request-123"}),
+            _FakeResponse(
+                json_data={
+                    "status": "success",
+                    "response": {
+                        "text": "done",
+                        "output": {"type": "text", "content": "done"},
+                    },
+                    "completedAt": "2026-05-08T00:00:00+00:00",
+                    "usage": {"actions": 0, "credits": 0},
+                    "hitlInputMetadata": None,
+                }
+            ),
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    await narada_pkg.Agent(environment=env).run("analyze", speed=speed)
+
+    payload = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    assert payload["speed"] == speed.value
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_speed_for_named_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=AsyncMock())
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        cloud_browser_session_id="session-123",
+        api_key="test-api-key",
+    )
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await narada_pkg.Agent(environment=env, kind="/owner/custom-agent").run(
+            "analyze",
+            speed=narada_pkg.AgentSpeed.FAST,
         )
 
 

@@ -57,6 +57,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     File,
     McpServer,
     ReasoningEffort,
@@ -874,6 +875,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -902,6 +904,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -929,6 +932,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -1022,6 +1026,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if speed is not None:
+            body["speed"] = speed.value
 
         try:
             seen_input_ids: set[str] = set()
