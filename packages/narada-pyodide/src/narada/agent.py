@@ -17,6 +17,10 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    AppendGoogleSheetRowRequest,
+    AppendGoogleSheetRowResponse,
+    CloseTabRequest,
+    CloseTabResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -54,6 +58,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     CriticConfig,
     File,
     McpServer,
@@ -93,6 +98,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -121,6 +127,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -148,6 +155,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -175,6 +183,11 @@ class Agent(Generic[_StructuredOutput]):
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
             )
+        if speed is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`speed` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own speed per workflow step"
+            )
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
             clear_chat=clear_chat,
@@ -196,6 +209,7 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             reasoning=reasoning,
             require_execution_trace=require_execution_trace,
+            speed=speed,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -253,6 +267,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -279,6 +294,7 @@ class Agent(Generic[_StructuredOutput]):
             prompt=prompt,
             agent=dispatch_agent,
             reasoning=reasoning,
+            speed=speed,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
@@ -314,21 +330,34 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
+        """Performs an action on an element specified by the given selectors, falling back to the
+        configured Operator agent and speed if the selectors fail to match a unique element.
 
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
         """
+        if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
+            raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
+        if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         request = AgenticSelectorRequest(
             action=action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
+            fallback_agent_type=(
+                "operatorMini"
+                if fallback_agent is AgentKind.OPERATOR_MINI
+                else "operator"
+            ),
+            fallback_speed=fallback_speed,
             verification_description=verification_description,
             verification_delay_ms=verification_delay_ms,
         )
@@ -429,6 +458,15 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
+
+    async def close_tab(self, *, timeout: int | None = None) -> None:
+        """Closes the active browser tab."""
+        environment = self._browser_environment()
+        response = await environment._run_extension_action(
+            CloseTabRequest(), CloseTabResponse, timeout=timeout
+        )
+        if response.closes_window:
+            environment._mark_browser_window_closed()
 
     async def wait_for_element(
         self,
@@ -542,6 +580,25 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
             ReadGoogleSheetResponse,
+            timeout=timeout,
+        )
+
+    async def append_google_sheet_row(
+        self,
+        *,
+        spreadsheet_id: str,
+        header_range: str,
+        row: Mapping[str, str | int | float | bool | None],
+        timeout: int | None = None,
+    ) -> AppendGoogleSheetRowResponse:
+        """Appends an object as a row using the selected range's first row as headers."""
+        return await self._browser_environment()._run_extension_action(
+            AppendGoogleSheetRowRequest(
+                spreadsheet_id=spreadsheet_id,
+                header_range=header_range,
+                row=dict(row),
+            ),
+            AppendGoogleSheetRowResponse,
             timeout=timeout,
         )
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from narada import (
     Agent,
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     Environment,
@@ -13,6 +15,8 @@ from narada import (
     ManagedVectorStore,
     ReasoningEffort,
 )
+from narada.environment import BaseBrowserEnvironment
+from narada_core.actions.models import CloseTabRequest, CloseTabResponse
 
 
 class _FakeResponse:
@@ -86,6 +90,36 @@ class _CountingEnvironment(Environment):
 
 
 @pytest.mark.asyncio
+async def test_agent_close_tab_dispatches_extension_action() -> None:
+    env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
+    env._run_extension_action = AsyncMock(  # type: ignore[method-assign]
+        return_value=CloseTabResponse(closes_window=False)
+    )
+
+    await Agent(environment=env).close_tab(timeout=15)
+
+    env._run_extension_action.assert_awaited_once()
+    request = env._run_extension_action.await_args.args[0]
+    assert isinstance(request, CloseTabRequest)
+    assert request.model_dump() == {"name": "close_tab"}
+    assert env._run_extension_action.await_args.args[1] is CloseTabResponse
+    assert env._run_extension_action.await_args.kwargs == {"timeout": 15}
+    assert env.browser_window_id == "window-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_close_tab_marks_environment_closed_for_last_tab() -> None:
+    env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
+    env._run_extension_action = AsyncMock(  # type: ignore[method-assign]
+        return_value=CloseTabResponse(closes_window=True)
+    )
+
+    await Agent(environment=env).close_tab()
+
+    assert env._browser_window_id is None
+
+
+@pytest.mark.asyncio
 async def test_agent_run_reruns_but_environment_initialization_is_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -110,6 +144,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator second",
     ]
     assert all("reasoningMode" not in body for body in fake_session.dispatched_bodies)
+    assert all("speed" not in body for body in fake_session.dispatched_bodies)
 
 
 @pytest.mark.asyncio
@@ -151,6 +186,40 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
     with pytest.raises(ValueError, match="named Agent Studio agents"):
         await agent.run("analyze", reasoning=ReasoningEffort.HIGH)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speed", list(AgentSpeed))
+@pytest.mark.parametrize("required_trace", [False, True])
+async def test_agent_run_forwards_speed(
+    monkeypatch: pytest.MonkeyPatch,
+    speed: AgentSpeed,
+    required_trace: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(environment=_CountingEnvironment()).run(
+        "analyze", speed=speed, require_execution_trace=required_trace
+    )
+
+    assert fake_session.dispatched_bodies[0]["speed"] == speed.value
+    assert (
+        fake_session.dispatched_bodies[0].get("requireExecutionTrace", False)
+        is required_trace
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_speed_for_named_agent() -> None:
+    agent = Agent(environment=_CountingEnvironment(), kind="/owner/custom-agent")
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await agent.run("analyze", speed=AgentSpeed.FAST)
 
 
 @pytest.mark.asyncio
