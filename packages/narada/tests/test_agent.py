@@ -313,3 +313,27 @@ async def test_agent_run_sends_operator_mini_command_without_transport_tier(
 
     assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
     assert "modelTier" not in fake_session.dispatched_bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    observed = []
+    original_get = session.get
+
+    def get(url, **kwargs):
+        assert observed == ["req-1"]
+        return original_get(url, **kwargs)
+
+    session.get = get
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    class TrackedEnvironment(_CountingEnvironment):
+        async def _internal_on_request_submitted(self, request_id):
+            assert session._poll_count == 0
+            observed.append(request_id)
+
+    await Agent(environment=TrackedEnvironment()).run("synthetic")
+    assert observed == ["req-1"]
