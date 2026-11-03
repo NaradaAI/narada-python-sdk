@@ -190,9 +190,11 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("speed", list(AgentSpeed))
+@pytest.mark.parametrize("required_trace", [False, True])
 async def test_agent_run_forwards_speed(
     monkeypatch: pytest.MonkeyPatch,
     speed: AgentSpeed,
+    required_trace: bool,
 ) -> None:
     import narada.environment as environment_module
 
@@ -201,9 +203,15 @@ async def test_agent_run_forwards_speed(
         environment_module.aiohttp, "ClientSession", lambda: fake_session
     )
 
-    await Agent(environment=_CountingEnvironment()).run("analyze", speed=speed)
+    await Agent(environment=_CountingEnvironment()).run(
+        "analyze", speed=speed, require_execution_trace=required_trace
+    )
 
     assert fake_session.dispatched_bodies[0]["speed"] == speed.value
+    assert (
+        fake_session.dispatched_bodies[0].get("requireExecutionTrace", False)
+        is required_trace
+    )
 
 
 @pytest.mark.asyncio

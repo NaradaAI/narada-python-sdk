@@ -51,6 +51,10 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 class CriticResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    request_id: str | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage

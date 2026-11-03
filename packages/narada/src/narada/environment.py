@@ -894,6 +894,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -923,6 +924,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -951,6 +953,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -971,6 +974,8 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        if require_execution_trace:
+            body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
