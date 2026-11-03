@@ -115,7 +115,7 @@ async def _stop_in_panel(
             raise NaradaError("Narada returned a mismatched Stop acknowledgment")
 
 
-async def stop_browser_request(
+async def _stop_browser_request(
     *,
     base_url: str,
     auth_headers: dict[str, str],

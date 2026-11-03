@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from aiohttp import web
 from narada import BrowserConfig, BrowserEnvironment
-from narada._request_stop import stop_browser_request
+from narada._request_stop import _stop_browser_request
 from narada_core.errors import NaradaError, NaradaTimeoutError
 
 
@@ -135,7 +135,7 @@ async def server(*, behavior="normal", terminal=False, terminal_status="error"):
 
 
 async def stop(state, *, timeout=2):
-    return await stop_browser_request(
+    return await _stop_browser_request(
         base_url=state.url,
         auth_headers={"X-API-Key": "synthetic-key"},
         cdp_url=state.url,

@@ -84,7 +84,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada._logging import log_duration
-from narada._request_stop import _RequestStopResult, stop_browser_request
+from narada._request_stop import _RequestStopResult, _stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
@@ -1327,7 +1327,7 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         This does not launch/reinitialize Chrome, clear chat, or undo effects.
         Unsupported panels and missing completion evidence fail without confirmation.
         """
-        return await stop_browser_request(
+        return await _stop_browser_request(
             base_url=self._base_url,
             auth_headers=self._auth_headers,
             cdp_url=self._config.cdp_url,
