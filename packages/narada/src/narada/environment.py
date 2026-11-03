@@ -84,6 +84,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada._logging import log_duration
+from narada._request_stop import RequestStopResult, stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
@@ -646,6 +647,9 @@ class Environment(ABC):
     _initialized: bool
     _init_lock: asyncio.Lock | None
 
+    async def _on_request_submitted(self, request_id: str) -> None:
+        """Pinned local-runner hook: retain dispatch identity before response polling."""
+
     def __init__(
         self,
         *,
@@ -1047,6 +1051,8 @@ class Environment(ABC):
                         resp.raise_for_status()
                         request_id = (await resp.json())["requestId"]
 
+                await self._on_request_submitted(request_id)
+
                 with log_duration(
                     logger, "agent_run", "wait_for_completion", request_id=request_id
                 ):
@@ -1306,6 +1312,28 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         else:
             await self._open_and_initialize_browser_window()
 
+    async def stop_request(
+        self,
+        request_id: str,
+        *,
+        browser_window_id: str,
+        timeout: float = 30,
+    ) -> RequestStopResult:
+        """Stop an exact request in this existing browser and verify server completion.
+
+        This does not launch/reinitialize Chrome or clear chat. Unsupported side
+        panels and unavailable completion evidence fail without claiming a stop.
+        """
+        return await stop_browser_request(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            cdp_url=self._config.cdp_url,
+            initialization_url=self._config.initialization_url,
+            request_id=request_id,
+            expected_browser_window_id=browser_window_id,
+            timeout=timeout,
+        )
+
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
         async with self._acquire_playwright_lifecycle_lock():
@@ -1332,8 +1360,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Narada side panel is no longer available"
                         )
 
-                    # Refresh the extension side panel, which ensures any inflight Narada
-                    # operations are canceled.
+                    # Refreshing detaches the frontend; it does not confirm a durable
+                    # cancellation. Use stop_request before reset when that is required.
                     if side_panel_match.page is not None:
                         await side_panel_match.page.reload()
                         return

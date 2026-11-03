@@ -31,6 +31,7 @@ from narada_core.models import (
 )
 
 from narada._logging import LOG_FORMAT, enable_logging
+from narada._request_stop import RequestStopResult
 from narada.agent import Agent
 from narada.config import BrowserConfig, ProxyConfig
 from narada.environment import (
@@ -86,6 +87,7 @@ __all__ = [
     "render_html",
     "Response",
     "ResponseContent",
+    "RequestStopResult",
     "SessionDownloadItem",
     "UserAbortedError",
 ]
