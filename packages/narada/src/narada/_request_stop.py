@@ -11,11 +11,12 @@ from narada_core.errors import NaradaError, NaradaTimeoutError
 
 
 @dataclass(frozen=True)
-class RequestStopResult:
-    """Terminal server observation after stopping an exact browser request.
+class _RequestStopResult:
+    """Internal terminal observation for the pinned local-runner integration.
 
     A request that completed before Stop keeps its original success/error result.
-    This record confirms that it is terminal, not that every result is an abort.
+    This record confirms that it is terminal, not that every result is an abort
+    or that the caller's Python workflow and any later requests have stopped.
     """
 
     request_id: str
@@ -123,7 +124,7 @@ async def stop_browser_request(
     request_id: str,
     expected_browser_window_id: str,
     timeout: float,
-) -> RequestStopResult:
+) -> _RequestStopResult:
     if not request_id or len(request_id) > 256 or not expected_browser_window_id:
         raise ValueError("Stop requires the exact request and browser window IDs")
     if timeout <= 0:
@@ -151,7 +152,7 @@ async def stop_browser_request(
                         raise NaradaError(
                             "Request has an inconsistent terminal response"
                         )
-                    return RequestStopResult(
+                    return _RequestStopResult(
                         request_id,
                         expected_browser_window_id,
                         value["status"],

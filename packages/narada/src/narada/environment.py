@@ -84,7 +84,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada._logging import log_duration
-from narada._request_stop import RequestStopResult, stop_browser_request
+from narada._request_stop import _RequestStopResult, stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
@@ -647,8 +647,8 @@ class Environment(ABC):
     _initialized: bool
     _init_lock: asyncio.Lock | None
 
-    async def _on_request_submitted(self, request_id: str) -> None:
-        """Pinned local-runner hook: retain dispatch identity before response polling."""
+    async def _internal_on_request_submitted(self, request_id: str) -> None:
+        """Internal integration hook: retain identity before polling, not public API."""
 
     def __init__(
         self,
@@ -1051,7 +1051,7 @@ class Environment(ABC):
                         resp.raise_for_status()
                         request_id = (await resp.json())["requestId"]
 
-                await self._on_request_submitted(request_id)
+                await self._internal_on_request_submitted(request_id)
 
                 with log_duration(
                     logger, "agent_run", "wait_for_completion", request_id=request_id
@@ -1312,17 +1312,20 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         else:
             await self._open_and_initialize_browser_window()
 
-    async def stop_request(
+    async def _internal_stop_request(
         self,
         request_id: str,
         *,
         browser_window_id: str,
         timeout: float = 30,
-    ) -> RequestStopResult:
-        """Stop an exact request in this existing browser and verify server completion.
+    ) -> _RequestStopResult:
+        """Internal local-runner operation; not a supported public cancellation API.
 
-        This does not launch/reinitialize Chrome or clear chat. Unsupported side
-        panels and unavailable completion evidence fail without claiming a stop.
+        The caller must stop its workflow before invoking this operation so it
+        cannot submit later requests, including a critic. The result confirms
+        only the exact request's terminal state and preserves its actual outcome.
+        This does not launch/reinitialize Chrome, clear chat, or undo effects.
+        Unsupported panels and missing completion evidence fail without confirmation.
         """
         return await stop_browser_request(
             base_url=self._base_url,
@@ -1361,7 +1364,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                         )
 
                     # Refreshing detaches the frontend; it does not confirm a durable
-                    # cancellation. Use stop_request before reset when that is required.
+                    # cancellation. Internal integrations must stop requests first
+                    # when terminal confirmation is required.
                     if side_panel_match.page is not None:
                         await side_panel_match.page.reload()
                         return

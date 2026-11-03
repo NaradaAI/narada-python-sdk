@@ -12,8 +12,16 @@ from narada._request_stop import stop_browser_request
 from narada_core.errors import NaradaError, NaradaTimeoutError
 
 
+def test_runner_stop_is_not_a_public_sdk_interface():
+    import narada
+
+    assert not hasattr(BrowserEnvironment, "stop_request")
+    assert not hasattr(narada, "RequestStopResult")
+    assert "RequestStopResult" not in narada.__all__
+
+
 @asynccontextmanager
-async def server(*, behavior="normal", terminal=False):
+async def server(*, behavior="normal", terminal=False, terminal_status="error"):
     state = SimpleNamespace(
         stopped=False, gets=0, stops=0, methods=[], terminal=terminal
     )
@@ -27,7 +35,7 @@ async def server(*, behavior="normal", terminal=False):
         return web.json_response(
             {
                 "browserWindowId": "other" if behavior == "wrong-owner" else "owned",
-                "status": "error" if done else "pending",
+                "status": terminal_status if done else "pending",
                 "completedAt": (
                     123 if behavior == "bad-terminal" else "2026-11-03T00:00:00Z"
                 )
@@ -151,9 +159,13 @@ async def test_stop_requires_durable_terminal_response_after_panel_ack():
 
 
 @pytest.mark.asyncio
-async def test_already_terminal_does_not_touch_browser():
-    async with server(terminal=True) as state:
-        await stop(state)
+@pytest.mark.parametrize("terminal_status", ["success", "error"])
+async def test_already_terminal_preserves_outcome_without_touching_browser(
+    terminal_status,
+):
+    async with server(terminal=True, terminal_status=terminal_status) as state:
+        result = await stop(state)
+        assert result.status == terminal_status
         assert not state.methods
         assert state.gets == 1
 
@@ -187,7 +199,7 @@ async def test_malformed_terminal_evidence_is_not_confirmation():
 
 
 @pytest.mark.asyncio
-async def test_public_stop_does_not_initialize_or_launch_browser(monkeypatch):
+async def test_internal_stop_does_not_initialize_or_launch_browser(monkeypatch):
     async with server(terminal=True) as state:
         config = BrowserConfig(
             cdp_host="http://127.0.0.1",
@@ -202,5 +214,7 @@ async def test_public_stop_does_not_initialize_or_launch_browser(monkeypatch):
             raise AssertionError("must not initialize")
 
         monkeypatch.setattr(environment, "_ensure_initialized", forbidden)
-        result = await environment.stop_request("request-a", browser_window_id="owned")
+        result = await environment._internal_stop_request(
+            "request-a", browser_window_id="owned"
+        )
         assert result.request_id == "request-a"

@@ -331,7 +331,7 @@ async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
     monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
 
     class TrackedEnvironment(_CountingEnvironment):
-        async def _on_request_submitted(self, request_id):
+        async def _internal_on_request_submitted(self, request_id):
             assert session._poll_count == 0
             observed.append(request_id)
 
