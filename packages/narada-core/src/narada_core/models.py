@@ -37,6 +37,7 @@ class ReasoningEffort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
 
 
 class AgentSpeed(StrEnum):

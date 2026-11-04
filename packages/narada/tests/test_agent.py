@@ -152,6 +152,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
     ("kind", "reasoning", "expected_prompt"),
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.XHIGH, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
         (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
