@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from narada_core.actions.models import HitlInputMetadata
 
@@ -45,6 +45,15 @@ class AgentSpeed(StrEnum):
     STANDARD = "standard"
     FAST = "fast"
     ULTRAFAST = "ultrafast"
+
+
+class Guardrails(BaseModel):
+    """URL allowlist and blacklist configuration for an agent invocation."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    url_allowlist: list[str] = Field(default_factory=list, alias="urlAllowlist")
+    url_blacklist: list[str] = Field(default_factory=list, alias="urlBlacklist")
 
 
 class UserResourceCredentials(TypedDict, total=False):

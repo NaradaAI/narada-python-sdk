@@ -59,6 +59,7 @@ from narada_core.models import (
     AgentKind,
     AgentSpeed,
     File,
+    Guardrails,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -880,6 +881,7 @@ class Environment(ABC):
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -910,6 +912,7 @@ class Environment(ABC):
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -939,6 +942,7 @@ class Environment(ABC):
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -986,6 +990,8 @@ class Environment(ABC):
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
+        if guardrails is not None:
+            body["guardrails"] = guardrails.model_dump(mode="json", by_alias=True)
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:

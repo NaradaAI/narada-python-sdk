@@ -53,6 +53,7 @@ uv run python examples/01_getting_started/01_run_your_first_task.py
 | [`02_connect_mcp_tools.py`](04_extending_the_agent/02_connect_mcp_tools.py) | Give the agent extra tools from an MCP server for a single run. |
 | [`03_connect_a_vector_store.py`](04_extending_the_agent/03_connect_a_vector_store.py) | Resolve a managed vector store by its canonical owner-qualified path and attach it to an agent run. |
 | [`04_connect_an_external_vector_store.py`](04_extending_the_agent/04_connect_an_external_vector_store.py) | Configure an Amazon Bedrock Knowledge Base from environment variables and attach it to a run. |
+| [`05_override_guardrails.py`](04_extending_the_agent/05_override_guardrails.py) | Override both URL lists for one invocation without changing the saved workflow. |
 
 ## 05 — Browser setups
 
