@@ -12,9 +12,11 @@ from narada_core.actions.models import (
     AgenticMouseActionRequest,
     AgenticMouseActionResponse,
     AgenticSelectorAction,
-    AgenticSelectorRequest,
+    AgenticSelectorBatchRequest,
+    AgenticSelectorBatchResponse,
     AgenticSelectorResponse,
     AgenticSelectors,
+    AgenticSelectorTarget,
     AgentResponse,
     AgentUsage,
     AppendGoogleSheetRowRequest,
@@ -324,6 +326,7 @@ class Agent(Generic[_StructuredOutput]):
             )
         return self.environment
 
+    @overload
     async def agentic_selector(
         self,
         *,
@@ -334,50 +337,89 @@ class Agent(Generic[_StructuredOutput]):
         fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
+        timeout: int | None = 300,
+    ) -> AgenticSelectorResponse: ...
+
+    @overload
+    async def agentic_selector(
+        self,
+        *,
+        actions: list[AgenticSelectorTarget],
+        fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
+        timeout: int | None = 300,
+    ) -> AgenticSelectorBatchResponse: ...
+
+    async def agentic_selector(
+        self,
+        *,
+        action: AgenticSelectorAction | None = None,
+        selectors: AgenticSelectors | None = None,
+        actions: list[AgenticSelectorTarget] | None = None,
+        fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
+        verification_description: str | None = None,
+        verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
-    ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to the
-        configured Operator agent and speed if the selectors fail to match a unique element.
-
-        Returns AgenticSelectorResponse with the value for read actions and the verification status
-        when verification_description is provided.
-        """
+    ) -> AgenticSelectorResponse | AgenticSelectorBatchResponse:
+        """Perform one or more selector actions with one shared configured Operator fallback."""
         if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
             raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
         if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
             raise ValueError("ultrafast speed is not supported by Operator Mini")
 
-        request = AgenticSelectorRequest(
-            action=action,
-            selectors=selectors,
-            fallback_operator_query=fallback_operator_query,
-            fallback_agent_type=(
-                "operatorMini"
-                if fallback_agent is AgentKind.OPERATOR_MINI
-                else "operator"
-            ),
-            fallback_speed=fallback_speed,
-            verification_description=verification_description,
-            verification_delay_ms=verification_delay_ms,
+        fallback_agent_type = (
+            "operatorMini" if fallback_agent is AgentKind.OPERATOR_MINI else "operator"
         )
-        response_model = (
-            AgenticSelectorResponse
-            if action["type"] in {"get_text", "get_property"}
-            or request.verification_description is not None
-            else None
+        if actions is None and action is not None and selectors is not None:
+            request = AgenticSelectorBatchRequest(
+                actions=[{"action": action, "selectors": selectors}],
+                fallback_operator_query=fallback_operator_query,
+                fallback_agent_type=fallback_agent_type,
+                fallback_speed=fallback_speed,
+                verification_description=verification_description,
+                verification_delay_ms=verification_delay_ms,
+            )
+            if (
+                action["type"] in {"get_text", "get_property"}
+                or request.verification_description is not None
+            ):
+                response_model = AgenticSelectorResponse
+            else:
+                response_model = None
+
+            result = await self._browser_environment()._run_extension_action(
+                request,
+                response_model,
+                timeout=timeout,
+            )
+            if result is None:
+                return AgenticSelectorResponse(value=None)
+            return result
+
+        if actions and action is None and selectors is None:
+            request = AgenticSelectorBatchRequest(
+                actions=actions,
+                fallback_operator_query=fallback_operator_query,
+                fallback_agent_type=fallback_agent_type,
+                fallback_speed=fallback_speed,
+                verification_description=verification_description,
+                verification_delay_ms=verification_delay_ms,
+            )
+            return await self._browser_environment()._run_extension_action(
+                request,
+                AgenticSelectorBatchResponse,
+                timeout=timeout,
+            )
+
+        raise ValueError(
+            "Provide either action and selectors or a non-empty actions list"
         )
-
-        result = await self._browser_environment()._run_extension_action(
-            request,
-            response_model,
-            timeout=timeout,
-        )
-
-        if result is None:
-            return AgenticSelectorResponse(value=None)
-
-        return result
 
     async def agentic_matching_selectors_finder(
         self,
