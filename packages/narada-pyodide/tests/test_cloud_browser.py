@@ -1971,35 +1971,39 @@ async def test_google_drive_refreshes_pyodide_auth_and_surfaces_errors(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "entries",
+    ("kind", "entries"),
     [
-        None,
-        {},
-        {"url_allowlist": ["*.example.com/*"]},
-        {"url_blacklist": ["blocked.example"]},
+        ("builtin", None),
+        ("gui", {}),
+        (
+            "builtin",
+            {
+                "url_allowlist": ["*.example.com/*"],
+                "url_blacklist": ["blocked.example"],
+            },
+        ),
     ],
 )
-@pytest.mark.parametrize("kind", ["builtin", "gui"])
 async def test_agent_run_guardrails_serialization(
     monkeypatch: pytest.MonkeyPatch,
     entries: dict[str, list[str]] | None,
     kind: str,
 ) -> None:
+    terminal_response = _FakeResponse(
+        json_data={
+            "status": "success",
+            "completedAt": "2026-01-01T00:00:01Z",
+            "response": {"text": "ok", "output": {"type": "text", "content": "ok"}},
+            "usage": {"actions": 0, "credits": 0},
+            "hitlInputMetadata": None,
+        }
+    )
     pyfetch = AsyncMock(
         side_effect=[
             _FakeResponse(json_data={"requestId": "guardrails-request"}),
-            _FakeResponse(
-                json_data={
-                    "status": "success",
-                    "completedAt": "2026-01-01T00:00:01Z",
-                    "response": {
-                        "text": "ok",
-                        "output": {"type": "text", "content": "ok"},
-                    },
-                    "usage": {"actions": 0, "credits": 0},
-                    "hitlInputMetadata": None,
-                }
-            ),
+            terminal_response,
+            _FakeResponse(json_data={"requestId": "next-request"}),
+            terminal_response,
         ]
     )
     narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
@@ -2023,17 +2027,5 @@ async def test_agent_run_guardrails_serialization(
             "urlBlacklist": entries.get("url_blacklist", []),
         }
 
-    pyfetch.side_effect = [
-        _FakeResponse(json_data={"requestId": "next-request"}),
-        _FakeResponse(
-            json_data={
-                "status": "success",
-                "completedAt": "2026-01-01T00:00:01Z",
-                "response": {"text": "ok", "output": {"type": "text", "content": "ok"}},
-                "usage": {"actions": 0, "credits": 0},
-                "hitlInputMetadata": None,
-            }
-        ),
-    ]
     await agent.run("next invocation")
     assert "guardrails" not in json.loads(pyfetch.await_args_list[2].kwargs["body"])

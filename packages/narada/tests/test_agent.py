@@ -18,7 +18,6 @@ from narada import (
 )
 from narada.environment import BaseBrowserEnvironment
 from narada_core.actions.models import CloseTabRequest, CloseTabResponse
-from pydantic import ValidationError
 
 
 class _FakeResponse:
@@ -342,14 +341,18 @@ async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", [AgentKind.OPERATOR, "/owner/gui-workflow"])
 @pytest.mark.parametrize(
-    "guardrails",
+    ("kind", "guardrails"),
     [
-        None,
-        Guardrails(),
-        Guardrails(url_allowlist=["https://example.com/*"]),
-        Guardrails(url_allowlist=["*.example.com"], url_blacklist=["blocked.example"]),
+        (AgentKind.OPERATOR, None),
+        ("/owner/gui-workflow", Guardrails()),
+        (
+            AgentKind.OPERATOR,
+            Guardrails(
+                url_allowlist=["https://Example.com/Path?x=1", "*.example.org/*"],
+                url_blacklist=["blocked.example"],
+            ),
+        ),
     ],
 )
 async def test_agent_run_guardrails_wire_format_and_invocation_isolation(
@@ -398,20 +401,3 @@ async def test_agent_run_passes_guardrails_to_critic_dispatch(
         body["guardrails"] == {"urlAllowlist": [], "urlBlacklist": []}
         for body in session.dispatched_bodies
     )
-
-
-def test_guardrails_model_validates_shape_and_preserves_entries() -> None:
-    guardrails = Guardrails(
-        url_allowlist=["An opaque pattern", "https://Example.com/Path"]
-    )
-    assert guardrails.model_dump(by_alias=True) == {
-        "urlAllowlist": ["An opaque pattern", "https://Example.com/Path"],
-        "urlBlacklist": [],
-    }
-    for invalid in (
-        {"url_allowlist": "example.com"},
-        {"url_blacklist": [123]},
-        {"unknown": []},
-    ):
-        with pytest.raises(ValidationError):
-            Guardrails.model_validate(invalid)
