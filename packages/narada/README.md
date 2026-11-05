@@ -133,6 +133,31 @@ response = await Agent(environment=env, kind=AgentKind.PRODUCTIVITY).run(
 See the managed and external examples in
 [`examples/04_extending_the_agent/`](examples/04_extending_the_agent/).
 
+## Guardrails overrides
+
+Pass URL configuration for one agent invocation, including its nested GUI workflows and critic:
+
+```python
+from narada import Guardrails
+
+response = await agent.run(
+    "Run the workflow",
+    guardrails=Guardrails(
+        url_allowlist=["https://example.com/*"],
+        url_blacklist=["https://example.com/private/*"],
+    ),
+)
+```
+
+Both desktop and Pyodide SDKs expose the same API. Omit `guardrails` or pass `None` to use each GUI
+workflow's saved settings. Built-in agents and workflows without saved settings default to empty
+lists. A supplied model replaces both lists: `Guardrails()` explicitly clears them for the current
+invocation, and supplying only an allowlist clears the blacklist. Overrides never update the saved
+workflow. Saved Python workflows do not support overrides; direct deterministic actions are unchanged.
+
+Entries are strings, with no URL or wildcard validation. This API carries configuration only;
+navigation enforcement is not active yet.
+
 ## Logging
 
 The SDK logs through standard `logging` loggers named after its modules, such as

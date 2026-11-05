@@ -1023,7 +1023,14 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
         cloud_browser_session_id="session-123",
         api_key="test-api-key",
     )
-    response = await narada_pkg.Agent(environment=env).run("return a trace", critic={})
+    response = await narada_pkg.Agent(environment=env).run(
+        "return a trace", critic={}, guardrails=narada_pkg.Guardrails()
+    )
+    for call in (pyfetch.await_args_list[0], pyfetch.await_args_list[2]):
+        assert json.loads(call.kwargs["body"])["guardrails"] == {
+            "urlAllowlist": [],
+            "urlBlacklist": [],
+        }
 
     combined_workflow_trace = {
         **workflow_trace,
@@ -1961,3 +1968,65 @@ async def test_google_drive_refreshes_pyodide_auth_and_surfaces_errors(
         pyfetch.await_args.kwargs["headers"]["Authorization"]
         == "Bearer frontend-id-token"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "entries"),
+    [
+        ("builtin", None),
+        ("gui", {}),
+        (
+            "builtin",
+            {
+                "url_allowlist": ["*.example.com/*"],
+                "url_blacklist": ["blocked.example"],
+            },
+        ),
+    ],
+)
+async def test_agent_run_guardrails_serialization(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: dict[str, list[str]] | None,
+    kind: str,
+) -> None:
+    terminal_response = _FakeResponse(
+        json_data={
+            "status": "success",
+            "completedAt": "2026-01-01T00:00:01Z",
+            "response": {"text": "ok", "output": {"type": "text", "content": "ok"}},
+            "usage": {"actions": 0, "credits": 0},
+            "hitlInputMetadata": None,
+        }
+    )
+    pyfetch = AsyncMock(
+        side_effect=[
+            _FakeResponse(json_data={"requestId": "guardrails-request"}),
+            terminal_response,
+            _FakeResponse(json_data={"requestId": "next-request"}),
+            terminal_response,
+        ]
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="window-1", api_key="test-key"
+    )
+    guardrails = None if entries is None else narada_pkg.Guardrails(**entries)
+    agent = narada_pkg.Agent(
+        environment=env,
+        kind=narada_pkg.AgentKind.OPERATOR
+        if kind == "builtin"
+        else "/owner/gui-workflow",
+    )
+    await agent.run("task", guardrails=guardrails)
+    body = json.loads(pyfetch.await_args_list[0].kwargs["body"])
+    if entries is None:
+        assert "guardrails" not in body
+    else:
+        assert body["guardrails"] == {
+            "urlAllowlist": entries.get("url_allowlist", []),
+            "urlBlacklist": entries.get("url_blacklist", []),
+        }
+
+    await agent.run("next invocation")
+    assert "guardrails" not in json.loads(pyfetch.await_args_list[2].kwargs["body"])

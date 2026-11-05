@@ -12,6 +12,7 @@ from narada import (
     BedrockCredentials,
     Environment,
     ExternalVectorStore,
+    Guardrails,
     ManagedVectorStore,
     ReasoningEffort,
 )
@@ -338,3 +339,66 @@ async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
 
     await Agent(environment=TrackedEnvironment()).run("synthetic")
     assert observed == ["req-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "guardrails"),
+    [
+        (AgentKind.OPERATOR, None),
+        ("/owner/gui-workflow", Guardrails()),
+        (
+            AgentKind.OPERATOR,
+            Guardrails(
+                url_allowlist=["https://Example.com/Path?x=1", "*.example.org/*"],
+                url_blacklist=["blocked.example"],
+            ),
+        ),
+    ],
+)
+async def test_agent_run_guardrails_wire_format_and_invocation_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: AgentKind | str,
+    guardrails: Guardrails | None,
+) -> None:
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment(), kind=kind)
+    await agent.run("first", guardrails=guardrails)
+    await agent.run("second")
+
+    first, second = session.dispatched_bodies
+    if guardrails is None:
+        assert "guardrails" not in first
+    else:
+        assert first["guardrails"] == {
+            "urlAllowlist": guardrails.url_allowlist,
+            "urlBlacklist": guardrails.url_blacklist,
+        }
+    assert "guardrails" not in second
+
+
+@pytest.mark.asyncio
+async def test_agent_run_passes_guardrails_to_critic_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.agent as agent_module
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    async def critic_dispatch(**kwargs: Any) -> None:
+        await kwargs["dispatch_request"](prompt="verify", agent=AgentKind.PRODUCTIVITY)
+
+    monkeypatch.setattr(agent_module, "run_critic", critic_dispatch)
+    await Agent(environment=_CountingEnvironment()).run(
+        "task", guardrails=Guardrails(), critic={}
+    )
+    assert len(session.dispatched_bodies) == 2
+    assert all(
+        body["guardrails"] == {"urlAllowlist": [], "urlBlacklist": []}
+        for body in session.dispatched_bodies
+    )
