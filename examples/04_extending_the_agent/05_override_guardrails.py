@@ -15,8 +15,9 @@ async def main() -> None:
             ),
         )
         print("Response:", response.model_dump_json(indent=2))
-        # Guardrails() clears both lists for this call. Omit the argument to use saved settings.
-        # This configuration does not enforce navigation yet.
+        # Override the workflow's saved URL allowlist and blacklist with empty lists
+        # for this run only. The saved workflow settings stay unchanged.
+        # Leave out the guardrails argument to use the workflow's saved lists.
         response = await agent.run("Jane Doe", guardrails=Guardrails())
         print("Response:", response.model_dump_json(indent=2))
     finally:
