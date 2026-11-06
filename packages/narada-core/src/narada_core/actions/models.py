@@ -165,7 +165,7 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             }
 
 
-class AgenticSelectors(TypedDict, total=False):
+class _AgenticSelectors(TypedDict, total=False):
     """Optional selector fields shared by browser actions.
 
     Text alone targets the innermost matching element. Combining text with a tag,
@@ -186,13 +186,18 @@ class AgenticSelectors(TypedDict, total=False):
     xpath: str
 
 
-def _validate_selector_text(selectors: AgenticSelectors) -> AgenticSelectors:
+def _validate_selector_text(selectors: _AgenticSelectors) -> _AgenticSelectors:
     if "text_content" in selectors and not selectors["text_content"].strip():
         raise ValueError(
             "text_content must not be empty or whitespace-only; "
             "omit the field to select without a text constraint"
         )
     return selectors
+
+
+type AgenticSelectors = Annotated[
+    _AgenticSelectors, AfterValidator(_validate_selector_text)
+]
 
 
 def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
@@ -225,7 +230,7 @@ def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
 class AgenticSelectorRequest(BaseModel):
     name: Literal["agentic_selector"] = "agentic_selector"
     action: AgenticSelectorAction
-    selectors: Annotated[AgenticSelectors, AfterValidator(_validate_selector_text)]
+    selectors: AgenticSelectors
     fallback_operator_query: str
     fallback_agent_type: Literal["operator", "operatorMini"] = "operator"
     fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard"
@@ -287,7 +292,7 @@ class AgenticMatchingSelectorsFinderResponse(BaseModel):
 
 class WaitForElementRequest(BaseModel):
     name: Literal["wait_for_element"] = "wait_for_element"
-    selectors: Annotated[AgenticSelectors, AfterValidator(_validate_selector_text)]
+    selectors: AgenticSelectors
     state: Literal["visible", "hidden"]
     timeout: int  # milliseconds
 
