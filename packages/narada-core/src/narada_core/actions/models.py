@@ -14,7 +14,7 @@ from typing import (
 )
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.tracing import model as tracing_model
 
@@ -165,7 +165,14 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             }
 
 
-class AgenticSelectors(TypedDict, total=False):
+class _AgenticSelectors(TypedDict, total=False):
+    """Optional selector fields shared by browser actions.
+
+    Text alone targets the innermost matching element. Combining text with a tag,
+    role, or class retains that constrained element. ID and path selectors remain
+    independent fallback strategies; omit them when text must determine the target.
+    """
+
     id: str
     data_testid: str
     name: str
@@ -177,6 +184,20 @@ class AgenticSelectors(TypedDict, total=False):
     class_name: str
     dom_path: str
     xpath: str
+
+
+def _validate_selector_text(selectors: _AgenticSelectors) -> _AgenticSelectors:
+    if "text_content" in selectors and not selectors["text_content"].strip():
+        raise ValueError(
+            "text_content must not be empty or whitespace-only; "
+            "omit the field to select without a text constraint"
+        )
+    return selectors
+
+
+type AgenticSelectors = Annotated[
+    _AgenticSelectors, AfterValidator(_validate_selector_text)
+]
 
 
 def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
