@@ -340,6 +340,12 @@ class Agent(Generic[_StructuredOutput]):
         """Performs an action on an element specified by the given selectors, falling back to the
         configured Operator agent and speed if the selectors fail to match a unique element.
 
+        Use {"text_content": "Save"} for the innermost text match, or combine it with
+        {"tag_name": "button"} to target the containing button. Role and class_name
+        can constrain text too. ID and path fields are independent fallback strategies.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch;
+        omit text_content when no text constraint is intended.
+
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
         """
@@ -476,6 +482,9 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int,
     ) -> bool:
         """Waits for an element matching the given selectors to reach the specified state.
+
+        Text selectors work alone or with tag/attribute constraints, as in agentic_selector.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch.
 
         Returns True if the element was found, False if no selector matched before timeout.
         """
