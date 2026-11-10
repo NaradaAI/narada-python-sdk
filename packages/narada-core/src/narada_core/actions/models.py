@@ -233,7 +233,7 @@ class AgenticSelectorRequest(BaseModel):
     selectors: AgenticSelectors
     fallback_operator_query: str
     fallback_agent_type: Literal["operator", "operatorMini"] = "operator"
-    fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard"
+    fallback_speed: Literal["standard", "fast", "ultrafast"] = "fast"
     verification_description: str | None = None
     verification_delay_ms: int | None = None
 

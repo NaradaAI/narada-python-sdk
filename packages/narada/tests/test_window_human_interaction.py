@@ -311,7 +311,7 @@ async def test_agentic_selector_returns_verification_status(
         },
         "fallback_operator_query": "Click the submit button",
         "fallback_agent_type": "operator",
-        "fallback_speed": "standard",
+        "fallback_speed": "fast",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
     }
@@ -336,7 +336,7 @@ async def test_agentic_selector_serializes_fallback_model_and_speed(
         selectors={"tag_name": "button"},
         fallback_operator_query="Click the submit button",
         fallback_agent=AgentKind.OPERATOR_MINI,
-        fallback_speed="fast",
+        fallback_speed="standard",
     )
 
     assert fake_session.post_bodies[0]["action"] == {
@@ -345,7 +345,7 @@ async def test_agentic_selector_serializes_fallback_model_and_speed(
         "selectors": {"tagName": {"value": "button"}},
         "fallback_operator_query": "Click the submit button",
         "fallback_agent_type": "operatorMini",
-        "fallback_speed": "fast",
+        "fallback_speed": "standard",
     }
 
 
