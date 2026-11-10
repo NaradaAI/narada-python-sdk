@@ -323,7 +323,7 @@ class Agent(Generic[_StructuredOutput]):
         selectors: AgenticSelectors,
         fallback_operator_query: str,
         fallback_agent: AgentKind = AgentKind.OPERATOR,
-        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "fast",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
