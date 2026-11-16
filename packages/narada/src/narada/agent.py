@@ -47,6 +47,7 @@ from narada_core.actions.models import (
     ReadGoogleSheetRequest,
     ReadGoogleSheetResponse,
     RecordedClick,
+    ResizeWindowRequest,
     SavePdfFileRequest,
     SavePdfFileResponse,
     UserApprovalRequest,
@@ -453,6 +454,14 @@ class Agent(Generic[_StructuredOutput]):
         """Navigates the active page in this window to the given URL."""
         return await self._browser_environment()._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
+        )
+
+    async def resize_window(
+        self, *, width: int, height: int, timeout: int | None = None
+    ) -> None:
+        """Resizes this browser window to the given outer dimensions in pixels."""
+        await self._browser_environment()._run_extension_action(
+            ResizeWindowRequest(width=width, height=height), timeout=timeout
         )
 
     async def close_tab(self, *, timeout: int | None = None) -> None:
