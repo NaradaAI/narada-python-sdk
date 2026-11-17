@@ -37,6 +37,15 @@ class ReasoningEffort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
+
+
+class AgentSpeed(StrEnum):
+    """Controls the processing tier used for built-in Narada agent responses."""
+
+    STANDARD = "standard"
+    FAST = "fast"
+    ULTRAFAST = "ultrafast"
 
 
 class UserResourceCredentials(TypedDict, total=False):

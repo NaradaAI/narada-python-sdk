@@ -7,6 +7,7 @@ import pytest
 from narada import (
     Agent,
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     Environment,
@@ -143,6 +144,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator second",
     ]
     assert all("reasoningMode" not in body for body in fake_session.dispatched_bodies)
+    assert all("speed" not in body for body in fake_session.dispatched_bodies)
 
 
 @pytest.mark.asyncio
@@ -150,6 +152,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
     ("kind", "reasoning", "expected_prompt"),
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.XHIGH, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
         (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
@@ -184,6 +187,40 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
     with pytest.raises(ValueError, match="named Agent Studio agents"):
         await agent.run("analyze", reasoning=ReasoningEffort.HIGH)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speed", list(AgentSpeed))
+@pytest.mark.parametrize("required_trace", [False, True])
+async def test_agent_run_forwards_speed(
+    monkeypatch: pytest.MonkeyPatch,
+    speed: AgentSpeed,
+    required_trace: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(environment=_CountingEnvironment()).run(
+        "analyze", speed=speed, require_execution_trace=required_trace
+    )
+
+    assert fake_session.dispatched_bodies[0]["speed"] == speed.value
+    assert (
+        fake_session.dispatched_bodies[0].get("requireExecutionTrace", False)
+        is required_trace
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_speed_for_named_agent() -> None:
+    agent = Agent(environment=_CountingEnvironment(), kind="/owner/custom-agent")
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await agent.run("analyze", speed=AgentSpeed.FAST)
 
 
 @pytest.mark.asyncio
@@ -277,3 +314,27 @@ async def test_agent_run_sends_operator_mini_command_without_transport_tier(
 
     assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
     assert "modelTier" not in fake_session.dispatched_bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    observed = []
+    original_get = session.get
+
+    def get(url, **kwargs):
+        assert observed == ["req-1"]
+        return original_get(url, **kwargs)
+
+    session.get = get
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    class TrackedEnvironment(_CountingEnvironment):
+        async def _internal_on_request_submitted(self, request_id):
+            assert session._poll_count == 0
+            observed.append(request_id)
+
+    await Agent(environment=TrackedEnvironment()).run("synthetic")
+    assert observed == ["req-1"]

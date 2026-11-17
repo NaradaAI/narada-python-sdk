@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -59,6 +60,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     CriticConfig,
     File,
     McpServer,
@@ -96,6 +98,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -114,6 +117,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -123,6 +127,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -141,6 +146,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -149,6 +155,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -167,6 +174,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
@@ -174,6 +182,11 @@ class Agent(Generic[_StructuredOutput]):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
+            )
+        if speed is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`speed` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own speed per workflow step"
             )
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
@@ -195,6 +208,8 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            require_execution_trace=require_execution_trace,
+            speed=speed,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -211,7 +226,10 @@ class Agent(Generic[_StructuredOutput]):
         critic_result: CriticResult | None = None
         if critic is not None:
             critic_result = await run_critic(
-                dispatch_request=self._dispatch_request,
+                dispatch_request=partial(
+                    self._dispatch_request,
+                    require_execution_trace=require_execution_trace,
+                ),
                 original_prompt=prompt,
                 response_content=response_content,
                 action_trace_raw=action_trace_raw,
@@ -234,6 +252,7 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def _dispatch_request(
@@ -242,6 +261,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -260,6 +280,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -267,6 +288,7 @@ class Agent(Generic[_StructuredOutput]):
             prompt=prompt,
             agent=dispatch_agent,
             reasoning=reasoning,
+            speed=speed,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
@@ -285,6 +307,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             critic_context=critic_context,
+            require_execution_trace=require_execution_trace,
             timeout=timeout,
         )
 
@@ -336,7 +359,18 @@ class Agent(Generic[_StructuredOutput]):
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse | AgenticSelectorBatchResponse:
-        """Perform one or more selector actions with one shared configured Operator fallback."""
+        """Perform one or more selector actions, falling back to the
+        configured Operator agent and speed if the selectors fail to match a unique element.
+
+        Use {"text_content": "Save"} for the innermost text match, or combine it with
+        {"tag_name": "button"} to target the containing button. Role and class_name
+        can constrain text too. ID and path fields are independent fallback strategies.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch;
+        omit text_content when no text constraint is intended.
+        A single action returns AgenticSelectorResponse; actions returns
+        AgenticSelectorBatchResponse. Read actions include the value, and verification
+        results are included when verification_description is provided.
+        """
         if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
             raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
         if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
@@ -487,6 +521,9 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int,
     ) -> bool:
         """Waits for an element matching the given selectors to reach the specified state.
+
+        Text selectors work alone or with tag/attribute constraints, as in agentic_selector.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch.
 
         Returns True if the element was found, False if no selector matched before timeout.
         """

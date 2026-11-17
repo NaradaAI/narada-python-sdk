@@ -57,6 +57,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     File,
     McpServer,
     ReasoningEffort,
@@ -83,6 +84,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada._logging import log_duration
+from narada._request_stop import _RequestStopResult, _stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
 from narada.utils import assert_not_none
@@ -645,6 +647,9 @@ class Environment(ABC):
     _initialized: bool
     _init_lock: asyncio.Lock | None
 
+    async def _internal_on_request_submitted(self, request_id: str) -> None:
+        """Internal integration hook: retain identity before polling, not public API."""
+
     def __init__(
         self,
         *,
@@ -874,6 +879,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -892,6 +898,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -902,6 +909,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -920,6 +928,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -929,6 +938,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -947,6 +957,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -967,6 +978,8 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        if require_execution_trace:
+            body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
@@ -1022,6 +1035,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if speed is not None:
+            body["speed"] = speed.value
 
         try:
             seen_input_ids: set[str] = set()
@@ -1035,6 +1050,8 @@ class Environment(ABC):
                     ) as resp:
                         resp.raise_for_status()
                         request_id = (await resp.json())["requestId"]
+
+                await self._internal_on_request_submitted(request_id)
 
                 with log_duration(
                     logger, "agent_run", "wait_for_completion", request_id=request_id
@@ -1295,6 +1312,31 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         else:
             await self._open_and_initialize_browser_window()
 
+    async def _internal_stop_request(
+        self,
+        request_id: str,
+        *,
+        browser_window_id: str,
+        timeout: float = 30,
+    ) -> _RequestStopResult:
+        """Internal local-runner operation; not a supported public cancellation API.
+
+        The caller must stop its workflow before invoking this operation so it
+        cannot submit later requests, including a critic. The result confirms
+        only the exact request's terminal state and preserves its actual outcome.
+        This does not launch/reinitialize Chrome, clear chat, or undo effects.
+        Unsupported panels and missing completion evidence fail without confirmation.
+        """
+        return await _stop_browser_request(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            cdp_url=self._config.cdp_url,
+            initialization_url=self._config.initialization_url,
+            request_id=request_id,
+            expected_browser_window_id=browser_window_id,
+            timeout=timeout,
+        )
+
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
         async with self._acquire_playwright_lifecycle_lock():
@@ -1321,8 +1363,9 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Narada side panel is no longer available"
                         )
 
-                    # Refresh the extension side panel, which ensures any inflight Narada
-                    # operations are canceled.
+                    # Refreshing detaches the frontend; it does not confirm a durable
+                    # cancellation. Internal integrations must stop requests first
+                    # when terminal confirmation is required.
                     if side_panel_match.page is not None:
                         await side_panel_match.page.reload()
                         return
