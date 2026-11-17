@@ -30,6 +30,7 @@ from narada_core.models import (
     VectorStore,
 )
 
+from narada import file_variable
 from narada._logging import LOG_FORMAT, enable_logging
 from narada.agent import Agent
 from narada.config import BrowserConfig, ProxyConfig
@@ -66,6 +67,7 @@ __all__ = [
     "Environment",
     "ExternalVectorStore",
     "File",
+    "file_variable",
     "GoogleDriveAuth",
     "GoogleDriveClient",
     "GoogleDriveFile",
