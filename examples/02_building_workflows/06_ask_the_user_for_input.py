@@ -13,7 +13,6 @@ async def main() -> None:
         # Use prompt_for_user_input when the script needs runtime details
         # that should come from a person instead of being hard-coded.
         values = await agent.prompt_for_user_input(
-            step_id="collect-research-details",
             variables=[
                 PromptForUserInputVariable(
                     name="company",
@@ -36,7 +35,6 @@ async def main() -> None:
         # Use user_approval before an action that costs time, uses credits,
         # changes external state, or depends on the user's confirmation.
         approved = await agent.user_approval(
-            step_id="approve-research-run",
             prompt_message=f"Research {company} with a focus on {research_focus}?",
             approve_label="Run research",
             reject_label="Cancel",

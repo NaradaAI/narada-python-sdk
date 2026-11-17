@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -16,6 +17,10 @@ from narada_core.actions.models import (
     AgenticSelectors,
     AgentResponse,
     AgentUsage,
+    AppendGoogleSheetRowRequest,
+    AppendGoogleSheetRowResponse,
+    CloseTabRequest,
+    CloseTabResponse,
     CriticResult,
     ExecuteJavaScriptOnPageRequest,
     ExecuteJavaScriptOnPageResponse,
@@ -32,6 +37,8 @@ from narada_core.actions.models import (
     PressKeyEventItem,
     PressKeyRequest,
     PrintMessageRequest,
+    PromptForUserFileRequest,
+    PromptForUserFileResponse,
     PromptForUserInputRequest,
     PromptForUserInputResponse,
     PromptForUserInputVariable,
@@ -51,6 +58,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     CriticConfig,
     File,
     McpServer,
@@ -88,6 +96,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -106,6 +115,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -115,6 +125,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -133,6 +144,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -141,6 +153,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -159,6 +172,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
         """Invokes an agent in the bound Narada environment."""
@@ -166,6 +180,11 @@ class Agent(Generic[_StructuredOutput]):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
+            )
+        if speed is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`speed` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own speed per workflow step"
             )
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
@@ -187,6 +206,8 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            require_execution_trace=require_execution_trace,
+            speed=speed,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -203,7 +224,10 @@ class Agent(Generic[_StructuredOutput]):
         critic_result: CriticResult | None = None
         if critic is not None:
             critic_result = await run_critic(
-                dispatch_request=self._dispatch_request,
+                dispatch_request=partial(
+                    self._dispatch_request,
+                    require_execution_trace=require_execution_trace,
+                ),
                 original_prompt=prompt,
                 response_content=response_content,
                 action_trace_raw=action_trace_raw,
@@ -226,6 +250,7 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def _dispatch_request(
@@ -234,6 +259,7 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -252,6 +278,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -259,6 +286,7 @@ class Agent(Generic[_StructuredOutput]):
             prompt=prompt,
             agent=dispatch_agent,
             reasoning=reasoning,
+            speed=speed,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
@@ -277,6 +305,7 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             critic_context=critic_context,
+            require_execution_trace=require_execution_trace,
             timeout=timeout,
         )
 
@@ -293,20 +322,39 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
+        """Performs an action on an element specified by the given selectors, falling back to the
+        configured Operator agent and speed if the selectors fail to match a unique element.
+
+        Use {"text_content": "Save"} for the innermost text match, or combine it with
+        {"tag_name": "button"} to target the containing button. Role and class_name
+        can constrain text too. ID and path fields are independent fallback strategies.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch;
+        omit text_content when no text constraint is intended.
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
         """
+        if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
+            raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
+        if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         request = AgenticSelectorRequest(
             action=action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
+            fallback_agent_type=(
+                "operatorMini"
+                if fallback_agent is AgentKind.OPERATOR_MINI
+                else "operator"
+            ),
+            fallback_speed=fallback_speed,
             verification_description=verification_description,
             verification_delay_ms=verification_delay_ms,
         )
@@ -407,6 +455,15 @@ class Agent(Generic[_StructuredOutput]):
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
+    async def close_tab(self, *, timeout: int | None = None) -> None:
+        """Closes the active browser tab."""
+        environment = self._browser_environment()
+        response = await environment._run_extension_action(
+            CloseTabRequest(), CloseTabResponse, timeout=timeout
+        )
+        if response.closes_window:
+            environment._mark_browser_window_closed()
+
     async def wait_for_element(
         self,
         *,
@@ -415,6 +472,9 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int,
     ) -> bool:
         """Waits for an element matching the given selectors to reach the specified state.
+
+        Text selectors work alone or with tag/attribute constraints, as in agentic_selector.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch.
 
         Returns True if the element was found, False if no selector matched before timeout.
         """
@@ -455,7 +515,6 @@ class Agent(Generic[_StructuredOutput]):
     async def prompt_for_user_input(
         self,
         *,
-        step_id: str,
         variables: list[PromptForUserInputVariable],
         prompt_message: str | None = None,
         timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
@@ -463,17 +522,34 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user for one or more input values in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             PromptForUserInputRequest(
-                step_id=step_id, prompt_message=prompt_message, variables=variables
+                prompt_message=prompt_message, variables=variables
             ),
             PromptForUserInputResponse,
             timeout=timeout,
         )
         return result.values_by_name
 
+    async def prompt_for_user_file(
+        self,
+        *,
+        variable_name: str,
+        prompt_message: str | None = None,
+        timeout: int | None = DEFAULT_HITL_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Prompts the user for a file in the extension UI."""
+        result = await self._browser_environment()._run_extension_action(
+            PromptForUserFileRequest(
+                variable_name=variable_name,
+                prompt_message=prompt_message,
+            ),
+            PromptForUserFileResponse,
+            timeout=timeout,
+        )
+        return result.file
+
     async def user_approval(
         self,
         *,
-        step_id: str,
         prompt_message: str,
         approve_label: str,
         reject_label: str,
@@ -482,7 +558,6 @@ class Agent(Generic[_StructuredOutput]):
         """Prompts the user to approve or reject in the extension UI."""
         result = await self._browser_environment()._run_extension_action(
             UserApprovalRequest(
-                step_id=step_id,
                 prompt_message=prompt_message,
                 approve_label=approve_label,
                 reject_label=reject_label,
@@ -503,6 +578,25 @@ class Agent(Generic[_StructuredOutput]):
         return await self._browser_environment()._run_extension_action(
             ReadGoogleSheetRequest(spreadsheet_id=spreadsheet_id, range=range),
             ReadGoogleSheetResponse,
+            timeout=timeout,
+        )
+
+    async def append_google_sheet_row(
+        self,
+        *,
+        spreadsheet_id: str,
+        header_range: str,
+        row: Mapping[str, str | int | float | bool | None],
+        timeout: int | None = None,
+    ) -> AppendGoogleSheetRowResponse:
+        """Appends an object as a row using the selected range's first row as headers."""
+        return await self._browser_environment()._run_extension_action(
+            AppendGoogleSheetRowRequest(
+                spreadsheet_id=spreadsheet_id,
+                header_range=header_range,
+                row=dict(row),
+            ),
+            AppendGoogleSheetRowResponse,
             timeout=timeout,
         )
 

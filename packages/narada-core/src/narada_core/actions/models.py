@@ -12,8 +12,9 @@ from typing import (
     cast,
     override,
 )
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.tracing import model as tracing_model
 
@@ -26,6 +27,10 @@ _StructuredOutputT = TypeVar("_StructuredOutputT")
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
+
+
+def _generate_hitl_step_id() -> str:
+    return uuid4().hex
 
 
 class AgentUsage(BaseModel):
@@ -46,6 +51,10 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 class CriticResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    request_id: str | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage
@@ -92,6 +101,7 @@ class AgenticSelectorHoverAction(TypedDict):
 class AgenticSelectorFillAction(TypedDict):
     type: Literal["fill"]
     value: str
+    press_enter: NotRequired[bool]
 
 
 class AgenticSelectorSelectOptionByIndexAction(TypedDict):
@@ -137,7 +147,11 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
         case "hover":
             return {"type": "hover"}
         case "fill":
-            return cast(dict[str, Any], action)
+            return {
+                "type": "fill",
+                "value": action["value"],
+                "pressEnter": action.get("press_enter", False),
+            }
         case "select_option_by_index":
             return {"type": "selectOptionByIndex", "value": action["value"]}
         case "select_option_by_value":
@@ -151,7 +165,14 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             }
 
 
-class AgenticSelectors(TypedDict, total=False):
+class _AgenticSelectors(TypedDict, total=False):
+    """Optional selector fields shared by browser actions.
+
+    Text alone targets the innermost matching element. Combining text with a tag,
+    role, or class retains that constrained element. ID and path selectors remain
+    independent fallback strategies; omit them when text must determine the target.
+    """
+
     id: str
     data_testid: str
     name: str
@@ -163,6 +184,20 @@ class AgenticSelectors(TypedDict, total=False):
     class_name: str
     dom_path: str
     xpath: str
+
+
+def _validate_selector_text(selectors: _AgenticSelectors) -> _AgenticSelectors:
+    if "text_content" in selectors and not selectors["text_content"].strip():
+        raise ValueError(
+            "text_content must not be empty or whitespace-only; "
+            "omit the field to select without a text constraint"
+        )
+    return selectors
+
+
+type AgenticSelectors = Annotated[
+    _AgenticSelectors, AfterValidator(_validate_selector_text)
+]
 
 
 def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
@@ -197,11 +232,19 @@ class AgenticSelectorRequest(BaseModel):
     action: AgenticSelectorAction
     selectors: AgenticSelectors
     fallback_operator_query: str
+    fallback_agent_type: Literal["operator", "operatorMini"] = "operator"
+    fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard"
     verification_description: str | None = None
     verification_delay_ms: int | None = None
 
     @model_validator(mode="after")
     def _normalize_verification_fields(self) -> Self:
+        if (
+            self.fallback_agent_type == "operatorMini"
+            and self.fallback_speed == "ultrafast"
+        ):
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         if self.verification_description is None:
             self.verification_delay_ms = None
             return self
@@ -222,6 +265,8 @@ class AgenticSelectorRequest(BaseModel):
             "action": _dump_agentic_selector_action(self.action),
             "selectors": _dump_agentic_selectors(self.selectors),
             "fallback_operator_query": self.fallback_operator_query,
+            "fallback_agent_type": self.fallback_agent_type,
+            "fallback_speed": self.fallback_speed,
         }
         if self.verification_description is not None:
             result["verification_description"] = self.verification_description
@@ -378,6 +423,14 @@ class CloseWindowRequest(BaseModel):
     name: Literal["close_window"] = "close_window"
 
 
+class CloseTabRequest(BaseModel):
+    name: Literal["close_tab"] = "close_tab"
+
+
+class CloseTabResponse(BaseModel):
+    closes_window: bool
+
+
 class GoToUrlRequest(BaseModel):
     name: Literal["go_to_url"] = "go_to_url"
     url: str
@@ -397,6 +450,17 @@ class ReadGoogleSheetRequest(BaseModel):
 
 class ReadGoogleSheetResponse(BaseModel):
     values: list[list[str]]
+
+
+class AppendGoogleSheetRowRequest(BaseModel):
+    name: Literal["append_google_sheet_row"] = "append_google_sheet_row"
+    spreadsheet_id: str
+    header_range: str
+    row: dict[str, str | int | float | bool | None]
+
+
+class AppendGoogleSheetRowResponse(BaseModel):
+    updated_range: str = Field(alias="updatedRange")
 
 
 class ReadExcelSheetRequest(BaseModel):
@@ -489,7 +553,7 @@ class PromptForUserInputVariable(BaseModel):
 
 class PromptForUserInputRequest(BaseModel):
     name: Literal["prompt_for_user_input"] = "prompt_for_user_input"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     variables: list[PromptForUserInputVariable]
     prompt_message: str | None = None
 
@@ -498,9 +562,20 @@ class PromptForUserInputResponse(BaseModel):
     values_by_name: dict[str, Any]
 
 
+class PromptForUserFileRequest(BaseModel):
+    name: Literal["prompt_for_user_file"] = "prompt_for_user_file"
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
+    variable_name: str
+    prompt_message: str | None = None
+
+
+class PromptForUserFileResponse(BaseModel):
+    file: dict[str, Any]
+
+
 class UserApprovalRequest(BaseModel):
     name: Literal["user_approval"] = "user_approval"
-    step_id: str
+    step_id: str = Field(default_factory=_generate_hitl_step_id)
     prompt_message: str
     approve_label: str
     reject_label: str
@@ -532,7 +607,7 @@ class PressKeyRequest(BaseModel):
 
 
 HitlInputAction = Annotated[
-    PromptForUserInputRequest | UserApprovalRequest,
+    PromptForUserFileRequest | PromptForUserInputRequest | UserApprovalRequest,
     Field(discriminator="name"),
 ]
 
@@ -546,6 +621,8 @@ type ExtensionActionRequest = (
     AgenticMatchingSelectorsFinderRequest
     | AgenticMouseActionRequest
     | AgenticSelectorRequest
+    | CloseTabRequest
+    | AppendGoogleSheetRowRequest
     | CloseWindowRequest
     | ExecuteJavaScriptOnPageRequest
     | SavePdfFileRequest
@@ -556,6 +633,7 @@ type ExtensionActionRequest = (
     | GoToUrlRequest
     | PressKeyRequest
     | PrintMessageRequest
+    | PromptForUserFileRequest
     | PromptForUserInputRequest
     | ReadExcelSheetRequest
     | ReadGoogleSheetRequest

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 import pytest
-from narada import Agent, RemoteBrowserEnvironment
+from narada import Agent, AgentKind, RemoteBrowserEnvironment
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    AgenticSelectors,
     PromptForUserInputVariable,
 )
 
@@ -45,6 +48,17 @@ class _FakeSession:
         return _FakeResponse(next(self._responses))
 
 
+def _assert_hitl_action(
+    action: dict[str, Any], expected_without_step_id: dict[str, Any]
+) -> None:
+    step_id = action.get("step_id")
+    assert isinstance(step_id, str)
+    parsed_step_id = UUID(step_id)
+    assert parsed_step_id.version == 4
+    assert parsed_step_id.hex == step_id
+    assert action == {**expected_without_step_id, "step_id": step_id}
+
+
 @pytest.mark.asyncio
 async def test_prompt_for_user_input_uses_hitl_default_timeout(
     monkeypatch: pytest.MonkeyPatch,
@@ -67,7 +81,6 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
     )
 
     values = await agent.prompt_for_user_input(
-        step_id="input-step",
         variables=[
             PromptForUserInputVariable(name="name", type="string", required=True),
         ],
@@ -75,6 +88,65 @@ async def test_prompt_for_user_input_uses_hitl_default_timeout(
 
     assert values == {"name": "Narada"}
     assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "prompt_for_user_input",
+            "variables": [
+                {
+                    "name": "name",
+                    "type": "string",
+                    "required": True,
+                    "enum_values": None,
+                }
+            ],
+            "prompt_message": None,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_prompt_for_user_file_dispatches_extension_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_value = {
+        "source": "inMemoryFile",
+        "filename": "invoice.pdf",
+        "mimeType": "application/pdf",
+        "base64": "JVBERi0=",
+    }
+    fake_session = _FakeSession(
+        [
+            {
+                "status": "success",
+                "data": json.dumps({"file": file_value}),
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    result = await agent.prompt_for_user_file(
+        variable_name="invoice_file",
+        prompt_message="Upload the invoice",
+    )
+
+    assert result == file_value
+    assert fake_session.post_bodies[0]["timeout"] == DEFAULT_HITL_TIMEOUT_SECONDS
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "prompt_for_user_file",
+            "variable_name": "invoice_file",
+            "prompt_message": "Upload the invoice",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -99,7 +171,6 @@ async def test_user_approval_respects_explicit_timeout(
     )
 
     approved = await agent.user_approval(
-        step_id="approval-step",
         prompt_message="Proceed?",
         approve_label="Approve",
         reject_label="Reject",
@@ -108,6 +179,15 @@ async def test_user_approval_respects_explicit_timeout(
 
     assert approved is True
     assert fake_session.post_bodies[0]["timeout"] == 600
+    _assert_hitl_action(
+        fake_session.post_bodies[0]["action"],
+        {
+            "name": "user_approval",
+            "prompt_message": "Proceed?",
+            "approve_label": "Approve",
+            "reject_label": "Reject",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -230,8 +310,69 @@ async def test_agentic_selector_returns_verification_status(
             "tagName": {"value": "button"},
         },
         "fallback_operator_query": "Click the submit button",
+        "fallback_agent_type": "operator",
+        "fallback_speed": "standard",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_serializes_fallback_model_and_speed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    await agent.agentic_selector(
+        action={"type": "click"},
+        selectors={"tag_name": "button"},
+        fallback_operator_query="Click the submit button",
+        fallback_agent=AgentKind.OPERATOR_MINI,
+        fallback_speed="fast",
+    )
+
+    assert fake_session.post_bodies[0]["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "click"},
+        "selectors": {"tagName": {"value": "button"}},
+        "fallback_operator_query": "Click the submit button",
+        "fallback_agent_type": "operatorMini",
+        "fallback_speed": "fast",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_serializes_press_enter_for_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": None}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+
+    await agent.agentic_selector(
+        action={"type": "fill", "value": "Narada AI", "press_enter": True},
+        selectors={"name": "q"},
+        fallback_operator_query="Fill the search box and press Enter",
+    )
+
+    assert fake_session.post_bodies[0]["action"]["action"] == {
+        "type": "fill",
+        "value": "Narada AI",
+        "pressEnter": True,
     }
 
 
@@ -290,3 +431,88 @@ async def test_save_pdf_file_dispatches_extension_action(
     assert result.base64_content == "JVBERi0xLjQ="
     assert "base64_content" not in result.model_dump()
     assert fake_session.post_bodies[0]["action"] == {"name": "save_pdf_file"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selectors, expected",
+    [
+        ({"text_content": "Save"}, {"textContent": {"value": "Save"}}),
+        (
+            {"text_content": "Save", "tag_name": "button"},
+            {"textContent": {"value": "Save"}, "tagName": {"value": "button"}},
+        ),
+        (
+            {"text_content": " Save ", "role": "button", "class_name": "primary"},
+            {
+                "textContent": {"value": " Save "},
+                "role": {"value": "button"},
+                "className": {"value": "primary"},
+            },
+        ),
+        ({"tag_name": "button"}, {"tagName": {"value": "button"}}),
+    ],
+)
+@pytest.mark.parametrize("method", ["agentic_selector", "wait_for_element"])
+async def test_text_selectors_dispatch_without_a_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    selectors: AgenticSelectors,
+    expected: dict[str, Any],
+    method: str,
+) -> None:
+    fake_session = _FakeSession([{"status": "success", "data": '{"found":true}'}])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+    if method == "agentic_selector":
+        await agent.agentic_selector(
+            action={"type": "click"},
+            selectors=selectors,
+            fallback_operator_query="Click Save",
+        )
+    else:
+        await agent.wait_for_element(selectors=selectors, state="visible", timeout=1000)
+    action = fake_session.post_bodies[0]["action"]
+    assert action["selectors"] == expected
+    assert "selectorMode" not in action
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["", " \t\n"])
+@pytest.mark.parametrize("tag", [False, True])
+@pytest.mark.parametrize("method", ["agentic_selector", "wait_for_element"])
+async def test_blank_text_selector_is_rejected_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    tag: bool,
+    method: str,
+) -> None:
+    fake_session = _FakeSession([])
+    monkeypatch.setattr(
+        "narada.environment.aiohttp.ClientSession", lambda: fake_session
+    )
+    agent = Agent(
+        environment=RemoteBrowserEnvironment(
+            browser_window_id="bw-1", api_key="test-key"
+        )
+    )
+    selectors: AgenticSelectors = {"text_content": text}
+    if tag:
+        selectors["tag_name"] = "button"
+    with pytest.raises(ValueError, match="text_content must not be empty"):
+        if method == "agentic_selector":
+            await agent.agentic_selector(
+                action={"type": "click"},
+                selectors=selectors,
+                fallback_operator_query="Click Save",
+            )
+        else:
+            await agent.wait_for_element(
+                selectors=selectors, state="visible", timeout=1000
+            )
+    assert fake_session.post_bodies == []

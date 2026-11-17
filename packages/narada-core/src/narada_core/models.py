@@ -37,6 +37,15 @@ class ReasoningEffort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
+
+
+class AgentSpeed(StrEnum):
+    """Controls the processing tier used for built-in Narada agent responses."""
+
+    STANDARD = "standard"
+    FAST = "fast"
+    ULTRAFAST = "ultrafast"
 
 
 class UserResourceCredentials(TypedDict, total=False):
@@ -214,6 +223,16 @@ class WaitForElementTrace(TypedDict):
 class PressKeysTrace(TypedDict):
     step_type: Literal["pressKeys"]
     url: str
+    description: str
+
+
+class ListGoogleDriveFilesTrace(TypedDict):
+    step_type: Literal["listGoogleDriveFiles"]
+    description: str
+
+
+class DownloadGoogleDriveFileTrace(TypedDict):
+    step_type: Literal["downloadGoogleDriveFile"]
     description: str
 
 
@@ -421,6 +440,8 @@ ApaStepTrace = (
     | WaitForElementTrace
     | PressKeysTrace
     | ReadCsvTrace
+    | ListGoogleDriveFilesTrace
+    | DownloadGoogleDriveFileTrace
     | ReadGoogleSheetTrace
     | ReadExcelSheetTrace
     | WriteGoogleSheetTrace
@@ -492,6 +513,31 @@ class _RemoteDispatchPollResponse(TypedDict):
     completedAt: str | None
     usage: Usage | None
     hitlInputMetadata: HitlInputMetadata | None
+
+
+class GoogleDriveAuth(TypedDict):
+    """Google Drive access mode. Currently only public sharing is supported."""
+
+    type: Literal["public"]
+
+
+class GoogleDriveFile(TypedDict):
+    """A directly contained Google Drive file, usable as a download reference."""
+
+    id: str
+    name: str
+    mimeType: str
+    url: str
+    resourceKey: NotRequired[str]
+
+
+class InMemoryFileVariable(TypedDict):
+    """Downloaded content in the Agent Studio file-variable format."""
+
+    source: Literal["inMemoryFile"]
+    filename: str
+    mimeType: str
+    base64: str
 
 
 class File(TypedDict):
