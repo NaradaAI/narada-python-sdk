@@ -11,6 +11,8 @@ from uuid import UUID
 import pytest
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    AgenticSelectorBatchResponse,
+    AgenticSelectorResponse,
     AgenticSelectors,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
@@ -1546,21 +1548,71 @@ async def test_agentic_selector_returns_verification_status(
         verification_delay_ms=750,
     )
 
+    assert isinstance(result, AgenticSelectorResponse)
     assert result.value is None
     assert result.verified is True
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["action"] == {
         "name": "agentic_selector",
-        "action": {"type": "click"},
-        "selectors": {
-            "ariaLabel": {"value": "Submit"},
-            "tagName": {"value": "button"},
-        },
+        "actions": [
+            {
+                "action": {"type": "click"},
+                "selectors": {
+                    "ariaLabel": {"value": "Submit"},
+                    "tagName": {"value": "button"},
+                },
+            }
+        ],
         "fallback_operator_query": "Click the submit button",
         "fallback_agent_type": "operator",
         "fallback_speed": "standard",
         "verification_description": "A confirmation dialog is visible.",
         "verification_delay_ms": 750,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_dispatches_grouped_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={
+                "status": "success",
+                "data": '{"values":[null,"Ready"],"verified":false}',
+            }
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    result = await narada_pkg.Agent(environment=env).agentic_selector(
+        actions=[
+            {"action": {"type": "click"}, "selectors": {"id": "open"}},
+            {"action": {"type": "get_text"}, "selectors": {"id": "status"}},
+        ],
+        fallback_operator_query="Open the panel and read its status",
+        verification_description="The panel is open.",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == [None, "Ready"]
+    assert result.verified is False
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {
+        "name": "agentic_selector",
+        "actions": [
+            {"action": {"type": "click"}, "selectors": {"id": {"value": "open"}}},
+            {"action": {"type": "getText"}, "selectors": {"id": {"value": "status"}}},
+        ],
+        "fallback_operator_query": "Open the panel and read its status",
+        "fallback_agent_type": "operator",
+        "fallback_speed": "standard",
+        "verification_description": "The panel is open.",
+        "verification_delay_ms": 500,
     }
 
 
@@ -1572,11 +1624,11 @@ async def test_agentic_selector_serializes_fallback_model_and_speed(
         return_value=_FakeResponse(json_data={"status": "success", "data": None})
     )
     narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
-
     env = narada_pkg.RemoteBrowserEnvironment(
         browser_window_id="browser-window-123",
         api_key="test-api-key",
     )
+
     await narada_pkg.Agent(environment=env).agentic_selector(
         action={"type": "click"},
         selectors={"tag_name": "button"},
@@ -1588,12 +1640,66 @@ async def test_agentic_selector_serializes_fallback_model_and_speed(
     payload = json.loads(pyfetch.await_args.kwargs["body"])
     assert payload["action"] == {
         "name": "agentic_selector",
-        "action": {"type": "click"},
-        "selectors": {"tagName": {"value": "button"}},
+        "actions": [
+            {
+                "action": {"type": "click"},
+                "selectors": {"tagName": {"value": "button"}},
+            }
+        ],
         "fallback_operator_query": "Click the submit button",
         "fallback_agent_type": "operatorMini",
         "fallback_speed": "fast",
     }
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_with_one_action_normalizes_value_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"value":"Hello"}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    result = await narada_pkg.Agent(environment=env).agentic_selector(
+        actions=[{"action": {"type": "get_text"}, "selectors": {"id": "title"}}],
+        fallback_operator_query="Read the title",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == ["Hello"]
+    assert result.verified is None
+
+
+@pytest.mark.asyncio
+async def test_agentic_selector_batch_with_one_mutation_returns_batch_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"value":null}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    result = await narada_pkg.Agent(environment=env).agentic_selector(
+        actions=[{"action": {"type": "click"}, "selectors": {"id": "submit"}}],
+        fallback_operator_query="Click submit",
+    )
+
+    assert isinstance(result, AgenticSelectorBatchResponse)
+    assert result.values == [None]
+    assert result.verified is None
 
 
 @pytest.mark.asyncio
@@ -2010,8 +2116,12 @@ async def test_text_selectors_dispatch_without_a_mode(
     else:
         await agent.wait_for_element(selectors=selectors, state="visible", timeout=1000)
     action = json.loads(pyfetch.await_args.kwargs["body"])["action"]
-    assert action["selectors"] == expected
-    assert "selectorMode" not in action
+    if method == "agentic_selector":
+        dispatched_selectors = action["actions"][0]["selectors"]
+    else:
+        dispatched_selectors = action["selectors"]
+    assert dispatched_selectors == expected
+    assert "selectorMode" not in dispatched_selectors
 
 
 @pytest.mark.asyncio
