@@ -14,6 +14,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     CriticConfig,
@@ -29,6 +30,7 @@ from narada_core.models import (
     VectorStore,
 )
 
+from narada._logging import LOG_FORMAT, enable_logging
 from narada.agent import Agent
 from narada.config import BrowserConfig, ProxyConfig
 from narada.environment import (
@@ -49,6 +51,7 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "AgentSpeed",
     "BedrockConnectionConfig",
     "BedrockCredentials",
     "BaseBrowserEnvironment",
@@ -59,6 +62,7 @@ __all__ = [
     "CriticConfig",
     "CriticResult",
     "download_file",
+    "enable_logging",
     "Environment",
     "ExternalVectorStore",
     "File",
@@ -67,6 +71,7 @@ __all__ = [
     "GoogleDriveFile",
     "InMemoryFileVariable",
     "LambdaEnvironment",
+    "LOG_FORMAT",
     "ManagedVectorStore",
     "NaradaError",
     "NaradaExtensionMissingError",
