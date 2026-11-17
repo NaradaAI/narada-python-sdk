@@ -46,6 +46,7 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     File,
     McpServer,
     ReasoningEffort,
@@ -449,6 +450,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -467,6 +469,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -477,6 +480,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -495,6 +499,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -504,6 +509,7 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -522,6 +528,7 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -556,6 +563,8 @@ class Environment(ABC):
         parent_request_id = self._current_parent_request_id()
         if parent_request_id is not None:
             body["parentRequestId"] = parent_request_id
+        if require_execution_trace:
+            body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
@@ -609,6 +618,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if speed is not None:
+            body["speed"] = speed.value
 
         try:
             seen_input_ids: set[str] = set()

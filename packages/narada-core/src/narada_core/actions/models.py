@@ -14,7 +14,7 @@ from typing import (
 )
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.tracing import model as tracing_model
 
@@ -51,6 +51,10 @@ class StructuredOutput(BaseModel, Generic[_StructuredOutputT]):
 class CriticResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    request_id: str | None = None
+    execution_trace_context: dict[str, Any] | None = Field(
+        default=None, alias="executionTraceContext"
+    )
     validation_passed: bool
     structured_output: Any
     usage: AgentUsage
@@ -161,7 +165,14 @@ def _dump_agentic_selector_action(action: AgenticSelectorAction) -> dict[str, An
             }
 
 
-class AgenticSelectors(TypedDict, total=False):
+class _AgenticSelectors(TypedDict, total=False):
+    """Optional selector fields shared by browser actions.
+
+    Text alone targets the innermost matching element. Combining text with a tag,
+    role, or class retains that constrained element. ID and path selectors remain
+    independent fallback strategies; omit them when text must determine the target.
+    """
+
     id: str
     data_testid: str
     name: str
@@ -173,6 +184,20 @@ class AgenticSelectors(TypedDict, total=False):
     class_name: str
     dom_path: str
     xpath: str
+
+
+def _validate_selector_text(selectors: _AgenticSelectors) -> _AgenticSelectors:
+    if "text_content" in selectors and not selectors["text_content"].strip():
+        raise ValueError(
+            "text_content must not be empty or whitespace-only; "
+            "omit the field to select without a text constraint"
+        )
+    return selectors
+
+
+type AgenticSelectors = Annotated[
+    _AgenticSelectors, AfterValidator(_validate_selector_text)
+]
 
 
 def _dump_agentic_selectors(selectors: AgenticSelectors) -> dict[str, Any]:
@@ -207,11 +232,19 @@ class AgenticSelectorRequest(BaseModel):
     action: AgenticSelectorAction
     selectors: AgenticSelectors
     fallback_operator_query: str
+    fallback_agent_type: Literal["operator", "operatorMini"] = "operator"
+    fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard"
     verification_description: str | None = None
     verification_delay_ms: int | None = None
 
     @model_validator(mode="after")
     def _normalize_verification_fields(self) -> Self:
+        if (
+            self.fallback_agent_type == "operatorMini"
+            and self.fallback_speed == "ultrafast"
+        ):
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
         if self.verification_description is None:
             self.verification_delay_ms = None
             return self
@@ -232,6 +265,8 @@ class AgenticSelectorRequest(BaseModel):
             "action": _dump_agentic_selector_action(self.action),
             "selectors": _dump_agentic_selectors(self.selectors),
             "fallback_operator_query": self.fallback_operator_query,
+            "fallback_agent_type": self.fallback_agent_type,
+            "fallback_speed": self.fallback_speed,
         }
         if self.verification_description is not None:
             result["verification_description"] = self.verification_description
