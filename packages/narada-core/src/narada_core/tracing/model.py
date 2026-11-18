@@ -76,6 +76,11 @@ class GetUrlTrace(BaseModel):
     description: str
 
 
+class GetMatchingElementsTrace(BaseModel):
+    step_type: Literal["getMatchingElements"]
+    description: str
+
+
 class PrintTrace(BaseModel):
     step_type: Literal["print"]
     url: str
@@ -388,6 +393,7 @@ class PythonAgentRunTrace(BaseModel):
 ApaStepTrace = Annotated[
     GoToUrlTrace
     | GetUrlTrace
+    | GetMatchingElementsTrace
     | PrintTrace
     | AgentTrace
     | ForLoopTrace

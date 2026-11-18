@@ -189,6 +189,7 @@ class BrowserConfig:
     extension_id: str = "bhioaidlggjdkheaajakomifblpjmokn"
     interactive: bool = True
     proxy: ProxyConfig | None = None
+    unpacked_extension_path: str | None = None
 
     @property
     def cdp_url(self) -> str:

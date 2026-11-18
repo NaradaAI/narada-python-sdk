@@ -26,6 +26,8 @@ from narada_core.actions.models import (
     ExecuteJavaScriptOnPageResponse,
     GetFullHtmlRequest,
     GetFullHtmlResponse,
+    GetMatchingElementsRequest,
+    GetMatchingElementsResponse,
     GetScreenshotRequest,
     GetScreenshotResponse,
     GetSimplifiedHtmlRequest,
@@ -34,6 +36,7 @@ from narada_core.actions.models import (
     GetUrlResponse,
     GoToUrlRequest,
     JsonValue,
+    MatchingElementResult,
     PressKeyEventItem,
     PressKeyRequest,
     PrintMessageRequest,
@@ -507,6 +510,19 @@ class Agent(Generic[_StructuredOutput]):
             GetUrlResponse,
             timeout=timeout,
         )
+
+    async def get_matching_elements(
+        self, *, selector: str, timeout: int | None = None
+    ) -> list[MatchingElementResult]:
+        """Return the text and URL of every element matching a CSS selector."""
+        if not selector.strip():
+            raise ValueError("selector must not be empty")
+        result = await self._browser_environment()._run_extension_action(
+            GetMatchingElementsRequest(selector=selector.strip()),
+            GetMatchingElementsResponse,
+            timeout=timeout,
+        )
+        return result.results
 
     async def execute_javascript_on_page(
         self, *, code: str, timeout: int | None = None

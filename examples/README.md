@@ -76,3 +76,12 @@ Low-level, deterministic browser actions with an AI fallback — useful when you
 | [`03_read_element_text_and_properties.py`](06_page_actions/03_read_element_text_and_properties.py) | Read text content and DOM properties from elements. |
 | [`04_replay_recorded_mouse_actions.py`](06_page_actions/04_replay_recorded_mouse_actions.py) | Replay recorded clicks, fills, and scrolls at viewport coordinates, with an AI fallback. |
 | [`05_send_keyboard_events.py`](06_page_actions/05_send_keyboard_events.py) | Send raw keyboard events, including modifier combinations. |
+| [`06_collect_matching_elements.py`](06_page_actions/06_collect_matching_elements.py) | Collect every product link matching a CSS selector as `{text, url}` objects, then process them in a Python loop. |
+
+To run the matching-elements example against local services, set `NARADA_API_BASE_URL` to the
+local backend, `NARADA_INITIALIZATION_URL` to the local frontend's `/initialize` page, and
+`NARADA_EXTENSION_ID` to the development extension ID. Set `NARADA_UNPACKED_EXTENSION_PATH`
+to a built development extension directory so the SDK loads it when launching Chromium. For an
+isolated Chromium profile, also set `NARADA_BROWSER_EXECUTABLE_PATH` and
+`NARADA_BROWSER_USER_DATA_DIR`. If that browser uses a different debugging port, set
+`NARADA_BROWSER_CDP_PORT`.

@@ -543,6 +543,20 @@ class GetUrlResponse(BaseModel):
     url: str
 
 
+class GetMatchingElementsRequest(BaseModel):
+    name: Literal["get_matching_elements"] = "get_matching_elements"
+    selector: str
+
+
+class MatchingElementResult(TypedDict):
+    text: str
+    url: str
+
+
+class GetMatchingElementsResponse(BaseModel):
+    results: list[MatchingElementResult]
+
+
 class ExecuteJavaScriptOnPageRequest(BaseModel):
     name: Literal["execute_javascript_on_page"] = "execute_javascript_on_page"
     code: str
@@ -638,6 +652,7 @@ type ExtensionActionRequest = (
     | GetScreenshotRequest
     | GetSimplifiedHtmlRequest
     | GetUrlRequest
+    | GetMatchingElementsRequest
     | GoToUrlRequest
     | PressKeyRequest
     | PrintMessageRequest

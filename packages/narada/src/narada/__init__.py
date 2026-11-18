@@ -1,6 +1,7 @@
 from narada_core.actions.models import (
     CriticResult,
     HitlInputMetadata,
+    MatchingElementResult,
     PressKeyEventItem,
 )
 from narada_core.errors import (
@@ -73,6 +74,7 @@ __all__ = [
     "LambdaEnvironment",
     "LOG_FORMAT",
     "ManagedVectorStore",
+    "MatchingElementResult",
     "NaradaError",
     "NaradaExtensionMissingError",
     "NaradaExtensionUnauthenticatedError",
