@@ -108,6 +108,22 @@ async def test_agent_close_tab_dispatches_extension_action() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_resize_window_dispatches_outer_dimensions() -> None:
+    env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
+    env._run_extension_action = AsyncMock()  # type: ignore[method-assign]
+
+    await Agent(environment=env).resize_window(width=1280, height=800, timeout=15)
+
+    request = env._run_extension_action.await_args.args[0]
+    assert request.model_dump() == {
+        "name": "resize_window",
+        "width": 1280,
+        "height": 800,
+    }
+    assert env._run_extension_action.await_args.kwargs == {"timeout": 15}
+
+
+@pytest.mark.asyncio
 async def test_agent_close_tab_marks_environment_closed_for_last_tab() -> None:
     env = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
     env._run_extension_action = AsyncMock(  # type: ignore[method-assign]

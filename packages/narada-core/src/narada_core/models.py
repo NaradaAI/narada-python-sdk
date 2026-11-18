@@ -162,6 +162,12 @@ class GoToUrlTrace(TypedDict):
     description: str
 
 
+class ResizeWindowTrace(TypedDict):
+    step_type: Literal["resizeWindow"]
+    url: str
+    description: str
+
+
 class GetUrlTrace(TypedDict):
     step_type: Literal["getUrl"]
     url: str
@@ -430,6 +436,7 @@ class PythonAgentRunTrace(TypedDict):
 
 ApaStepTrace = (
     GoToUrlTrace
+    | ResizeWindowTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace

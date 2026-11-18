@@ -445,6 +445,12 @@ class GoToUrlRequest(BaseModel):
     new_tab: bool
 
 
+class ResizeWindowRequest(BaseModel):
+    name: Literal["resize_window"] = "resize_window"
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+
 class PrintMessageRequest(BaseModel):
     name: Literal["print_message"] = "print_message"
     message: str
@@ -639,6 +645,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetUrlRequest
     | GoToUrlRequest
+    | ResizeWindowRequest
     | PressKeyRequest
     | PrintMessageRequest
     | PromptForUserFileRequest

@@ -70,6 +70,12 @@ class GoToUrlTrace(BaseModel):
     description: str
 
 
+class ResizeWindowTrace(BaseModel):
+    step_type: Literal["resizeWindow"]
+    url: str
+    description: str
+
+
 class GetUrlTrace(BaseModel):
     step_type: Literal["getUrl"]
     url: str
@@ -387,6 +393,7 @@ class PythonAgentRunTrace(BaseModel):
 
 ApaStepTrace = Annotated[
     GoToUrlTrace
+    | ResizeWindowTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace

@@ -1717,6 +1717,22 @@ async def test_agent_close_tab_dispatches_extension_action(
 
 
 @pytest.mark.asyncio
+async def test_agent_resize_window_dispatches_outer_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(return_value=_FakeResponse(json_data={"status": "success"}))
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123", api_key="test-api-key"
+    )
+    await narada_pkg.Agent(environment=env).resize_window(width=1280, height=800)
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {"name": "resize_window", "width": 1280, "height": 800}
+
+
+@pytest.mark.asyncio
 async def test_close_after_closing_last_tab_does_not_send_close_window_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
