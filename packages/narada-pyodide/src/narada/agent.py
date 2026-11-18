@@ -348,14 +348,27 @@ class Agent(Generic[_StructuredOutput]):
 
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
+
+        For select_file actions, file must be an existing file-variable value. Local file uploads
+        are unavailable in the browser runtime.
         """
         if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
             raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
         if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
             raise ValueError("ultrafast speed is not supported by Operator Mini")
 
+        browser_environment = self._browser_environment()
+        normalized_action = action
+        if action["type"] == "select_file":
+            normalized_action = {
+                "type": "select_file",
+                "file": await browser_environment._normalize_input_variables_value_impl(
+                    input_variable_value=action["file"]
+                ),
+            }
+
         request = AgenticSelectorRequest(
-            action=action,
+            action=normalized_action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
             fallback_agent_type=(
@@ -374,7 +387,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
 
-        result = await self._browser_environment()._run_extension_action(
+        result = await browser_environment._run_extension_action(
             request,
             response_model,
             timeout=timeout,
