@@ -1549,9 +1549,20 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
             f"--remote-debugging-port={config.cdp_port}",
             "--no-default-browser-check",
             "--no-first-run",
-            "--new-window",
-            launch_url,
         ]
+
+        if config.unpacked_extension_path is not None:
+            extension_path = Path(config.unpacked_extension_path).expanduser().resolve()
+            if not (extension_path / "manifest.json").is_file():
+                raise ValueError(f"Unpacked extension not found: {extension_path}")
+            browser_args.extend(
+                [
+                    f"--disable-extensions-except={extension_path}",
+                    f"--load-extension={extension_path}",
+                ]
+            )
+            if sys.platform == "darwin":
+                browser_args.extend(["--use-mock-keychain", "--password-store=basic"])
 
         # Add proxy arguments if configured.
         if config.proxy is not None:
@@ -1563,6 +1574,8 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
 
             if config.proxy.ignore_cert_errors:
                 browser_args.append("--ignore-certificate-errors")
+
+        browser_args.extend(["--new-window", launch_url])
 
         # Launch an independent browser process which will not be killed when the current program
         # exits.
