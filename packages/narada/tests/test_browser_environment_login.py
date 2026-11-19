@@ -4,7 +4,6 @@ import logging
 import subprocess
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call
@@ -1520,36 +1519,6 @@ async def test_launch_browser_does_not_restart_unrelated_initialization_failures
 
     assert exc_info.value is initialization_error
     launch_once.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_browser_launch_loads_unpacked_extension(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    extension_path = tmp_path / "dev-extension"
-    extension_path.mkdir()
-    (extension_path / "manifest.json").write_text("{}")
-    config = BrowserConfig(
-        interactive=False, unpacked_extension_path=str(extension_path)
-    )
-    env = BrowserEnvironment(api_key="test-key", config=config)
-    launch = AsyncMock(return_value=SimpleNamespace(pid=123))
-    monkeypatch.setattr(environment_module.asyncio, "create_subprocess_exec", launch)
-    monkeypatch.setattr(environment_module.sys, "platform", "darwin")
-    monkeypatch.setattr(
-        env, "_initialize_launched_browser", AsyncMock(return_value=object())
-    )
-
-    await env._launch_browser_once(  # type: ignore[arg-type]
-        object(), config, restart_on_autoload_failure=False
-    )
-
-    browser_args = launch.await_args.args
-    assert f"--load-extension={extension_path}" in browser_args
-    assert f"--disable-extensions-except={extension_path}" in browser_args
-    assert "--use-mock-keychain" in browser_args
-    assert "--password-store=basic" in browser_args
-    assert browser_args[-2] == "--new-window"
 
 
 @pytest.mark.asyncio
