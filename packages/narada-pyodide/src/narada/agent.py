@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
 from functools import partial
-from io import BytesIO
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -52,6 +50,7 @@ from narada_core.actions.models import (
     SavePdfFileRequest,
     SavePdfFileResponse,
     ServeHtmlRequest,
+    UploadedFileVariable,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -482,32 +481,15 @@ class Agent(Generic[_StructuredOutput]):
         )
 
     async def serve_html(
-        self, *, file: Mapping[str, Any] | IO[Any], timeout: int | None = None
+        self, *, file: UploadedFileVariable, timeout: int | None = None
     ) -> None:
         """Display a self-contained HTML file for Operator to inspect and interact with.
 
-        The file opens in a new active Chrome tab.
+        Pass an uploaded workflow file value. The file opens in a new active Chrome tab.
         """
         environment = self._browser_environment()
-        if isinstance(file, Mapping):
-            if file.get("source") == "inMemoryFile":
-                filename = file.get("filename")
-                encoded = file.get("base64")
-                if not isinstance(filename, str) or not isinstance(encoded, str):
-                    raise ValueError("Invalid in-memory HTML file value")
-                uploaded = BytesIO(base64.b64decode(encoded, validate=True))
-                uploaded.name = filename
-                file_value = await environment._upload_input_variable_file(
-                    input_variable_value=uploaded
-                )
-            else:
-                file_value = dict(file)
-        else:
-            file_value = await environment._upload_input_variable_file(
-                input_variable_value=file
-            )
         await environment._run_extension_action(
-            ServeHtmlRequest(file=file_value),
+            ServeHtmlRequest(file=file),
             timeout=timeout if timeout is not None else 60,
         )
 

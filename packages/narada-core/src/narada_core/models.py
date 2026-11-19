@@ -6,7 +6,7 @@ from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, Typ
 
 from pydantic import BaseModel, Field
 
-from narada_core.actions.models import HitlInputMetadata
+from narada_core.actions.models import HitlInputMetadata, UploadedFileVariable
 
 
 class AgentKind(Enum):
@@ -544,6 +544,9 @@ class InMemoryFileVariable(TypedDict):
     filename: str
     mimeType: str
     base64: str
+
+
+type FileVariable = UploadedFileVariable | InMemoryFileVariable
 
 
 class File(TypedDict):

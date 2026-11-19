@@ -2,31 +2,42 @@ import base64
 from unittest.mock import AsyncMock
 
 import pytest
-from narada import Agent, BaseBrowserEnvironment
+from narada import Agent, BaseBrowserEnvironment, UploadedFileVariable
 from narada_core.actions.models import ServeHtmlRequest
 from narada_core.tracing.model import ApaStepTrace
 from pydantic import TypeAdapter
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "file",
+    [
+        {
+            "source": "remoteDispatchUpload",
+            "id": "upload-1",
+            "filename": "page.html",
+            "mimeType": "text/html",
+        },
+        {
+            "source": "agentStudioAttachment",
+            "id": "attachment-1",
+            "filename": "page.html",
+            "mimeType": "text/html",
+            "itemId": "workflow-1",
+        },
+    ],
+)
 async def test_serve_html_dispatches_file_reference(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, file: UploadedFileVariable
 ) -> None:
     environment = BaseBrowserEnvironment(auth_headers={}, browser_window_id="window-1")
     dispatch = AsyncMock()
     monkeypatch.setattr(environment, "_run_extension_action", dispatch)
-    file = {
-        "source": "remoteDispatchUpload",
-        "id": "upload-1",
-        "filename": "page.html",
-        "mimeType": "text/html",
-    }
-
     await Agent(environment=environment).serve_html(file=file)
 
     request = dispatch.await_args.args[0]
     assert isinstance(request, ServeHtmlRequest)
-    assert request.file == file
+    assert request.model_dump() == {"name": "serve_html", "file": file}
     assert dispatch.await_args.kwargs == {"timeout": 60}
 
 

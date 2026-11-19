@@ -445,9 +445,27 @@ class GoToUrlRequest(BaseModel):
     new_tab: bool
 
 
+class RemoteDispatchUploadFile(TypedDict):
+    source: Literal["remoteDispatchUpload"]
+    id: str
+    filename: str
+    mimeType: str
+
+
+class AgentStudioAttachmentFile(TypedDict):
+    source: Literal["agentStudioAttachment"]
+    id: str
+    filename: str
+    mimeType: str
+    itemId: str
+
+
+type UploadedFileVariable = RemoteDispatchUploadFile | AgentStudioAttachmentFile
+
+
 class ServeHtmlRequest(BaseModel):
     name: Literal["serve_html"] = "serve_html"
-    file: dict[str, Any]
+    file: Annotated[UploadedFileVariable, Field(discriminator="source")]
 
 
 class PrintMessageRequest(BaseModel):

@@ -64,6 +64,7 @@ from narada_core.models import (
     AgentSpeed,
     CriticConfig,
     File,
+    FileVariable,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -472,26 +473,23 @@ class Agent(Generic[_StructuredOutput]):
         )
 
     async def serve_html(
-        self, *, file: Mapping[str, Any] | IO[Any], timeout: int | None = None
+        self, *, file: FileVariable | IO[bytes] | IO[str], timeout: int | None = None
     ) -> None:
         """Display a self-contained HTML file for Operator to inspect and interact with.
 
-        The file opens in a new active Chrome tab.
+        Pass an open file handle or a workflow file value. The file opens in a new
+        active Chrome tab.
         """
         environment = self._browser_environment()
         if isinstance(file, Mapping):
-            if file.get("source") == "inMemoryFile":
-                filename = file.get("filename")
-                encoded = file.get("base64")
-                if not isinstance(filename, str) or not isinstance(encoded, str):
-                    raise ValueError("Invalid in-memory HTML file value")
-                uploaded = BytesIO(base64.b64decode(encoded, validate=True))
-                uploaded.name = filename
+            if file["source"] == "inMemoryFile":
+                uploaded = BytesIO(base64.b64decode(file["base64"], validate=True))
+                uploaded.name = file["filename"]
                 file_value = await environment._upload_input_variable_file(
                     input_variable_value=uploaded
                 )
             else:
-                file_value = dict(file)
+                file_value = file
         else:
             file_value = await environment._upload_input_variable_file(
                 input_variable_value=file
