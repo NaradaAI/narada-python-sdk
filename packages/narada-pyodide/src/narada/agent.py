@@ -484,7 +484,7 @@ class Agent(Generic[_StructuredOutput]):
     async def serve_html(
         self, *, file: Mapping[str, Any] | IO[Any], timeout: int | None = None
     ) -> None:
-        """Serve an HTML file or file value in the active Chrome tab."""
+        """Serve an HTML file or file value in a new active Chrome tab."""
         environment = self._browser_environment()
         if isinstance(file, Mapping):
             if file.get("source") == "inMemoryFile":

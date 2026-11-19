@@ -76,7 +76,7 @@ Low-level, deterministic browser actions with an AI fallback — useful when you
 | [`03_read_element_text_and_properties.py`](06_page_actions/03_read_element_text_and_properties.py) | Read text content and DOM properties from elements. |
 | [`04_replay_recorded_mouse_actions.py`](06_page_actions/04_replay_recorded_mouse_actions.py) | Replay recorded clicks, fills, and scrolls at viewport coordinates, with an AI fallback. |
 | [`05_send_keyboard_events.py`](06_page_actions/05_send_keyboard_events.py) | Send raw keyboard events, including modifier combinations. |
-| [`07_serve_html.py`](06_page_actions/07_serve_html.py) | Serve a local HTML file in the current tab, then ask Operator to click its counter button. |
+| [`07_serve_html.py`](06_page_actions/07_serve_html.py) | Serve a local HTML file in a new tab, then ask Operator to click its counter button. |
 
 ### Serve HTML with local services
 
