@@ -2,6 +2,7 @@ from narada_core.actions.models import (
     CriticResult,
     HitlInputMetadata,
     PressKeyEventItem,
+    UploadedFileVariable,
 )
 from narada_core.errors import (
     NaradaError,
@@ -20,6 +21,7 @@ from narada_core.models import (
     CriticConfig,
     ExternalVectorStore,
     File,
+    FileVariable,
     GoogleDriveAuth,
     GoogleDriveFile,
     InMemoryFileVariable,
@@ -66,6 +68,7 @@ __all__ = [
     "Environment",
     "ExternalVectorStore",
     "File",
+    "FileVariable",
     "GoogleDriveAuth",
     "GoogleDriveClient",
     "GoogleDriveFile",
@@ -87,5 +90,6 @@ __all__ = [
     "Response",
     "ResponseContent",
     "SessionDownloadItem",
+    "UploadedFileVariable",
     "UserAbortedError",
 ]

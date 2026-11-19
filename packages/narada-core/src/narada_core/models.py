@@ -6,7 +6,7 @@ from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, Typ
 
 from pydantic import BaseModel, Field
 
-from narada_core.actions.models import HitlInputMetadata
+from narada_core.actions.models import HitlInputMetadata, UploadedFileVariable
 
 
 class AgentKind(Enum):
@@ -159,6 +159,11 @@ class OperatorActionTraceItem(TypedDict):
 class GoToUrlTrace(TypedDict):
     step_type: Literal["goToUrl"]
     url: str
+    description: str
+
+
+class ServeHtmlTrace(TypedDict):
+    step_type: Literal["serveHtml"]
     description: str
 
 
@@ -430,6 +435,7 @@ class PythonAgentRunTrace(TypedDict):
 
 ApaStepTrace = (
     GoToUrlTrace
+    | ServeHtmlTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace
@@ -538,6 +544,9 @@ class InMemoryFileVariable(TypedDict):
     filename: str
     mimeType: str
     base64: str
+
+
+type FileVariable = UploadedFileVariable | InMemoryFileVariable
 
 
 class File(TypedDict):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from functools import partial
+from io import BytesIO
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
@@ -49,6 +51,7 @@ from narada_core.actions.models import (
     RecordedClick,
     SavePdfFileRequest,
     SavePdfFileResponse,
+    ServeHtmlRequest,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -61,6 +64,7 @@ from narada_core.models import (
     AgentSpeed,
     CriticConfig,
     File,
+    FileVariable,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -466,6 +470,33 @@ class Agent(Generic[_StructuredOutput]):
         """Navigates the active page in this window to the given URL."""
         return await self._browser_environment()._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
+        )
+
+    async def serve_html(
+        self, *, file: FileVariable | IO[bytes] | IO[str], timeout: int | None = None
+    ) -> None:
+        """Display a self-contained HTML file for Operator to inspect and interact with.
+
+        Pass an open file handle or a workflow file value. The file opens in a new
+        active Chrome tab.
+        """
+        environment = self._browser_environment()
+        if isinstance(file, Mapping):
+            if file["source"] == "inMemoryFile":
+                uploaded = BytesIO(base64.b64decode(file["base64"], validate=True))
+                uploaded.name = file["filename"]
+                file_value = await environment._upload_input_variable_file(
+                    input_variable_value=uploaded
+                )
+            else:
+                file_value = file
+        else:
+            file_value = await environment._upload_input_variable_file(
+                input_variable_value=file
+            )
+        await environment._run_extension_action(
+            ServeHtmlRequest(file=file_value),
+            timeout=timeout if timeout is not None else 60,
         )
 
     async def close_tab(self, *, timeout: int | None = None) -> None:

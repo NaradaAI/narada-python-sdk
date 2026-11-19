@@ -49,6 +49,8 @@ from narada_core.actions.models import (
     RecordedClick,
     SavePdfFileRequest,
     SavePdfFileResponse,
+    ServeHtmlRequest,
+    UploadedFileVariable,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -476,6 +478,19 @@ class Agent(Generic[_StructuredOutput]):
         """Navigates the active page in this window to the given URL."""
         return await self._browser_environment()._run_extension_action(
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
+        )
+
+    async def serve_html(
+        self, *, file: UploadedFileVariable, timeout: int | None = None
+    ) -> None:
+        """Display a self-contained HTML file for Operator to inspect and interact with.
+
+        Pass an uploaded workflow file value. The file opens in a new active Chrome tab.
+        """
+        environment = self._browser_environment()
+        await environment._run_extension_action(
+            ServeHtmlRequest(file=file),
+            timeout=timeout if timeout is not None else 60,
         )
 
     async def close_tab(self, *, timeout: int | None = None) -> None:
