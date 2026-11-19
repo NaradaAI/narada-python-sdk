@@ -445,6 +445,11 @@ class GoToUrlRequest(BaseModel):
     new_tab: bool
 
 
+class ServeHtmlRequest(BaseModel):
+    name: Literal["serve_html"] = "serve_html"
+    file: dict[str, Any]
+
+
 class PrintMessageRequest(BaseModel):
     name: Literal["print_message"] = "print_message"
     message: str
@@ -639,6 +644,7 @@ type ExtensionActionRequest = (
     | GetSimplifiedHtmlRequest
     | GetUrlRequest
     | GoToUrlRequest
+    | ServeHtmlRequest
     | PressKeyRequest
     | PrintMessageRequest
     | PromptForUserFileRequest

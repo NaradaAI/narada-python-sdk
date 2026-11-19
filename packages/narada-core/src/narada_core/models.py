@@ -162,6 +162,11 @@ class GoToUrlTrace(TypedDict):
     description: str
 
 
+class ServeHtmlTrace(TypedDict):
+    step_type: Literal["serveHtml"]
+    description: str
+
+
 class GetUrlTrace(TypedDict):
     step_type: Literal["getUrl"]
     url: str
@@ -430,6 +435,7 @@ class PythonAgentRunTrace(TypedDict):
 
 ApaStepTrace = (
     GoToUrlTrace
+    | ServeHtmlTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace

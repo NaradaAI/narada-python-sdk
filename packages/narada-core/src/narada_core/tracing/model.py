@@ -70,6 +70,11 @@ class GoToUrlTrace(BaseModel):
     description: str
 
 
+class ServeHtmlTrace(BaseModel):
+    step_type: Literal["serveHtml"]
+    description: str
+
+
 class GetUrlTrace(BaseModel):
     step_type: Literal["getUrl"]
     url: str
@@ -387,6 +392,7 @@ class PythonAgentRunTrace(BaseModel):
 
 ApaStepTrace = Annotated[
     GoToUrlTrace
+    | ServeHtmlTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace

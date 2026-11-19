@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Serve HTML SDK test</title>
+  </head>
+  <body>
+    <h1>Serve HTML SDK test</h1>
+    <p>Counter: <span id="counter">0</span></p>
+    <button type="button" id="increment">Increment counter</button>
+    <script>
+      document.getElementById('increment').addEventListener('click', () => {
+        const counter = document.getElementById('counter');
+        counter.textContent = String(Number(counter.textContent) + 1);
+      });
+    </script>
+  </body>
+</html>
