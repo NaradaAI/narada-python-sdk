@@ -65,6 +65,7 @@ from narada_core.models import (
     CriticConfig,
     File,
     FileVariable,
+    Guardrails,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -101,6 +102,7 @@ class Agent(Generic[_StructuredOutput]):
         *,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -130,6 +132,7 @@ class Agent(Generic[_StructuredOutput]):
         *,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -158,6 +161,7 @@ class Agent(Generic[_StructuredOutput]):
         *,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -212,6 +216,7 @@ class Agent(Generic[_StructuredOutput]):
             reasoning=reasoning,
             require_execution_trace=require_execution_trace,
             speed=speed,
+            guardrails=guardrails,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -230,6 +235,7 @@ class Agent(Generic[_StructuredOutput]):
             critic_result = await run_critic(
                 dispatch_request=partial(
                     self._dispatch_request,
+                    guardrails=guardrails,
                     require_execution_trace=require_execution_trace,
                 ),
                 original_prompt=prompt,
@@ -264,6 +270,7 @@ class Agent(Generic[_StructuredOutput]):
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
         speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -291,6 +298,7 @@ class Agent(Generic[_StructuredOutput]):
             agent=dispatch_agent,
             reasoning=reasoning,
             speed=speed,
+            guardrails=guardrails,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
