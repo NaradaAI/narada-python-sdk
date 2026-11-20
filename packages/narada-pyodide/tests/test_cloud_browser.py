@@ -846,6 +846,36 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent(
 
 
 @pytest.mark.asyncio
+async def test_agent_run_maps_quota_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            ok=False,
+            status=403,
+            text_data=json.dumps(
+                {
+                    "detail": {
+                        "code": 0,
+                        "userEmail": "user@example.com",
+                        "resourceName": "naradaCredits",
+                    }
+                }
+            ),
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+
+    with pytest.raises(
+        narada_pkg.NaradaQuotaExceededError,
+        match="You have run out of credits",
+    ):
+        await narada_pkg.Agent(environment=env).run("Test exhausted quota")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("speed", list(AgentSpeed))
 @pytest.mark.parametrize("required_trace", [False, True])
 async def test_agent_run_forwards_speed(
