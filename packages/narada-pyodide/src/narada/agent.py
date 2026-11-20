@@ -49,6 +49,8 @@ from narada_core.actions.models import (
     RecordedClick,
     SavePdfFileRequest,
     SavePdfFileResponse,
+    ServeHtmlRequest,
+    UploadedFileVariable,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -348,16 +350,35 @@ class Agent(Generic[_StructuredOutput]):
         """Performs an action on an element specified by the given selectors, falling back to the
         configured Operator agent and speed if the selectors fail to match a unique element.
 
+        Use {"text_content": "Save"} for the innermost text match, or combine it with
+        {"tag_name": "button"} to target the containing button. Role and class_name
+        can constrain text too. ID and path fields are independent fallback strategies.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch;
+        omit text_content when no text constraint is intended.
+
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
+
+        For select_file actions, file must be an existing file-variable value. Local file uploads
+        are unavailable in the browser runtime.
         """
         if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
             raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
         if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
             raise ValueError("ultrafast speed is not supported by Operator Mini")
 
+        browser_environment = self._browser_environment()
+        normalized_action = action
+        if action["type"] == "select_file":
+            normalized_action = {
+                "type": "select_file",
+                "file": await browser_environment._normalize_input_variables_value_impl(
+                    input_variable_value=action["file"]
+                ),
+            }
+
         request = AgenticSelectorRequest(
-            action=action,
+            action=normalized_action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
             fallback_agent_type=(
@@ -376,7 +397,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
 
-        result = await self._browser_environment()._run_extension_action(
+        result = await browser_environment._run_extension_action(
             request,
             response_model,
             timeout=timeout,
@@ -467,6 +488,19 @@ class Agent(Generic[_StructuredOutput]):
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
+    async def serve_html(
+        self, *, file: UploadedFileVariable, timeout: int | None = None
+    ) -> None:
+        """Display a self-contained HTML file for Operator to inspect and interact with.
+
+        Pass an uploaded workflow file value. The file opens in a new active Chrome tab.
+        """
+        environment = self._browser_environment()
+        await environment._run_extension_action(
+            ServeHtmlRequest(file=file),
+            timeout=timeout if timeout is not None else 60,
+        )
+
     async def close_tab(self, *, timeout: int | None = None) -> None:
         """Closes the active browser tab."""
         environment = self._browser_environment()
@@ -484,6 +518,9 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int,
     ) -> bool:
         """Waits for an element matching the given selectors to reach the specified state.
+
+        Text selectors work alone or with tag/attribute constraints, as in agentic_selector.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch.
 
         Returns True if the element was found, False if no selector matched before timeout.
         """

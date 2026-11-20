@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 from narada_core.actions.models import (
     DEFAULT_HITL_TIMEOUT_SECONDS,
+    AgenticSelectors,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
     PromptForUserInputVariable,
@@ -779,6 +780,7 @@ async def test_agent_run_sends_operator_mini_command_without_transport_tier(
     ("kind", "reasoning", "expected_prompt"),
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.XHIGH, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
         (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
@@ -1570,6 +1572,46 @@ async def test_agentic_selector_returns_verification_status(
 
 
 @pytest.mark.asyncio
+async def test_agentic_selector_preserves_file_value_for_select_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(json_data={"status": "success", "data": None})
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    file_value = {
+        "source": "agentStudioAttachment",
+        "id": "file-123",
+        "filename": "invoice.pdf",
+        "mimeType": "application/pdf",
+        "itemId": "workflow-123",
+    }
+
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="browser-window-123",
+        api_key="test-api-key",
+    )
+    await narada_pkg.Agent(environment=env).agentic_selector(
+        action={"type": "select_file", "file": file_value},
+        selectors={"tag_name": "input", "type": "file"},
+        fallback_operator_query="Select the invoice file",
+    )
+
+    payload = json.loads(pyfetch.await_args.kwargs["body"])
+    assert payload["action"] == {
+        "name": "agentic_selector",
+        "action": {"type": "selectFile", "file": file_value},
+        "selectors": {
+            "type": {"value": "file"},
+            "tagName": {"value": "input"},
+        },
+        "fallback_operator_query": "Select the invoice file",
+        "fallback_agent_type": "operator",
+        "fallback_speed": "standard",
+    }
+
+
+@pytest.mark.asyncio
 async def test_agentic_selector_serializes_fallback_model_and_speed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1967,6 +2009,89 @@ async def test_google_drive_refreshes_pyodide_auth_and_surfaces_errors(
         pyfetch.await_args.kwargs["headers"]["Authorization"]
         == "Bearer frontend-id-token"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selectors, expected",
+    [
+        ({"text_content": "Save"}, {"textContent": {"value": "Save"}}),
+        (
+            {"text_content": "Save", "tag_name": "button"},
+            {"textContent": {"value": "Save"}, "tagName": {"value": "button"}},
+        ),
+        (
+            {"text_content": " Save ", "role": "button", "class_name": "primary"},
+            {
+                "textContent": {"value": " Save "},
+                "role": {"value": "button"},
+                "className": {"value": "primary"},
+            },
+        ),
+        ({"tag_name": "button"}, {"tagName": {"value": "button"}}),
+    ],
+)
+@pytest.mark.parametrize("method", ["agentic_selector", "wait_for_element"])
+async def test_text_selectors_dispatch_without_a_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    selectors: AgenticSelectors,
+    expected: dict[str, object],
+    method: str,
+) -> None:
+    pyfetch = AsyncMock(
+        return_value=_FakeResponse(
+            json_data={"status": "success", "data": '{"found":true}'}
+        )
+    )
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="bw-1", api_key="test-key"
+    )
+    agent = narada_pkg.Agent(environment=env)
+    if method == "agentic_selector":
+        await agent.agentic_selector(
+            action={"type": "click"},
+            selectors=selectors,
+            fallback_operator_query="Click Save",
+        )
+    else:
+        await agent.wait_for_element(selectors=selectors, state="visible", timeout=1000)
+    action = json.loads(pyfetch.await_args.kwargs["body"])["action"]
+    assert action["selectors"] == expected
+    assert "selectorMode" not in action
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["", " \t\n"])
+@pytest.mark.parametrize("tag", [False, True])
+@pytest.mark.parametrize("method", ["agentic_selector", "wait_for_element"])
+async def test_blank_text_selector_is_rejected_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    tag: bool,
+    method: str,
+) -> None:
+    pyfetch = AsyncMock()
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="bw-1", api_key="test-key"
+    )
+    agent = narada_pkg.Agent(environment=env)
+    selectors: AgenticSelectors = {"text_content": text}
+    if tag:
+        selectors["tag_name"] = "button"
+    with pytest.raises(ValueError, match="text_content must not be empty"):
+        if method == "agentic_selector":
+            await agent.agentic_selector(
+                action={"type": "click"},
+                selectors=selectors,
+                fallback_operator_query="Click Save",
+            )
+        else:
+            await agent.wait_for_element(
+                selectors=selectors, state="visible", timeout=1000
+            )
+    pyfetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

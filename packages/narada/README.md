@@ -83,6 +83,42 @@ This would then result in the following trajectory:
 
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
+## Text selectors
+
+Use `text_content` with `agent.agentic_selector(...)` in both CPython and Pyodide.
+No tag or search mode is required:
+
+```python
+await agent.agentic_selector(
+    action={"type": "click"},
+    selectors={"text_content": "Save"},
+    fallback_operator_query="Click Save",
+)
+```
+
+Text alone matches the innermost element containing it. For
+`<button><span>Save</span></button>`, it targets the span. Add a tag to target the
+containing button instead:
+
+```python
+await agent.agentic_selector(
+    action={"type": "click"},
+    selectors={"tag_name": "button", "text_content": "Save"},
+    fallback_operator_query="Click the Save button",
+)
+```
+
+`role`, `class_name`, and other attribute constraints can also combine with text.
+ID, test ID, DOM path, and XPath keep their independent fallback priority; omit
+them when text must determine the target. A missing or ambiguous match invokes
+the configured Operator fallback.
+
+`agent.wait_for_element(...)` accepts the same selector combinations. Pass Python
+variables as ordinary string values, such as `{"text_content": worker_id}`.
+Explicit empty or whitespace-only `text_content` raises `ValueError` before
+sending a browser action, including when other fields are present. Omit the field
+when you intend to match without a text constraint.
+
 ## Migration note
 
 This version introduces a non-backward-compatible, agent-centered API:
@@ -155,8 +191,8 @@ lists. A supplied model replaces both lists: `Guardrails()` explicitly clears th
 invocation, and supplying only an allowlist clears the blacklist. Overrides never update the saved
 workflow. Saved Python workflows do not support overrides; direct deterministic actions are unchanged.
 
-Entries are strings, with no URL or wildcard validation. This API carries configuration only;
-navigation enforcement is not active yet.
+For browser-agent runs, the Narada Enterprise Chrome extension applies the lists to document
+navigations in the workflow's Chrome window. A regular Chrome Web Store installation is supported.
 
 ## Logging
 
