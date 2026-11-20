@@ -11,11 +11,11 @@ async def main() -> None:
             "John Doe",
             guardrails=Guardrails(
                 url_allowlist=["https://example.com/*"],
-                url_blacklist=["https://example.com/private/*"],
+                url_blocklist=["https://example.com/private/*"],
             ),
         )
         print("Response:", response.model_dump_json(indent=2))
-        # Override the workflow's saved URL allowlist and blacklist with empty lists
+        # Override the workflow's saved URL allowlist and blocklist with empty lists
         # for this run only. The saved workflow settings stay unchanged.
         # Leave out the guardrails argument to use the workflow's saved lists.
         response = await agent.run("Jane Doe", guardrails=Guardrails())

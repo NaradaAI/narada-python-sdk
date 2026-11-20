@@ -351,7 +351,7 @@ async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
             AgentKind.OPERATOR,
             Guardrails(
                 url_allowlist=["https://Example.com/Path?x=1", "*.example.org/*"],
-                url_blacklist=["blocked.example"],
+                url_blocklist=["blocked.example"],
             ),
         ),
     ],
@@ -375,7 +375,7 @@ async def test_agent_run_guardrails_wire_format_and_invocation_isolation(
     else:
         assert first["guardrails"] == {
             "urlAllowlist": guardrails.url_allowlist,
-            "urlBlacklist": guardrails.url_blacklist,
+            "urlBlocklist": guardrails.url_blocklist,
         }
     assert "guardrails" not in second
 
@@ -399,6 +399,6 @@ async def test_agent_run_passes_guardrails_to_critic_dispatch(
     )
     assert len(session.dispatched_bodies) == 2
     assert all(
-        body["guardrails"] == {"urlAllowlist": [], "urlBlacklist": []}
+        body["guardrails"] == {"urlAllowlist": [], "urlBlocklist": []}
         for body in session.dispatched_bodies
     )

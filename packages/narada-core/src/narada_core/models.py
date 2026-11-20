@@ -49,12 +49,12 @@ class AgentSpeed(StrEnum):
 
 
 class Guardrails(BaseModel):
-    """URL allowlist and blacklist configuration for an agent invocation."""
+    """URL allowlist and blocklist configuration for an agent invocation."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     url_allowlist: list[str] = Field(default_factory=list, alias="urlAllowlist")
-    url_blacklist: list[str] = Field(default_factory=list, alias="urlBlacklist")
+    url_blocklist: list[str] = Field(default_factory=list, alias="urlBlocklist")
 
 
 class UserResourceCredentials(TypedDict, total=False):

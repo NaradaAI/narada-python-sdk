@@ -1030,7 +1030,7 @@ async def test_agent_run_emits_combined_critic_workflow_trace(
     for call in (pyfetch.await_args_list[0], pyfetch.await_args_list[2]):
         assert json.loads(call.kwargs["body"])["guardrails"] == {
             "urlAllowlist": [],
-            "urlBlacklist": [],
+            "urlBlocklist": [],
         }
 
     combined_workflow_trace = {
@@ -2104,7 +2104,7 @@ async def test_blank_text_selector_is_rejected_before_dispatch(
             "builtin",
             {
                 "url_allowlist": ["*.example.com/*"],
-                "url_blacklist": ["blocked.example"],
+                "url_blocklist": ["blocked.example"],
             },
         ),
     ],
@@ -2149,7 +2149,7 @@ async def test_agent_run_guardrails_serialization(
     else:
         assert body["guardrails"] == {
             "urlAllowlist": entries.get("url_allowlist", []),
-            "urlBlacklist": entries.get("url_blacklist", []),
+            "urlBlocklist": entries.get("url_blocklist", []),
         }
 
     await agent.run("next invocation")
