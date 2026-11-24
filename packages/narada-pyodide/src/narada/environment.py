@@ -54,6 +54,7 @@ from narada_core.models import (
     UserResourceCredentials,
     VectorStore,
     _connected_vector_store_to_wire,
+    _guardrails_to_wire,
     _RemoteDispatchPollResponse,
     _SdkConfig,
 )
@@ -537,6 +538,9 @@ class Environment(ABC):
 
         The higher-level `Agent.run` method should be preferred for most use cases.
         """
+        serialized_guardrails = (
+            None if guardrails is None else _guardrails_to_wire(guardrails)
+        )
         await self._ensure_initialized()
 
         # Trace instrumentation: the entire method body is wrapped so that any
@@ -573,8 +577,8 @@ class Environment(ABC):
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
-        if guardrails is not None:
-            body["guardrails"] = guardrails.model_dump(mode="json", by_alias=True)
+        if serialized_guardrails is not None:
+            body["guardrails"] = serialized_guardrails
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:

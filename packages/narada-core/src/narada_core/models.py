@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    Generic,
+    Literal,
+    NotRequired,
+    Self,
+    TypedDict,
+    TypeVar,
+)
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from narada_core.actions.models import HitlInputMetadata, UploadedFileVariable
 
@@ -49,12 +58,29 @@ class AgentSpeed(StrEnum):
 
 
 class Guardrails(BaseModel):
-    """URL allowlist and blocklist configuration for an agent invocation."""
+    """URL allowlist or blocklist configuration for an agent invocation."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        revalidate_instances="always",
+    )
 
     url_allowlist: list[str] = Field(default_factory=list, alias="urlAllowlist")
     url_blocklist: list[str] = Field(default_factory=list, alias="urlBlocklist")
+
+    @model_validator(mode="after")
+    def _validate_mutually_exclusive(self) -> Self:
+        if self.url_allowlist and self.url_blocklist:
+            raise ValueError(
+                "url_allowlist and url_blocklist cannot both be specified; "
+                "provide at most one."
+            )
+        return self
+
+
+def _guardrails_to_wire(guardrails: Guardrails) -> dict[str, list[str]]:
+    return Guardrails.model_validate(guardrails).model_dump(mode="json", by_alias=True)
 
 
 class UserResourceCredentials(TypedDict, total=False):
