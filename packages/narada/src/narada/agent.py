@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from functools import partial
 from io import BytesIO
 from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
@@ -122,6 +123,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -152,6 +154,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -181,9 +184,32 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
-        """Invokes an agent in the bound Narada environment."""
+        """Invoke an agent in the bound Narada environment.
+
+        Set `memory_id` on a repeatable Operator or Operator Mini step to reuse
+        and update its organization-scoped policy. Keep the same ID for that
+        step across runs. Memory requires a standalone browser dispatch with
+        trace retention and cannot be combined with `critic`. A Memory update
+        failure leaves the Operator result available.
+        """
+        if memory_id is not None:
+            if (
+                not isinstance(memory_id, str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", memory_id) is None
+            ):
+                raise ValueError(
+                    "`memory_id` must contain 1–128 ASCII letters, digits, "
+                    "hyphens, or underscores."
+                )
+            if self.kind not in (AgentKind.OPERATOR, AgentKind.OPERATOR_MINI):
+                raise ValueError(
+                    "`memory_id` is only supported for Operator and Operator Mini."
+                )
+            if critic is not None:
+                raise ValueError("`memory_id` cannot be combined with `critic`.")
         if reasoning is not None and not isinstance(self.kind, AgentKind):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
@@ -215,6 +241,7 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             reasoning=reasoning,
             require_execution_trace=require_execution_trace,
+            **({"memory_id": memory_id} if memory_id is not None else {}),
             speed=speed,
             guardrails=guardrails,
             timeout=timeout,
@@ -290,6 +317,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -318,6 +346,7 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             critic_context=critic_context,
             require_execution_trace=require_execution_trace,
+            **({"memory_id": memory_id} if memory_id is not None else {}),
             timeout=timeout,
         )
 

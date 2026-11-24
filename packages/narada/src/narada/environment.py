@@ -40,6 +40,7 @@ from uuid import uuid4
 
 import aiohttp
 from narada_core.actions.models import (
+    AgentUsage,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
@@ -901,6 +902,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -932,6 +934,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -962,6 +965,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        memory_id: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -983,6 +987,9 @@ class Environment(ABC):
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
         if require_execution_trace:
+            body["requireExecutionTrace"] = True
+        if memory_id is not None:
+            body["memoryId"] = memory_id
             body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
@@ -1099,12 +1106,64 @@ class Environment(ABC):
                             else:
                                 response_content["structuredOutput"] = None
 
+                        if memory_id is not None and response["status"] == "success":
+                            await self._finalize_operator_memory(
+                                session, response, deadline=deadline
+                            )
                         return cast(Response, response)
                     else:
                         raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+
+    async def _finalize_operator_memory(
+        self,
+        session: aiohttp.ClientSession,
+        response: _RemoteDispatchPollResponse,
+        *,
+        deadline: float,
+    ) -> None:
+        request_id = response["requestId"]
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            async with asyncio.timeout(remaining):
+                async with session.post(
+                    f"{self._base_url}/remote-dispatch/responses/{request_id}"
+                    "/operator-memory/finalize",
+                    headers=self._auth_headers,
+                ) as result:
+                    result.raise_for_status()
+                    receipt = await result.json()
+                if not isinstance(receipt, dict) or receipt.get("outcome") not in (
+                    "reused",
+                    "published",
+                    "skipped",
+                    "failed",
+                    "pending",
+                ):
+                    raise ValueError("Invalid Operator Memory receipt")
+                if receipt["outcome"] not in ("reused", "published"):
+                    logger.warning(
+                        "Operator Memory outcome for request %s: %s",
+                        request_id,
+                        receipt["outcome"],
+                    )
+                if receipt.get("usage") is not None:
+                    usage = AgentUsage.model_validate(receipt["usage"])
+                    response["usage"] = {
+                        "actions": usage.actions,
+                        "credits": usage.credits,
+                    }
+        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            logger.warning(
+                "Operator Memory finalization for request %s is uncertain (%s)",
+                request_id,
+                type(error).__name__,
+            )
+        # Caller cancellation propagates through both the POST and this deadline.
 
     @overload
     async def _run_extension_action(
