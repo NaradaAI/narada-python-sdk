@@ -85,10 +85,12 @@ You can use the SDK to launch browsers and run automated tasks using natural lan
 
 ## Operator Memory
 
-Give a repeatable Operator or Operator Mini step a stable key.
+Give a repeatable Operator or Operator Mini step a stable key. Use it on
+standalone browser dispatches. Inherited execution traces and the `critic`
+argument cannot be combined with Memory.
 
 ```python
-result = await operator.run(
+result = await agent.run(
     "Open the booking details and read the current rates.",
     operator_memory_key="7c29b6b5-e094-4bd4-8d3a-376b01851d00",
 )
@@ -109,7 +111,9 @@ A review may add a fixed charge and metered model usage. Exact reuse skips revie
 Review uses the time left in `run()`. If the outcome is pending or unknown,
 the successful Operator result is still available and usage may still change.
 The usage flag concerns charges from that Memory attempt and does not change
-ordinary Operator metering.
+ordinary Operator metering. Use `GET /remote-dispatch/responses/{requestId}` to
+check again without starting another review. An interrupted finalization may
+remain pending, and repeating the finalize request does not resume it.
 
 ## Text selectors
 
