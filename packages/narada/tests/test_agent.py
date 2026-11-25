@@ -436,7 +436,8 @@ async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
     assert result.operator_memory.outcome == "published"
     assert "policy_revision" not in result.operator_memory.model_dump()
     assert result.operator_memory.usage_is_final is True
-    assert session.dispatched_bodies[0]["memoryId"] == "hotel_rates-1"
+    assert session.dispatched_bodies[0]["operatorMemoryKey"] == "hotel_rates-1"
+    assert "memoryId" not in session.dispatched_bodies[0]
     assert session.dispatched_bodies[0]["requireExecutionTrace"] is True
     assert session.finalized_urls == [
         f"{agent.environment._base_url}/remote-dispatch/responses/req-1/operator-memory/finalize"
@@ -445,7 +446,7 @@ async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
 
 @pytest.mark.parametrize("operator_memory_key", ["", "a" * 129, "a/b", "ñ", "a\n", 1])
 @pytest.mark.asyncio
-async def test_memory_rejects_invalid_ids_before_dispatch(operator_memory_key):
+async def test_memory_rejects_invalid_keys_before_dispatch(operator_memory_key):
     env = _CountingEnvironment()
     with pytest.raises(ValueError, match="ASCII"):
         await Agent(environment=env).run(
@@ -496,7 +497,7 @@ async def test_memory_finalizes_only_opted_in_successes(monkeypatch):
     assert result.status == "error"
     assert result.operator_memory.outcome == "skipped"
     assert result.operator_memory.usage_is_final is True
-    assert "memoryId" not in session.dispatched_bodies[0]
+    assert "operatorMemoryKey" not in session.dispatched_bodies[0]
     assert "requireExecutionTrace" not in session.dispatched_bodies[0]
     assert session.finalized_urls == []
 

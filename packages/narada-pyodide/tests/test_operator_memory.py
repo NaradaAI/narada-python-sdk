@@ -99,14 +99,15 @@ async def test_operator_memory_uses_existing_browser_identity_and_preserves_resu
     assert first.kwargs["headers"]["X-Narada-User-ID"] == "user"
     assert first.kwargs["headers"]["X-Narada-Env"] == "dev"
     dispatch = json.loads(first.kwargs["body"])
+    assert "memoryId" not in dispatch
     assert dispatch["parentRequestId"] == "workflow"
     assert dispatch["executionTraceContext"]["traceId"] == "workflow-trace"
     if key is None:
-        assert "memoryId" not in dispatch
+        assert "operatorMemoryKey" not in dispatch
         assert "requireExecutionTrace" not in dispatch
         assert rest == []
     else:
-        assert dispatch["memoryId"] == key
+        assert dispatch["operatorMemoryKey"] == key
         assert dispatch["requireExecutionTrace"] is True
         [finalize_call] = rest
         assert finalize_call.args[0].endswith(

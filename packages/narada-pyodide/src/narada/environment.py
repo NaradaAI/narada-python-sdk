@@ -567,7 +567,7 @@ class Environment(ABC):
             "timeZone": time_zone,
         }
         if operator_memory_key is not None:
-            body["memoryId"] = operator_memory_key
+            body["operatorMemoryKey"] = operator_memory_key
             require_execution_trace = True
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
