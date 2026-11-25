@@ -434,7 +434,7 @@ async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
     assert result.text == "ok-1"
     assert result.usage.credits == 11
     assert result.operator_memory.outcome == "published"
-    assert result.operator_memory.policy_revision == "etag-1"
+    assert "policy_revision" not in result.operator_memory.model_dump()
     assert result.operator_memory.usage_is_final is True
     assert session.dispatched_bodies[0]["memoryId"] == "hotel_rates-1"
     assert session.dispatched_bodies[0]["requireExecutionTrace"] is True

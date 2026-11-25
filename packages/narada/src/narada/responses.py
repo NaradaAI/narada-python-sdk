@@ -12,7 +12,6 @@ class OperatorMemoryOutcome(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     outcome: Literal["pending", "reused", "published", "skipped", "failed", "unknown"]
-    policy_revision: str | None = Field(default=None, alias="policyRevision")
     usage_is_final: StrictBool = Field(alias="usageIsFinal")
 
 

@@ -107,6 +107,8 @@ can learn it again.
 
 Opting in retains an execution trace. The organization's retention settings
 apply. Shared policies hold observation hints, so each run uses its own inputs.
+An initial navigation can be followed by a learned browser step. The policy
+does not save its URL. If the run has no verified control, Memory skips review.
 A review may add a fixed charge and metered model usage. Exact reuse skips review.
 Review uses the time left in `run()`. If the outcome is pending or unknown,
 the successful Operator result is still available and usage may still change.
