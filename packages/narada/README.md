@@ -83,6 +83,34 @@ This would then result in the following trajectory:
 
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
+## Operator Memory
+
+Give a repeatable Operator or Operator Mini step a stable key.
+
+```python
+result = await operator.run(
+    "Open the booking details and read the current rates.",
+    operator_memory_key="7c29b6b5-e094-4bd4-8d3a-376b01851d00",
+)
+if result.operator_memory and not result.operator_memory.usage_is_final:
+    print("Usage may still change", result.request_id)
+```
+
+Keep one key per logical step. Eligible members of the same Narada organization
+can reuse and update the policy with their own successfully completed runs.
+DEV and PROD each have their own policies. Use a UUID or another unique key and
+keep customer data out of the key. An organization administrator can clear the
+policy with `DELETE /remote-dispatch/operator-memory/{memory_key}`. A future run
+can learn it again.
+
+Opting in retains an execution trace. The organization's retention settings
+apply. Shared policies hold observation hints, so each run uses its own inputs.
+A review may add a fixed charge and metered model usage. Exact reuse skips review.
+Review uses the time left in `run()`. If the outcome is pending or unknown,
+the successful Operator result is still available and usage may still change.
+The usage flag concerns charges from that Memory attempt and does not change
+ordinary Operator metering.
+
 ## Text selectors
 
 Use `text_content` with `agent.agentic_selector(...)` in both CPython and Pyodide.

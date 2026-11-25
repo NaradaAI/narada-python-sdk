@@ -46,6 +46,7 @@ from narada.environment import (
     SessionDownloadItem,
 )
 from narada.google_drive import GoogleDriveClient
+from narada.responses import AgentResponse, OperatorMemoryOutcome
 from narada.utils import download_file, render_html
 from narada.version import __version__
 
@@ -54,6 +55,7 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "AgentResponse",
     "AgentSpeed",
     "BedrockConnectionConfig",
     "BedrockCredentials",
@@ -84,6 +86,7 @@ __all__ = [
     "NaradaInitializationError",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
+    "OperatorMemoryOutcome",
     "PressKeyEventItem",
     "ProxyConfig",
     "ReasoningEffort",

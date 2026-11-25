@@ -28,6 +28,7 @@ from typing import (
     Callable,
     Literal,
     Mapping,
+    NotRequired,
     TypedDict,
     TypeGuard,
     TypeVar,
@@ -68,8 +69,10 @@ from narada_core.models import (
     UserResourceCredentials,
     VectorStore,
     _connected_vector_store_to_wire,
-    _RemoteDispatchPollResponse,
     _SdkConfig,
+)
+from narada_core.models import (
+    _RemoteDispatchPollResponse as _CorePollResponse,
 )
 from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
@@ -89,11 +92,17 @@ from narada._logging import log_duration
 from narada._request_stop import _RequestStopResult, _stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
+from narada.responses import OperatorMemoryOutcome
 from narada.utils import assert_not_none
 from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
 
 logger = logging.getLogger(__name__)
+
+
+class _RemoteDispatchPollResponse(_CorePollResponse):
+    operatorMemory: NotRequired[dict[str, Any]]
+
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -902,7 +911,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
-        memory_id: str | None = None,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -934,7 +943,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
-        memory_id: str | None = None,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -965,7 +974,7 @@ class Environment(ABC):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
-        memory_id: str | None = None,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -988,8 +997,8 @@ class Environment(ABC):
             body["browserWindowId"] = browser_window_id
         if require_execution_trace:
             body["requireExecutionTrace"] = True
-        if memory_id is not None:
-            body["memoryId"] = memory_id
+        if operator_memory_key is not None:
+            body["memoryId"] = operator_memory_key
             body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
@@ -1106,10 +1115,16 @@ class Environment(ABC):
                             else:
                                 response_content["structuredOutput"] = None
 
-                        if memory_id is not None and response["status"] == "success":
-                            await self._finalize_operator_memory(
-                                session, response, deadline=deadline
-                            )
+                        if operator_memory_key is not None:
+                            if response["status"] == "success":
+                                await self._finalize_operator_memory(
+                                    session, response, deadline=deadline
+                                )
+                            else:
+                                response["operatorMemory"] = {
+                                    "outcome": "skipped",
+                                    "usageIsFinal": True,
+                                }
                         return cast(Response, response)
                     else:
                         raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
@@ -1137,19 +1152,12 @@ class Environment(ABC):
                 ) as result:
                     result.raise_for_status()
                     receipt = await result.json()
-                if not isinstance(receipt, dict) or receipt.get("outcome") not in (
-                    "reused",
-                    "published",
-                    "skipped",
-                    "failed",
-                    "pending",
-                ):
-                    raise ValueError("Invalid Operator Memory receipt")
-                if receipt["outcome"] not in ("reused", "published"):
+                outcome = OperatorMemoryOutcome.model_validate(receipt)
+                if outcome.outcome not in ("reused", "published"):
                     logger.warning(
                         "Operator Memory outcome for request %s: %s",
                         request_id,
-                        receipt["outcome"],
+                        outcome.outcome,
                     )
                 if receipt.get("usage") is not None:
                     usage = AgentUsage.model_validate(receipt["usage"])
@@ -1157,7 +1165,14 @@ class Environment(ABC):
                         "actions": usage.actions,
                         "credits": usage.credits,
                     }
+                else:
+                    outcome.usage_is_final = False
+                response["operatorMemory"] = outcome.model_dump(by_alias=True)
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            response["operatorMemory"] = {
+                "outcome": "unknown",
+                "usageIsFinal": False,
+            }
             logger.warning(
                 "Operator Memory finalization for request %s is uncertain (%s)",
                 request_id,

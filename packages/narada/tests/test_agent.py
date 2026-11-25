@@ -46,7 +46,12 @@ class _RemoteDispatchFakeClientSession:
         self.dispatched_bodies: list[dict[str, Any]] = []
         self.finalized_urls: list[str] = []
         self.finalization_response = _FakeResponse(
-            {"outcome": "published", "usage": {"actions": 1, "credits": 11}}
+            {
+                "outcome": "published",
+                "policyRevision": "etag-1",
+                "usageIsFinal": True,
+                "usage": {"actions": 1, "credits": 11},
+            }
         )
         self.poll_status = "success"
 
@@ -424,10 +429,13 @@ async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
     monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
     agent = Agent(environment=_CountingEnvironment(), kind=kind)
 
-    result = await agent.run("bookings", memory_id="hotel_rates-1")
+    result = await agent.run("bookings", operator_memory_key="hotel_rates-1")
 
     assert result.text == "ok-1"
     assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "published"
+    assert result.operator_memory.policy_revision == "etag-1"
+    assert result.operator_memory.usage_is_final is True
     assert session.dispatched_bodies[0]["memoryId"] == "hotel_rates-1"
     assert session.dispatched_bodies[0]["requireExecutionTrace"] is True
     assert session.finalized_urls == [
@@ -435,12 +443,14 @@ async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
     ]
 
 
-@pytest.mark.parametrize("memory_id", ["", "a" * 129, "a/b", "ñ", "a\n", 1])
+@pytest.mark.parametrize("operator_memory_key", ["", "a" * 129, "a/b", "ñ", "a\n", 1])
 @pytest.mark.asyncio
-async def test_memory_rejects_invalid_ids_before_dispatch(memory_id):
+async def test_memory_rejects_invalid_ids_before_dispatch(operator_memory_key):
     env = _CountingEnvironment()
     with pytest.raises(ValueError, match="ASCII"):
-        await Agent(environment=env).run("task", memory_id=memory_id)
+        await Agent(environment=env).run(
+            "task", operator_memory_key=operator_memory_key
+        )
     assert env.initialize_count == 0
 
 
@@ -449,7 +459,9 @@ async def test_memory_rejects_invalid_ids_before_dispatch(memory_id):
 async def test_memory_rejects_non_operator_before_dispatch(kind):
     env = _CountingEnvironment()
     with pytest.raises(ValueError, match="only supported"):
-        await Agent(environment=env, kind=kind).run("task", memory_id="example")
+        await Agent(environment=env, kind=kind).run(
+            "task", operator_memory_key="example"
+        )
     assert env.initialize_count == 0
 
 
@@ -460,7 +472,9 @@ async def test_memory_rejects_critic_before_dispatch():
     env = _CountingEnvironment()
     with pytest.raises(ValueError, match="cannot be combined"):
         await Agent(environment=env).run(
-            "task", memory_id="example", critic=CriticConfig(prompt="check task")
+            "task",
+            operator_memory_key="example",
+            critic=CriticConfig(prompt="check task"),
         )
     assert env.initialize_count == 0
 
@@ -473,11 +487,15 @@ async def test_memory_finalizes_only_opted_in_successes(monkeypatch):
     monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
     agent = Agent(environment=_CountingEnvironment())
 
-    await agent.run("ordinary")
+    ordinary = await agent.run("ordinary")
+    assert ordinary.operator_memory is None
+    assert "operator_memory" not in ordinary.model_dump()
     session.poll_status = "error"
-    result = await agent.run("failed", memory_id="example")
+    result = await agent.run("failed", operator_memory_key="example")
 
     assert result.status == "error"
+    assert result.operator_memory.outcome == "skipped"
+    assert result.operator_memory.usage_is_final is True
     assert "memoryId" not in session.dispatched_bodies[0]
     assert "requireExecutionTrace" not in session.dispatched_bodies[0]
     assert session.finalized_urls == []
@@ -502,12 +520,14 @@ async def test_memory_failure_keeps_operator_result(monkeypatch, caplog, error):
     monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
 
     result = await Agent(environment=_CountingEnvironment()).run(
-        "task", memory_id="example"
+        "task", operator_memory_key="example"
     )
 
     assert result.status == "success"
     assert result.text == "ok-1"
     assert result.usage.credits == 1
+    assert result.operator_memory.outcome == "unknown"
+    assert result.operator_memory.usage_is_final is False
     assert len(session.finalized_urls) == 1
     assert "finalization for request req-1 is uncertain" in caplog.text
 
@@ -521,7 +541,9 @@ async def test_memory_propagates_caller_cancellation(monkeypatch):
     monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
 
     with pytest.raises(asyncio.CancelledError):
-        await Agent(environment=_CountingEnvironment()).run("task", memory_id="example")
+        await Agent(environment=_CountingEnvironment()).run(
+            "task", operator_memory_key="example"
+        )
     assert len(session.finalized_urls) == 1
 
 
@@ -533,3 +555,27 @@ async def test_memory_does_not_post_when_remaining_deadline_is_gone():
     )
 
     assert session.finalized_urls == []
+
+
+@pytest.mark.asyncio
+async def test_pending_receipt_keeps_updated_usage_preliminary(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FakeResponse(
+        {
+            "outcome": "pending",
+            "usageIsFinal": False,
+            "usage": {"actions": 1, "credits": 11},
+        }
+    )
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    result = await Agent(environment=_CountingEnvironment()).run(
+        "task", operator_memory_key="booking"
+    )
+
+    assert result.status == "success"
+    assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "pending"
+    assert result.operator_memory.usage_is_final is False
