@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Literal,
     Mapping,
+    NotRequired,
     TypedDict,
     TypeGuard,
     TypeVar,
@@ -31,6 +32,7 @@ from urllib.parse import urlencode
 
 from js import AbortController, setTimeout  # type: ignore
 from narada_core.actions.models import (
+    AgentUsage,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
@@ -54,9 +56,9 @@ from narada_core.models import (
     UserResourceCredentials,
     VectorStore,
     _connected_vector_store_to_wire,
-    _RemoteDispatchPollResponse,
     _SdkConfig,
 )
+from narada_core.models import _RemoteDispatchPollResponse as _CorePollResponse
 from packaging.version import Version
 from pydantic import BaseModel
 from pyodide.ffi import JsProxy, create_once_callable
@@ -65,6 +67,7 @@ from pyodide.http import pyfetch
 from . import _trace
 from ._logging import log_duration
 from .google_drive import GoogleDriveClient
+from .responses import OperatorMemoryOutcome
 from .retry import pyfetch_with_retries
 from .vector_stores import VectorStoreCatalog
 from .version import __version__
@@ -73,6 +76,10 @@ from .version import __version__
 # in the stack on the frontend.
 
 logger = logging.getLogger(__name__)
+
+
+class _RemoteDispatchPollResponse(_CorePollResponse):
+    operatorMemory: NotRequired[dict[str, Any]]
 
 
 def _parent_run_ids() -> list[str]:
@@ -470,6 +477,7 @@ class Environment(ABC):
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -501,6 +509,7 @@ class Environment(ABC):
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -531,6 +540,7 @@ class Environment(ABC):
         callback_headers: dict[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
@@ -556,6 +566,9 @@ class Environment(ABC):
             "prompt": agent_prefix + prompt,
             "timeZone": time_zone,
         }
+        if operator_memory_key is not None:
+            body["memoryId"] = operator_memory_key
+            require_execution_trace = True
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
@@ -733,6 +746,16 @@ class Environment(ABC):
                             else None
                         ),
                     )
+                    if operator_memory_key is not None:
+                        if response["status"] == "success":
+                            await self._finalize_operator_memory(
+                                response, headers=headers, deadline=deadline
+                            )
+                        else:
+                            response["operatorMemory"] = {
+                                "outcome": "skipped",
+                                "usageIsFinal": True,
+                            }
                     return cast(Response, response)
                 else:
                     raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
@@ -764,6 +787,51 @@ class Environment(ABC):
                 error_message=str(err),
             )
             raise
+
+    async def _finalize_operator_memory(
+        self,
+        response: _RemoteDispatchPollResponse,
+        *,
+        headers: dict[str, str],
+        deadline: float,
+    ) -> None:
+        request_id = response["requestId"]
+        controller = AbortController.new()
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            async with asyncio.timeout(remaining):
+                result = await pyfetch(
+                    f"{self._base_url}/remote-dispatch/responses/{request_id}"
+                    "/operator-memory/finalize",
+                    method="POST",
+                    headers=headers,
+                    signal=controller.signal,
+                )
+                if not result.ok:
+                    raise NaradaError(
+                        f"Memory finalization returned HTTP {result.status}"
+                    )
+                receipt = await result.json()
+            outcome = OperatorMemoryOutcome.model_validate(receipt)
+            if receipt.get("usage") is not None:
+                usage = AgentUsage.model_validate(receipt["usage"])
+                response["usage"] = {"actions": usage.actions, "credits": usage.credits}
+            else:
+                outcome.usage_is_final = False
+            response["operatorMemory"] = outcome.model_dump(by_alias=True)
+        except UserAbortedError:
+            raise
+        except Exception as error:
+            response["operatorMemory"] = {"outcome": "unknown", "usageIsFinal": False}
+            logger.warning(
+                "Operator Memory finalization for request %s is uncertain (%s)",
+                request_id,
+                type(error).__name__,
+            )
+        finally:
+            controller.abort()
 
     @overload
     async def _run_extension_action(

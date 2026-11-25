@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 from functools import partial
-from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
+from typing import IO, Any, Generic, Literal, Mapping, TypeVar, cast, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
@@ -15,7 +16,6 @@ from narada_core.actions.models import (
     AgenticSelectorRequest,
     AgenticSelectorResponse,
     AgenticSelectors,
-    AgentResponse,
     AgentUsage,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
@@ -81,6 +81,7 @@ from narada.environment import (
 )
 
 from . import _trace
+from .responses import AgentResponse, OperatorMemoryOutcome
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -121,6 +122,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
         require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
@@ -151,6 +153,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
         require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
@@ -180,10 +183,34 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
         require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
-        """Invokes an agent in the bound Narada environment."""
+        """Invoke an agent in the bound Narada environment.
+
+        Supply a stable `operator_memory_key` for a repeatable Operator or
+        Operator Mini step. Both SDKs share eligible policies in the same
+        organization and environment. Review uses the remaining run timeout.
+        A review failure preserves a successful Operator result.
+        """
+        if operator_memory_key is not None:
+            if (
+                not isinstance(operator_memory_key, str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", operator_memory_key) is None
+            ):
+                raise ValueError(
+                    "`operator_memory_key` must contain 1–128 ASCII letters, digits, "
+                    "hyphens, or underscores."
+                )
+            if self.kind not in (AgentKind.OPERATOR, AgentKind.OPERATOR_MINI):
+                raise ValueError(
+                    "`operator_memory_key` is only supported for Operator and Operator Mini."
+                )
+            if critic is not None:
+                raise ValueError(
+                    "`operator_memory_key` cannot be combined with `critic`."
+                )
         if reasoning is not None and not isinstance(self.kind, AgentKind):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
@@ -215,6 +242,11 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             reasoning=reasoning,
             require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
             speed=speed,
             guardrails=guardrails,
             timeout=timeout,
@@ -256,6 +288,9 @@ class Agent(Generic[_StructuredOutput]):
         if workflow_trace is not None and parent_request_id is None:
             _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
+        raw_memory = cast(Mapping[str, object], remote_dispatch_response).get(
+            "operatorMemory"
+        )
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
@@ -266,6 +301,11 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            operator_memory=(
+                None
+                if raw_memory is None
+                else OperatorMemoryOutcome.model_validate(raw_memory)
+            ),
             execution_trace_context=response_content.get("executionTraceContext"),
         )
 
@@ -295,6 +335,7 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        operator_memory_key: str | None = None,
         require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
@@ -324,6 +365,11 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             critic_context=critic_context,
             require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
             timeout=timeout,
         )
 
