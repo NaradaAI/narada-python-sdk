@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -44,6 +45,17 @@ class _FakeResponse:
 class _RemoteDispatchFakeClientSession:
     def __init__(self) -> None:
         self.dispatched_bodies: list[dict[str, Any]] = []
+        self.finalized_urls: list[str] = []
+        self.finalization_response = _FakeResponse(
+            {
+                "outcome": "published",
+                "policyRevision": "etag-1",
+                "usageIsFinal": True,
+                "usage": {"actions": 1, "credits": 11},
+            }
+        )
+        self.poll_status = "success"
+
         self._poll_count = 0
 
     async def __aenter__(self) -> "_RemoteDispatchFakeClientSession":
@@ -56,6 +68,10 @@ class _RemoteDispatchFakeClientSession:
         if url.endswith("/remote-dispatch"):
             self.dispatched_bodies.append(kwargs["json"])
             return _FakeResponse({"requestId": f"req-{len(self.dispatched_bodies)}"})
+        if url.endswith("/operator-memory/finalize"):
+            assert set(kwargs) == {"headers"}
+            self.finalized_urls.append(url)
+            return self.finalization_response
         raise AssertionError(f"Unexpected POST URL: {url}")
 
     def get(self, url: str, **kwargs: Any) -> _FakeResponse:
@@ -65,7 +81,7 @@ class _RemoteDispatchFakeClientSession:
         self._poll_count += 1
         return _FakeResponse(
             {
-                "status": "success",
+                "status": self.poll_status,
                 "response": {
                     "text": f"ok-{self._poll_count}",
                     "output": {"type": "text", "content": f"ok-{self._poll_count}"},
@@ -441,3 +457,165 @@ async def test_agent_run_passes_guardrails_to_critic_dispatch(
         body["guardrails"] == {"urlAllowlist": [], "urlBlocklist": []}
         for body in session.dispatched_bodies
     )
+
+
+@pytest.mark.parametrize("kind", [AgentKind.OPERATOR, AgentKind.OPERATOR_MINI])
+@pytest.mark.asyncio
+async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment(), kind=kind)
+
+    result = await agent.run("bookings", operator_memory_key="hotel_rates-1")
+
+    assert result.text == "ok-1"
+    assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "published"
+    assert "policy_revision" not in result.operator_memory.model_dump()
+    assert result.operator_memory.usage_is_final is True
+    assert session.dispatched_bodies[0]["operatorMemoryKey"] == "hotel_rates-1"
+    assert "memoryId" not in session.dispatched_bodies[0]
+    assert session.dispatched_bodies[0]["requireExecutionTrace"] is True
+    assert session.finalized_urls == [
+        f"{agent.environment._base_url}/remote-dispatch/responses/req-1/operator-memory/finalize"
+    ]
+
+
+@pytest.mark.parametrize("operator_memory_key", ["", "a" * 129, "a/b", "ñ", "a\n", 1])
+@pytest.mark.asyncio
+async def test_memory_rejects_invalid_keys_before_dispatch(operator_memory_key):
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="ASCII"):
+        await Agent(environment=env).run(
+            "task", operator_memory_key=operator_memory_key
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.parametrize("kind", [AgentKind.CORE_AGENT, "Operator"])
+@pytest.mark.asyncio
+async def test_memory_rejects_non_operator_before_dispatch(kind):
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="only supported"):
+        await Agent(environment=env, kind=kind).run(
+            "task", operator_memory_key="example"
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_rejects_critic_before_dispatch():
+    from narada_core.models import CriticConfig
+
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="cannot be combined"):
+        await Agent(environment=env).run(
+            "task",
+            operator_memory_key="example",
+            critic=CriticConfig(prompt="check task"),
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_finalizes_only_opted_in_successes(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment())
+
+    ordinary = await agent.run("ordinary")
+    assert ordinary.operator_memory is None
+    assert "operator_memory" not in ordinary.model_dump()
+    session.poll_status = "error"
+    result = await agent.run("failed", operator_memory_key="example")
+
+    assert result.status == "error"
+    assert result.operator_memory.outcome == "skipped"
+    assert result.operator_memory.usage_is_final is True
+    assert "operatorMemoryKey" not in session.dispatched_bodies[0]
+    assert "requireExecutionTrace" not in session.dispatched_bodies[0]
+    assert session.finalized_urls == []
+
+
+class _FailingMemoryResponse(_FakeResponse):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__({})
+        self.error = error
+
+    async def json(self) -> dict[str, Any]:
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), ValueError("bad receipt")])
+@pytest.mark.asyncio
+async def test_memory_failure_keeps_operator_result(monkeypatch, caplog, error):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FailingMemoryResponse(error)
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    result = await Agent(environment=_CountingEnvironment()).run(
+        "task", operator_memory_key="example"
+    )
+
+    assert result.status == "success"
+    assert result.text == "ok-1"
+    assert result.usage.credits == 1
+    assert result.operator_memory.outcome == "unknown"
+    assert result.operator_memory.usage_is_final is False
+    assert len(session.finalized_urls) == 1
+    assert "finalization for request req-1 is uncertain" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_memory_propagates_caller_cancellation(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FailingMemoryResponse(asyncio.CancelledError())
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    with pytest.raises(asyncio.CancelledError):
+        await Agent(environment=_CountingEnvironment()).run(
+            "task", operator_memory_key="example"
+        )
+    assert len(session.finalized_urls) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_does_not_post_when_remaining_deadline_is_gone():
+    session = _RemoteDispatchFakeClientSession()
+    await _CountingEnvironment()._finalize_operator_memory(
+        session, {"requestId": "req-1"}, deadline=0
+    )
+
+    assert session.finalized_urls == []
+
+
+@pytest.mark.asyncio
+async def test_pending_receipt_keeps_updated_usage_preliminary(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FakeResponse(
+        {
+            "outcome": "pending",
+            "usageIsFinal": False,
+            "usage": {"actions": 1, "credits": 11},
+        }
+    )
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    result = await Agent(environment=_CountingEnvironment()).run(
+        "task", operator_memory_key="booking"
+    )
+
+    assert result.status == "success"
+    assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "pending"
+    assert result.operator_memory.usage_is_final is False

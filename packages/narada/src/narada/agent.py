@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+import re
 from functools import partial
 from io import BytesIO
-from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
+from typing import IO, Any, Generic, Literal, Mapping, TypeVar, cast, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
@@ -17,7 +18,6 @@ from narada_core.actions.models import (
     AgenticSelectorRequest,
     AgenticSelectorResponse,
     AgenticSelectors,
-    AgentResponse,
     AgentUsage,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
@@ -81,6 +81,7 @@ from narada.environment import (
     Environment,
     InputRequiredCallback,
 )
+from narada.responses import AgentResponse, OperatorMemoryOutcome
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -122,6 +123,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -152,6 +154,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -181,9 +184,45 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> AgentResponse:
-        """Invokes an agent in the bound Narada environment."""
+        """Invoke an agent in the bound Narada environment.
+
+        Set `operator_memory_key` on a repeatable Operator or Operator Mini step
+        to use a mutable policy shared by eligible callers in the active Narada
+        organization. DEV and PROD have separate policies. Generate a stable
+        unique key per logical step, for example a UUID, and keep it across runs.
+        Do not put customer inputs or secrets in the key. A different step needs
+        a different key. Eligible members can learn from their own successful
+        runs. A current organization administrator can clear the policy with the
+        Remote Dispatch API. A later eligible run can learn again.
+
+        Opting in retains an execution trace under the organization's retention
+        policy. Review can add a fixed charge and metered model usage. Exact reuse
+        skips review. Review uses the remaining run timeout. A review failure does
+        not discard an already successful Operator result. Check
+        `result.operator_memory.usage_is_final` to see whether usage includes all
+        charges from this Memory attempt. Unknown or pending outcomes do not imply
+        that no review charge occurred.
+        """
+        if operator_memory_key is not None:
+            if (
+                not isinstance(operator_memory_key, str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", operator_memory_key) is None
+            ):
+                raise ValueError(
+                    "`operator_memory_key` must contain 1–128 ASCII letters, digits, "
+                    "hyphens, or underscores."
+                )
+            if self.kind not in (AgentKind.OPERATOR, AgentKind.OPERATOR_MINI):
+                raise ValueError(
+                    "`operator_memory_key` is only supported for Operator and Operator Mini."
+                )
+            if critic is not None:
+                raise ValueError(
+                    "`operator_memory_key` cannot be combined with `critic`."
+                )
         if reasoning is not None and not isinstance(self.kind, AgentKind):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
@@ -215,6 +254,11 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             reasoning=reasoning,
             require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
             speed=speed,
             guardrails=guardrails,
             timeout=timeout,
@@ -250,7 +294,15 @@ class Agent(Generic[_StructuredOutput]):
                 critic_result=critic_result,
             )
 
+        raw_memory = cast(Mapping[str, object], remote_dispatch_response).get(
+            "operatorMemory"
+        )
         return AgentResponse(
+            operator_memory=(
+                None
+                if raw_memory is None
+                else OperatorMemoryOutcome.model_validate(raw_memory)
+            ),
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
             text=response_content["text"],
@@ -290,6 +342,7 @@ class Agent(Generic[_StructuredOutput]):
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
         require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -318,6 +371,11 @@ class Agent(Generic[_StructuredOutput]):
             on_input_required=on_input_required,
             critic_context=critic_context,
             require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
             timeout=timeout,
         )
 
