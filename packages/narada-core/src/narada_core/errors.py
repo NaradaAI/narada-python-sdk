@@ -1,5 +1,22 @@
+_QUOTA_EXCEEDED_ERROR_CODE = 0
+
+
 class NaradaError(Exception):
     pass
+
+
+class NaradaQuotaExceededError(NaradaError):
+    def __init__(self) -> None:
+        super().__init__(
+            "You have run out of credits. Please upgrade your account to continue."
+        )
+
+
+def is_quota_exceeded_error_payload(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    detail = payload.get("detail")
+    return isinstance(detail, dict) and detail.get("code") == _QUOTA_EXCEEDED_ERROR_CODE
 
 
 class NaradaTimeoutError(NaradaError):

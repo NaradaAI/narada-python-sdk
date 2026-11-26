@@ -53,9 +53,11 @@ from narada_core.errors import (
     NaradaExtensionMissingError,
     NaradaExtensionUnauthenticatedError,
     NaradaInitializationError,
+    NaradaQuotaExceededError,
     NaradaTimeoutError,
     NaradaUnsupportedBrowserError,
     UserAbortedError,
+    is_quota_exceeded_error_payload,
 )
 from narada_core.models import (
     AgentKind,
@@ -1074,6 +1076,13 @@ class Environment(ABC):
                         json=body,
                         timeout=aiohttp.ClientTimeout(total=timeout),
                     ) as resp:
+                        if not resp.ok:
+                            try:
+                                error_payload = await resp.json()
+                            except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                                error_payload = None
+                            if is_quota_exceeded_error_payload(error_payload):
+                                raise NaradaQuotaExceededError()
                         resp.raise_for_status()
                         request_id = (await resp.json())["requestId"]
 
