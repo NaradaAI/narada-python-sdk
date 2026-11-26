@@ -191,6 +191,7 @@ async def test_cloud_browser_environment_maps_backend_response(
     assert create_call.kwargs["headers"] == {
         "Content-Type": "application/json",
         "x-api-key": "test-api-key",
+        "Prefer": "respond-async",
     }
     assert json.loads(create_call.kwargs["body"]) == {
         "session_name": "demo",
@@ -288,7 +289,68 @@ async def test_cloud_browser_environment_supports_frontend_bearer_auth(
             "Authorization": "Bearer frontend-id-token",
             "X-Narada-User-ID": "user-123",
             "X-Narada-Env": "dev",
+            **(
+                {"Prefer": "respond-async"}
+                if call.args[0].endswith(
+                    "/cloud-browser/create-and-initialize-cloud-browser-session"
+                )
+                else {}
+            ),
         }
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_async_startup_waits_for_backend_window(monkeypatch):
+    monkeypatch.setenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-test")
+    fetch = AsyncMock(
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(
+                status=202,
+                json_data={"session_id": "kernel-test", "status": "starting"},
+            ),
+            _FakeResponse(
+                json_data={
+                    "session_id": "kernel-test",
+                    "status": "ready",
+                    "browser_window_id": "kernel-window",
+                }
+            ),
+        ]
+    )
+    narada_pkg, module = _import_pyodide_narada(monkeypatch, pyfetch=fetch)
+    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock())
+    env = narada_pkg.CloudBrowserEnvironment(api_key="test-key")
+    await env.start()
+    assert env.browser_window_id == "kernel-window"
+    assert (
+        "/cloud-browser/session-connection?session_id=kernel-test"
+        in fetch.await_args.args[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_browser_async_failure_stops_reserved_session(monkeypatch):
+    monkeypatch.setenv("NARADA_INITIATOR_REMOTE_DISPATCH_REQUEST_ID", "request-test")
+    fetch = AsyncMock(
+        side_effect=[
+            _sdk_config_response(),
+            _FakeResponse(
+                status=202,
+                json_data={"session_id": "kernel-test", "status": "starting"},
+            ),
+            _FakeResponse(json_data={"session_id": "kernel-test", "status": "failed"}),
+        ]
+    )
+    narada_pkg, module = _import_pyodide_narada(monkeypatch, pyfetch=fetch)
+    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock())
+    stop = AsyncMock()
+    monkeypatch.setattr(module, "_stop_cloud_browser_session", stop)
+    env = narada_pkg.CloudBrowserEnvironment(api_key="test-key")
+    with pytest.raises(RuntimeError, match="startup failed"):
+        await env.start()
+    assert stop.await_args.kwargs["session_id"] == "kernel-test"
+    assert stop.await_args.kwargs["status"] == "failed"
 
 
 @pytest.mark.asyncio

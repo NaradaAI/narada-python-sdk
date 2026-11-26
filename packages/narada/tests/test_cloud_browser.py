@@ -77,6 +77,68 @@ class _RemoteDispatchFakeClientSession:
         raise AssertionError(f"Unexpected GET URL: {url}")
 
 
+@pytest.mark.asyncio
+async def test_backend_initialized_browser_polls_without_playwright_bootstrap(
+    monkeypatch,
+):
+    import narada.environment as environment_module
+
+    class Client(_FakeClientSession):
+        def get(self, url, **kwargs):
+            assert kwargs["params"] == {"session_id": "kernel-test"}
+            return _FakeResponse(
+                {
+                    "status": "ready",
+                    "session_id": "kernel-test",
+                    "browser_window_id": "kernel-window",
+                    "cdp_websocket_url": "wss://api.example/automation",
+                    "login_url": "",
+                    "cdp_auth_headers": {},
+                }
+            )
+
+    client = Client({"status": "starting", "session_id": "kernel-test"})
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: client)
+    monkeypatch.setattr(environment_module.asyncio, "sleep", AsyncMock())
+    env = CloudBrowserEnvironment(auth_headers={"x-api-key": "test"})
+    env._start_playwright = AsyncMock()
+    env._stop_playwright = AsyncMock()
+    env._initialize_cloud_browser_window = AsyncMock()
+    await env._initialize_once()
+    assert env.browser_window_id == "kernel-window"
+    assert client.posts[0]["headers"]["Prefer"] == "respond-async"
+    env._initialize_cloud_browser_window.assert_not_awaited()
+    env._stop_playwright.assert_awaited_once()
+    env._ensure_initialized = AsyncMock()
+    await env.reset_agent_state()
+    assert client.posts[-1]["json"] == {
+        "session_id": "kernel-test",
+        "browser_window_id": "kernel-window",
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_startup_cancellation_retains_session_id_for_cleanup(monkeypatch):
+    import narada.environment as environment_module
+
+    client = _FakeClientSession({"status": "starting", "session_id": "kernel-test"})
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: client)
+    monkeypatch.setattr(
+        environment_module.asyncio,
+        "sleep",
+        AsyncMock(side_effect=asyncio.CancelledError()),
+    )
+    stop = AsyncMock()
+    monkeypatch.setattr(environment_module, "_stop_cloud_browser_session", stop)
+    env = CloudBrowserEnvironment(auth_headers={"x-api-key": "test"})
+    env._start_playwright = AsyncMock()
+    env._stop_playwright = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await env._initialize()
+    assert stop.await_args.kwargs["session_id"] == "kernel-test"
+    assert stop.await_args.kwargs["status"] == "failed"
+
+
 def _build_cloud_environment_with_page(page: AsyncMock) -> CloudBrowserEnvironment:
     env = CloudBrowserEnvironment(
         auth_headers={"x-api-key": "test-key"},

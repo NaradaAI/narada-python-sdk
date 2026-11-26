@@ -1183,7 +1183,7 @@ async def _create_and_initialize_cloud_browser_session(
             response = await pyfetch(
                 endpoint_url,
                 method="POST",
-                headers=auth_headers,
+                headers={**auth_headers, "Prefer": "respond-async"},
                 body=json.dumps(request_body),
             )
             if response.ok:
@@ -1201,7 +1201,43 @@ async def _create_and_initialize_cloud_browser_session(
             f"Endpoint URL: {endpoint_url}"
         )
 
-    return await response.json()
+    result = await response.json()
+    if result.get("status") == "starting":
+        reserved_session_id = result["session_id"]
+        try:
+            async with asyncio.timeout(660):
+                while result.get("status") == "starting":
+                    await asyncio.sleep(1)
+                    status_response = await pyfetch(
+                        _build_cloud_browser_url(
+                            base_url,
+                            "/cloud-browser/session-connection",
+                            params={"session_id": result["session_id"]},
+                        ),
+                        headers=auth_headers,
+                    )
+                    if not status_response.ok:
+                        raise RuntimeError(
+                            "Could not read cloud browser startup status"
+                        )
+                    result = await status_response.json()
+                    if result.get("session_id") != reserved_session_id:
+                        raise RuntimeError(
+                            "Cloud browser startup returned a different session"
+                        )
+                if result.get("status") == "failed":
+                    raise RuntimeError("Cloud browser startup failed")
+        except BaseException:
+            await asyncio.shield(
+                _stop_cloud_browser_session(
+                    base_url=base_url,
+                    auth_headers=auth_headers,
+                    session_id=reserved_session_id,
+                    status="failed",
+                )
+            )
+            raise
+    return result
 
 
 def _build_cloud_browser_url(
@@ -1288,13 +1324,16 @@ async def _stop_cloud_browser_session(
     auth_headers: dict[str, str],
     session_id: str,
     timeout: int | None = None,
+    status: str | None = None,
 ) -> None:
     try:
         fetch_response = await pyfetch(
             f"{base_url}/cloud-browser/stop-cloud-browser-session",
             method="POST",
             headers={**auth_headers, "Content-Type": "application/json"},
-            body=json.dumps({"session_id": session_id}),
+            body=json.dumps(
+                {"session_id": session_id, **({"status": status} if status else {})}
+            ),
         )
         if not fetch_response.ok:
             logger.warning(

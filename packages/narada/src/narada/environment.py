@@ -2350,6 +2350,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._session_name = session_name
         self._session_timeout = session_timeout
         self._session_id: str | None = None
+        self._backend_initialized = False
         self._context: BrowserContext | None = None
         self._playwright_browser: Browser | None = None
         self._playwright_lifecycle_lock: asyncio.Lock | None = None
@@ -2376,6 +2377,24 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
+        if self._backend_initialized:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    f"{self._base_url}/cloud-browser/reset-agent-state",
+                    headers=self._auth_headers,
+                    json={
+                        "session_id": self.cloud_browser_session_id,
+                        "browser_window_id": self.browser_window_id,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response,
+            ):
+                if not response.ok:
+                    raise NaradaInitializationError(
+                        "Could not reset the cloud browser agent"
+                    )
+            return
         async with self._acquire_playwright_lifecycle_lock():
             try:
                 await self._ensure_playwright_connected()
@@ -2441,7 +2460,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     endpoint_url,
-                    headers=self._auth_headers,
+                    headers={**self._auth_headers, "Prefer": "respond-async"},
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(
                         total=180
@@ -2460,12 +2479,41 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                         raise err
                     response_data = await resp.json()
 
+        self._session_id = response_data["session_id"]
+        if response_data.get("status") == "starting":
+            async with asyncio.timeout(660), aiohttp.ClientSession() as session:
+                while response_data.get("status") == "starting":
+                    await asyncio.sleep(1)
+                    async with session.get(
+                        f"{self._base_url}/cloud-browser/session-connection",
+                        params={"session_id": self._session_id},
+                        headers=self._auth_headers,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as response:
+                        if not response.ok:
+                            raise NaradaInitializationError(
+                                "Could not read cloud browser startup status"
+                            )
+                        response_data = await response.json()
+                        if response_data.get("session_id") != self._session_id:
+                            raise NaradaInitializationError(
+                                "Cloud browser startup returned a different session"
+                            )
+        if response_data.get("status") == "failed":
+            raise NaradaInitializationError("Cloud browser startup failed")
+
         cdp_websocket_url = response_data["cdp_websocket_url"]
         session_id = response_data["session_id"]
         login_url = response_data["login_url"]
         cdp_auth_headers = response_data["cdp_auth_headers"]
         self._session_id = session_id
         self._cdp_websocket_url = cdp_websocket_url
+
+        if response_data.get("browser_window_id"):
+            self._browser_window_id = response_data["browser_window_id"]
+            self._backend_initialized = True
+            await self._stop_playwright()
+            return
 
         # Connect to browser via CDP with authentication headers and log the user in.
         await self._initialize_cloud_browser_window(
@@ -2508,6 +2556,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             self._browser_window_id = None
             self._context = None
             self._cdp_websocket_url = None
+            self._backend_initialized = False
 
     async def _connect_playwright_browser(self) -> Browser:
         if self._cdp_websocket_url is None:
