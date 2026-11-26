@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -7,15 +8,18 @@ import pytest
 from narada import (
     Agent,
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     Environment,
     ExternalVectorStore,
+    Guardrails,
     ManagedVectorStore,
     ReasoningEffort,
 )
 from narada.environment import BaseBrowserEnvironment
 from narada_core.actions.models import CloseTabRequest, CloseTabResponse
+from pydantic import ValidationError
 
 
 class _FakeResponse:
@@ -41,6 +45,17 @@ class _FakeResponse:
 class _RemoteDispatchFakeClientSession:
     def __init__(self) -> None:
         self.dispatched_bodies: list[dict[str, Any]] = []
+        self.finalized_urls: list[str] = []
+        self.finalization_response = _FakeResponse(
+            {
+                "outcome": "published",
+                "policyRevision": "etag-1",
+                "usageIsFinal": True,
+                "usage": {"actions": 1, "credits": 11},
+            }
+        )
+        self.poll_status = "success"
+
         self._poll_count = 0
 
     async def __aenter__(self) -> "_RemoteDispatchFakeClientSession":
@@ -53,6 +68,10 @@ class _RemoteDispatchFakeClientSession:
         if url.endswith("/remote-dispatch"):
             self.dispatched_bodies.append(kwargs["json"])
             return _FakeResponse({"requestId": f"req-{len(self.dispatched_bodies)}"})
+        if url.endswith("/operator-memory/finalize"):
+            assert set(kwargs) == {"headers"}
+            self.finalized_urls.append(url)
+            return self.finalization_response
         raise AssertionError(f"Unexpected POST URL: {url}")
 
     def get(self, url: str, **kwargs: Any) -> _FakeResponse:
@@ -62,7 +81,7 @@ class _RemoteDispatchFakeClientSession:
         self._poll_count += 1
         return _FakeResponse(
             {
-                "status": "success",
+                "status": self.poll_status,
                 "response": {
                     "text": f"ok-{self._poll_count}",
                     "output": {"type": "text", "content": f"ok-{self._poll_count}"},
@@ -143,6 +162,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
         "/Operator second",
     ]
     assert all("reasoningMode" not in body for body in fake_session.dispatched_bodies)
+    assert all("speed" not in body for body in fake_session.dispatched_bodies)
 
 
 @pytest.mark.asyncio
@@ -150,6 +170,7 @@ async def test_agent_run_reruns_but_environment_initialization_is_cached(
     ("kind", "reasoning", "expected_prompt"),
     [
         (AgentKind.PRODUCTIVITY, ReasoningEffort.NONE, "analyze"),
+        (AgentKind.PRODUCTIVITY, ReasoningEffort.XHIGH, "analyze"),
         (AgentKind.OPERATOR, ReasoningEffort.LOW, "/Operator analyze"),
         (AgentKind.OPERATOR_MINI, ReasoningEffort.LOW, "/OperatorMini analyze"),
         (AgentKind.CORE_AGENT, ReasoningEffort.MEDIUM, "/coreAgent analyze"),
@@ -184,6 +205,40 @@ async def test_agent_run_rejects_top_level_reasoning_for_named_agent() -> None:
 
     with pytest.raises(ValueError, match="named Agent Studio agents"):
         await agent.run("analyze", reasoning=ReasoningEffort.HIGH)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speed", list(AgentSpeed))
+@pytest.mark.parametrize("required_trace", [False, True])
+async def test_agent_run_forwards_speed(
+    monkeypatch: pytest.MonkeyPatch,
+    speed: AgentSpeed,
+    required_trace: bool,
+) -> None:
+    import narada.environment as environment_module
+
+    fake_session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(
+        environment_module.aiohttp, "ClientSession", lambda: fake_session
+    )
+
+    await Agent(environment=_CountingEnvironment()).run(
+        "analyze", speed=speed, require_execution_trace=required_trace
+    )
+
+    assert fake_session.dispatched_bodies[0]["speed"] == speed.value
+    assert (
+        fake_session.dispatched_bodies[0].get("requireExecutionTrace", False)
+        is required_trace
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_top_level_speed_for_named_agent() -> None:
+    agent = Agent(environment=_CountingEnvironment(), kind="/owner/custom-agent")
+
+    with pytest.raises(ValueError, match="named Agent Studio agents"):
+        await agent.run("analyze", speed=AgentSpeed.FAST)
 
 
 @pytest.mark.asyncio
@@ -277,3 +332,290 @@ async def test_agent_run_sends_operator_mini_command_without_transport_tier(
 
     assert fake_session.dispatched_bodies[0]["prompt"] == "/OperatorMini fast task"
     assert "modelTier" not in fake_session.dispatched_bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    observed = []
+    original_get = session.get
+
+    def get(url, **kwargs):
+        assert observed == ["req-1"]
+        return original_get(url, **kwargs)
+
+    session.get = get
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    class TrackedEnvironment(_CountingEnvironment):
+        async def _internal_on_request_submitted(self, request_id):
+            assert session._poll_count == 0
+            observed.append(request_id)
+
+    await Agent(environment=TrackedEnvironment()).run("synthetic")
+    assert observed == ["req-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "guardrails"),
+    [
+        (AgentKind.OPERATOR, None),
+        ("/owner/gui-workflow", Guardrails()),
+        (
+            AgentKind.OPERATOR,
+            Guardrails(
+                url_allowlist=["https://Example.com/Path?x=1", "*.example.org/*"],
+            ),
+        ),
+        (
+            AgentKind.OPERATOR,
+            Guardrails(
+                url_blocklist=["blocked.example"],
+            ),
+        ),
+    ],
+)
+async def test_agent_run_guardrails_wire_format_and_invocation_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: AgentKind | str,
+    guardrails: Guardrails | None,
+) -> None:
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment(), kind=kind)
+    await agent.run("first", guardrails=guardrails)
+    await agent.run("second")
+
+    first, second = session.dispatched_bodies
+    if guardrails is None:
+        assert "guardrails" not in first
+    else:
+        assert first["guardrails"] == {
+            "urlAllowlist": guardrails.url_allowlist,
+            "urlBlocklist": guardrails.url_blocklist,
+        }
+    assert "guardrails" not in second
+
+
+def test_guardrails_rejects_both_allowlist_and_blocklist() -> None:
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        Guardrails(
+            url_allowlist=["https://example.com/*"],
+            url_blocklist=["https://example.com/private/*"],
+        )
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        Guardrails.model_validate(
+            {
+                "urlAllowlist": ["https://example.com/*"],
+                "urlBlocklist": ["https://example.com/private/*"],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_mutated_guardrails_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    env = _CountingEnvironment()
+    guardrails = Guardrails(url_allowlist=["https://example.com/*"])
+    guardrails.url_blocklist.append("https://example.com/private/*")
+
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        await Agent(environment=env).run("task", guardrails=guardrails)
+    assert env.initialize_count == 0
+    assert session.dispatched_bodies == []
+
+
+@pytest.mark.asyncio
+async def test_agent_run_passes_guardrails_to_critic_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.agent as agent_module
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    async def critic_dispatch(**kwargs: Any) -> None:
+        await kwargs["dispatch_request"](prompt="verify", agent=AgentKind.PRODUCTIVITY)
+
+    monkeypatch.setattr(agent_module, "run_critic", critic_dispatch)
+    await Agent(environment=_CountingEnvironment()).run(
+        "task", guardrails=Guardrails(), critic={}
+    )
+    assert len(session.dispatched_bodies) == 2
+    assert all(
+        body["guardrails"] == {"urlAllowlist": [], "urlBlocklist": []}
+        for body in session.dispatched_bodies
+    )
+
+
+@pytest.mark.parametrize("kind", [AgentKind.OPERATOR, AgentKind.OPERATOR_MINI])
+@pytest.mark.asyncio
+async def test_memory_refreshes_usage_after_operator_success(monkeypatch, kind):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment(), kind=kind)
+
+    result = await agent.run("bookings", operator_memory_key="hotel_rates-1")
+
+    assert result.text == "ok-1"
+    assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "published"
+    assert "policy_revision" not in result.operator_memory.model_dump()
+    assert result.operator_memory.usage_is_final is True
+    assert session.dispatched_bodies[0]["operatorMemoryKey"] == "hotel_rates-1"
+    assert "memoryId" not in session.dispatched_bodies[0]
+    assert session.dispatched_bodies[0]["requireExecutionTrace"] is True
+    assert session.finalized_urls == [
+        f"{agent.environment._base_url}/remote-dispatch/responses/req-1/operator-memory/finalize"
+    ]
+
+
+@pytest.mark.parametrize("operator_memory_key", ["", "a" * 129, "a/b", "ñ", "a\n", 1])
+@pytest.mark.asyncio
+async def test_memory_rejects_invalid_keys_before_dispatch(operator_memory_key):
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="ASCII"):
+        await Agent(environment=env).run(
+            "task", operator_memory_key=operator_memory_key
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.parametrize("kind", [AgentKind.CORE_AGENT, "Operator"])
+@pytest.mark.asyncio
+async def test_memory_rejects_non_operator_before_dispatch(kind):
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="only supported"):
+        await Agent(environment=env, kind=kind).run(
+            "task", operator_memory_key="example"
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_rejects_critic_before_dispatch():
+    from narada_core.models import CriticConfig
+
+    env = _CountingEnvironment()
+    with pytest.raises(ValueError, match="cannot be combined"):
+        await Agent(environment=env).run(
+            "task",
+            operator_memory_key="example",
+            critic=CriticConfig(prompt="check task"),
+        )
+    assert env.initialize_count == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_finalizes_only_opted_in_successes(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    agent = Agent(environment=_CountingEnvironment())
+
+    ordinary = await agent.run("ordinary")
+    assert ordinary.operator_memory is None
+    assert "operator_memory" not in ordinary.model_dump()
+    session.poll_status = "error"
+    result = await agent.run("failed", operator_memory_key="example")
+
+    assert result.status == "error"
+    assert result.operator_memory.outcome == "skipped"
+    assert result.operator_memory.usage_is_final is True
+    assert "operatorMemoryKey" not in session.dispatched_bodies[0]
+    assert "requireExecutionTrace" not in session.dispatched_bodies[0]
+    assert session.finalized_urls == []
+
+
+class _FailingMemoryResponse(_FakeResponse):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__({})
+        self.error = error
+
+    async def json(self) -> dict[str, Any]:
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), ValueError("bad receipt")])
+@pytest.mark.asyncio
+async def test_memory_failure_keeps_operator_result(monkeypatch, caplog, error):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FailingMemoryResponse(error)
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    result = await Agent(environment=_CountingEnvironment()).run(
+        "task", operator_memory_key="example"
+    )
+
+    assert result.status == "success"
+    assert result.text == "ok-1"
+    assert result.usage.credits == 1
+    assert result.operator_memory.outcome == "unknown"
+    assert result.operator_memory.usage_is_final is False
+    assert len(session.finalized_urls) == 1
+    assert "finalization for request req-1 is uncertain" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_memory_propagates_caller_cancellation(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FailingMemoryResponse(asyncio.CancelledError())
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    with pytest.raises(asyncio.CancelledError):
+        await Agent(environment=_CountingEnvironment()).run(
+            "task", operator_memory_key="example"
+        )
+    assert len(session.finalized_urls) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_does_not_post_when_remaining_deadline_is_gone():
+    session = _RemoteDispatchFakeClientSession()
+    await _CountingEnvironment()._finalize_operator_memory(
+        session, {"requestId": "req-1"}, deadline=0
+    )
+
+    assert session.finalized_urls == []
+
+
+@pytest.mark.asyncio
+async def test_pending_receipt_keeps_updated_usage_preliminary(monkeypatch):
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    session.finalization_response = _FakeResponse(
+        {
+            "outcome": "pending",
+            "usageIsFinal": False,
+            "usage": {"actions": 1, "credits": 11},
+        }
+    )
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+
+    result = await Agent(environment=_CountingEnvironment()).run(
+        "task", operator_memory_key="booking"
+    )
+
+    assert result.status == "success"
+    assert result.usage.credits == 11
+    assert result.operator_memory.outcome == "pending"
+    assert result.operator_memory.usage_is_final is False

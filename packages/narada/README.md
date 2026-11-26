@@ -83,6 +83,76 @@ This would then result in the following trajectory:
 
 You can use the SDK to launch browsers and run automated tasks using natural language instructions. For more examples and code samples, please explore the [`examples/`](examples/) folder in this repository.
 
+## Operator Memory
+
+Give a repeatable Operator or Operator Mini step a stable key. Use it on
+standalone browser dispatches. Inherited execution traces and the `critic`
+argument cannot be combined with Memory.
+
+```python
+result = await agent.run(
+    "Open the booking details and read the current rates.",
+    operator_memory_key="7c29b6b5-e094-4bd4-8d3a-376b01851d00",
+)
+if result.operator_memory and not result.operator_memory.usage_is_final:
+    print("Usage may still change", result.request_id)
+```
+
+Keep one key per logical step. Eligible members of the same Narada organization
+can reuse and update the policy with their own successfully completed runs.
+DEV and PROD each have their own policies. Use a UUID or another unique key and
+keep customer data out of the key. An organization administrator can clear the
+policy with `DELETE /remote-dispatch/operator-memory/{memory_key}`. A future run
+can learn it again.
+
+Opting in retains an execution trace. The organization's retention settings
+apply. Shared policies hold observation hints, so each run uses its own inputs.
+An initial navigation can be followed by a learned browser step. The policy
+does not save its URL. If the run has no verified control, Memory skips review.
+A review may add a fixed charge and metered model usage. Exact reuse skips review.
+Review uses the time left in `run()`. If the outcome is pending or unknown,
+the successful Operator result is still available and usage may still change.
+The usage flag concerns charges from that Memory attempt and does not change
+ordinary Operator metering. Use `GET /remote-dispatch/responses/{requestId}` to
+check again without starting another review. An interrupted finalization may
+remain pending, and repeating the finalize request does not resume it.
+
+## Text selectors
+
+Use `text_content` with `agent.agentic_selector(...)` in both CPython and Pyodide.
+No tag or search mode is required:
+
+```python
+await agent.agentic_selector(
+    action={"type": "click"},
+    selectors={"text_content": "Save"},
+    fallback_operator_query="Click Save",
+)
+```
+
+Text alone matches the innermost element containing it. For
+`<button><span>Save</span></button>`, it targets the span. Add a tag to target the
+containing button instead:
+
+```python
+await agent.agentic_selector(
+    action={"type": "click"},
+    selectors={"tag_name": "button", "text_content": "Save"},
+    fallback_operator_query="Click the Save button",
+)
+```
+
+`role`, `class_name`, and other attribute constraints can also combine with text.
+ID, test ID, DOM path, and XPath keep their independent fallback priority; omit
+them when text must determine the target. A missing or ambiguous match invokes
+the configured Operator fallback.
+
+`agent.wait_for_element(...)` accepts the same selector combinations. Pass Python
+variables as ordinary string values, such as `{"text_content": worker_id}`.
+Explicit empty or whitespace-only `text_content` raises `ValueError` before
+sending a browser action, including when other fields are present. Omit the field
+when you intend to match without a text constraint.
+
 ## Migration note
 
 This version introduces a non-backward-compatible, agent-centered API:
@@ -132,6 +202,32 @@ response = await Agent(environment=env, kind=AgentKind.PRODUCTIVITY).run(
 
 See the managed and external examples in
 [`examples/04_extending_the_agent/`](examples/04_extending_the_agent/).
+
+## Guardrails overrides
+
+Pass a URL allowlist, URL blocklist, or no restrictions for one agent invocation, including its nested GUI workflows and critic:
+
+```python
+from narada import Guardrails
+
+# Restrict the run to matching URLs:
+response = await agent.run(
+    "Run the workflow",
+    guardrails=Guardrails(url_allowlist=["https://example.com/*"]),
+)
+
+# Or block matching URLs while allowing everything else:
+response = await agent.run(
+    "Run the workflow",
+    guardrails=Guardrails(url_blocklist=["https://example.com/private/*"]),
+)
+```
+
+`url_allowlist` and `url_blocklist` are mutually exclusive: specify at most one, or pass `Guardrails()` to clear any saved guardrails for the current invocation. Passing both non-empty lists raises a validation error.
+
+Both desktop and Pyodide SDKs expose the same API. Omit `guardrails` or pass `None` to use each GUI workflow's saved settings. Built-in agents and workflows without saved settings default to no URL restrictions. Overrides never update the saved workflow. Saved Python workflows do not support overrides; direct deterministic actions are unchanged.
+
+For browser-agent runs, the Narada Enterprise Chrome extension applies the policy to document navigations in the workflow's Chrome window. A regular Chrome Web Store installation is supported.
 
 ## Logging
 

@@ -28,6 +28,7 @@ from typing import (
     Callable,
     Literal,
     Mapping,
+    NotRequired,
     TypedDict,
     TypeGuard,
     TypeVar,
@@ -40,6 +41,7 @@ from uuid import uuid4
 
 import aiohttp
 from narada_core.actions.models import (
+    AgentUsage,
     CloseWindowRequest,
     ExtensionActionRequest,
     ExtensionActionResponse,
@@ -57,7 +59,9 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     File,
+    Guardrails,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -65,8 +69,11 @@ from narada_core.models import (
     UserResourceCredentials,
     VectorStore,
     _connected_vector_store_to_wire,
-    _RemoteDispatchPollResponse,
+    _guardrails_to_wire,
     _SdkConfig,
+)
+from narada_core.models import (
+    _RemoteDispatchPollResponse as _CorePollResponse,
 )
 from packaging.version import Version
 from playwright._impl._errors import Error as PlaywrightError
@@ -83,13 +90,20 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 
 from narada._logging import log_duration
+from narada._request_stop import _RequestStopResult, _stop_browser_request
 from narada.config import BrowserConfig, ProxyConfig
 from narada.google_drive import GoogleDriveClient
+from narada.responses import OperatorMemoryOutcome
 from narada.utils import assert_not_none
 from narada.vector_stores import VectorStoreCatalog
 from narada.version import __version__
 
 logger = logging.getLogger(__name__)
+
+
+class _RemoteDispatchPollResponse(_CorePollResponse):
+    operatorMemory: NotRequired[dict[str, Any]]
+
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -645,6 +659,9 @@ class Environment(ABC):
     _initialized: bool
     _init_lock: asyncio.Lock | None
 
+    async def _internal_on_request_submitted(self, request_id: str) -> None:
+        """Internal integration hook: retain identity before polling, not public API."""
+
     def __init__(
         self,
         *,
@@ -874,6 +891,8 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -892,6 +911,8 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[None]: ...
 
@@ -902,6 +923,8 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -920,6 +943,8 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response[_StructuredOutput]: ...
 
@@ -929,6 +954,8 @@ class Environment(ABC):
         prompt: str,
         agent: AgentKind | str = AgentKind.OPERATOR,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -947,12 +974,17 @@ class Environment(ABC):
         callback_secret: str | None = None,
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
+        require_execution_trace: bool = False,
+        operator_memory_key: str | None = None,
         timeout: int = 1000,
     ) -> Response:
         """Low-level API for invoking an agent in the Narada extension side panel chat.
 
         The higher-level `Agent.run` method should be preferred for most use cases.
         """
+        serialized_guardrails = (
+            None if guardrails is None else _guardrails_to_wire(guardrails)
+        )
         await self._ensure_initialized()
 
         deadline = time.monotonic() + timeout
@@ -967,12 +999,19 @@ class Environment(ABC):
         browser_window_id = self._dispatch_browser_window_id
         if browser_window_id is not None:
             body["browserWindowId"] = browser_window_id
+        if require_execution_trace:
+            body["requireExecutionTrace"] = True
+        if operator_memory_key is not None:
+            body["operatorMemoryKey"] = operator_memory_key
+            body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
             body["executionTraceContext"] = execution_trace_context
         cloud_browser_session_id = self.cloud_browser_session_id
         if cloud_browser_session_id is not None:
             body["cloudBrowserSessionId"] = cloud_browser_session_id
+        if serialized_guardrails is not None:
+            body["guardrails"] = serialized_guardrails
         if clear_chat is not None:
             body["clearChat"] = clear_chat
         if generate_gif is not None:
@@ -1022,6 +1061,8 @@ class Environment(ABC):
             body["callbackHeaders"] = callback_headers
         if reasoning is not None:
             body["reasoningMode"] = reasoning.value
+        if speed is not None:
+            body["speed"] = speed.value
 
         try:
             seen_input_ids: set[str] = set()
@@ -1035,6 +1076,8 @@ class Environment(ABC):
                     ) as resp:
                         resp.raise_for_status()
                         request_id = (await resp.json())["requestId"]
+
+                await self._internal_on_request_submitted(request_id)
 
                 with log_duration(
                     logger, "agent_run", "wait_for_completion", request_id=request_id
@@ -1076,12 +1119,70 @@ class Environment(ABC):
                             else:
                                 response_content["structuredOutput"] = None
 
+                        if operator_memory_key is not None:
+                            if response["status"] == "success":
+                                await self._finalize_operator_memory(
+                                    session, response, deadline=deadline
+                                )
+                            else:
+                                response["operatorMemory"] = {
+                                    "outcome": "skipped",
+                                    "usageIsFinal": True,
+                                }
                         return cast(Response, response)
                     else:
                         raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
 
         except asyncio.TimeoutError:
             raise NaradaAgentTimeoutError_INTERNAL_DO_NOT_USE(timeout)
+
+    async def _finalize_operator_memory(
+        self,
+        session: aiohttp.ClientSession,
+        response: _RemoteDispatchPollResponse,
+        *,
+        deadline: float,
+    ) -> None:
+        request_id = response["requestId"]
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            async with asyncio.timeout(remaining):
+                async with session.post(
+                    f"{self._base_url}/remote-dispatch/responses/{request_id}"
+                    "/operator-memory/finalize",
+                    headers=self._auth_headers,
+                ) as result:
+                    result.raise_for_status()
+                    receipt = await result.json()
+                outcome = OperatorMemoryOutcome.model_validate(receipt)
+                if outcome.outcome not in ("reused", "published"):
+                    logger.warning(
+                        "Operator Memory outcome for request %s: %s",
+                        request_id,
+                        outcome.outcome,
+                    )
+                if receipt.get("usage") is not None:
+                    usage = AgentUsage.model_validate(receipt["usage"])
+                    response["usage"] = {
+                        "actions": usage.actions,
+                        "credits": usage.credits,
+                    }
+                else:
+                    outcome.usage_is_final = False
+                response["operatorMemory"] = outcome.model_dump(by_alias=True)
+        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            response["operatorMemory"] = {
+                "outcome": "unknown",
+                "usageIsFinal": False,
+            }
+            logger.warning(
+                "Operator Memory finalization for request %s is uncertain (%s)",
+                request_id,
+                type(error).__name__,
+            )
+        # Caller cancellation propagates through both the POST and this deadline.
 
     @overload
     async def _run_extension_action(
@@ -1295,6 +1396,31 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
         else:
             await self._open_and_initialize_browser_window()
 
+    async def _internal_stop_request(
+        self,
+        request_id: str,
+        *,
+        browser_window_id: str,
+        timeout: float = 30,
+    ) -> _RequestStopResult:
+        """Internal local-runner operation; not a supported public cancellation API.
+
+        The caller must stop its workflow before invoking this operation so it
+        cannot submit later requests, including a critic. The result confirms
+        only the exact request's terminal state and preserves its actual outcome.
+        This does not launch/reinitialize Chrome, clear chat, or undo effects.
+        Unsupported panels and missing completion evidence fail without confirmation.
+        """
+        return await _stop_browser_request(
+            base_url=self._base_url,
+            auth_headers=self._auth_headers,
+            cdp_url=self._config.cdp_url,
+            initialization_url=self._config.initialization_url,
+            request_id=request_id,
+            expected_browser_window_id=browser_window_id,
+            timeout=timeout,
+        )
+
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
         async with self._acquire_playwright_lifecycle_lock():
@@ -1321,8 +1447,9 @@ class BrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
                             "Narada side panel is no longer available"
                         )
 
-                    # Refresh the extension side panel, which ensures any inflight Narada
-                    # operations are canceled.
+                    # Refreshing detaches the frontend; it does not confirm a durable
+                    # cancellation. Internal integrations must stop requests first
+                    # when terminal confirmation is required.
                     if side_panel_match.page is not None:
                         await side_panel_match.page.reload()
                         return
@@ -2327,10 +2454,10 @@ class RemoteBrowserEnvironment(BaseBrowserEnvironment):
 
 
 class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment):
-    """A browser environment that connects to a backend-cloud browser session via CDP.
+    """A cloud browser environment that routes agent actions to its frontend.
 
-    This class connects to a cloud browser session created by the backend API and provides
-    the same transport semantics as other browser environments for agent operations.
+    Cold sessions use CDP for initialization. Ready warm sessions use the returned
+    browser window ID without opening another CDP connection.
     """
 
     def __init__(
@@ -2350,7 +2477,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._session_name = session_name
         self._session_timeout = session_timeout
         self._session_id: str | None = None
-        self._backend_initialized = False
         self._context: BrowserContext | None = None
         self._playwright_browser: Browser | None = None
         self._playwright_lifecycle_lock: asyncio.Lock | None = None
@@ -2377,52 +2503,28 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
 
     async def reset_agent_state(self) -> None:
         await self._ensure_initialized()
-        if self._backend_initialized:
-            async with (
-                aiohttp.ClientSession() as session,
-                session.post(
-                    f"{self._base_url}/cloud-browser/reset-agent-state",
-                    headers=self._auth_headers,
-                    json={
-                        "session_id": self.cloud_browser_session_id,
-                        "browser_window_id": self.browser_window_id,
-                    },
-                    timeout=aiohttp.ClientTimeout(total=60),
-                ) as response,
-            ):
-                if not response.ok:
-                    raise NaradaInitializationError(
-                        "Could not reset the cloud browser agent"
-                    )
-            return
-        async with self._acquire_playwright_lifecycle_lock():
-            try:
-                await self._ensure_playwright_connected()
-                assert self._playwright_browser is not None
-                side_panel_url = create_side_panel_url(
-                    self._config, self.browser_window_id
-                )
-                side_panel_page = _find_page_by_url(
-                    self._playwright_browser, side_panel_url
-                )
-                if side_panel_page is None:
-                    raise NaradaInitializationError(
-                        "Narada side panel is no longer available"
-                    )
-
-                # Reloading cancels any in-flight Narada operations.
-                await side_panel_page.reload()
-            finally:
-                await self._stop_playwright()
+        async with (
+            self._acquire_initialization_lock(),
+            aiohttp.ClientSession() as session,
+        ):
+            async with session.post(
+                f"{self._base_url}/cloud-browser/reset-agent-state",
+                headers=self._auth_headers,
+                json={
+                    "session_id": self.cloud_browser_session_id,
+                    "browser_window_id": self.browser_window_id,
+                },
+                timeout=aiohttp.ClientTimeout(total=45),
+            ) as response:
+                response.raise_for_status()
 
     async def _initialize(self) -> None:
         """Create a cloud browser session and initialize the browser extension.
         Retry up to 3 times on error.
 
-        Calls ``POST /cloud-browser/create-cloud-browser-session``, then connects local
-        Playwright over CDP, opens ``login_url``, and waits for
-        ``#narada-browser-window-id`` (extension install retries apply). ``config`` controls
-        interactive prompts and related behavior.
+        Calls ``POST /cloud-browser/create-cloud-browser-session`` with warm reuse enabled.
+        A ready warm browser provides its routing ID without CDP. A cold browser uses
+        ``login_url`` and waits for ``#narada-browser-window-id``.
         """
         max_attempts = 3
         for attempt in range(max_attempts):
@@ -2452,8 +2554,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         if self._config.proxy is not None:
             request_body["proxy"] = self._config.proxy._cloud_browser_payload()
 
-        with log_duration(logger, "start", "start_playwright"):
-            await self._start_playwright()
         endpoint_url = f"{self._base_url}/cloud-browser/create-cloud-browser-session"
 
         with log_duration(logger, "start", "create_session"):
@@ -2461,6 +2561,7 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
                 async with session.post(
                     endpoint_url,
                     headers={**self._auth_headers, "Prefer": "respond-async"},
+                    params={"allow_warm_session": "true"},
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(
                         total=180
@@ -2509,19 +2610,23 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
         self._session_id = session_id
         self._cdp_websocket_url = cdp_websocket_url
 
-        if response_data.get("browser_window_id"):
-            self._browser_window_id = response_data["browser_window_id"]
-            self._backend_initialized = True
+        browser_window_id = response_data.get("browser_window_id")
+        if browser_window_id is not None:
+            # The frontend download relay owns CDP; SDK actions use this routing ID.
+            self._browser_window_id = browser_window_id
             await self._stop_playwright()
-            return
-
-        # Connect to browser via CDP with authentication headers and log the user in.
-        await self._initialize_cloud_browser_window(
-            cdp_websocket_url=cdp_websocket_url,
-            session_id=session_id,
-            login_url=login_url,
-            cdp_auth_headers=cdp_auth_headers,
-        )
+            if self._config.interactive:
+                self._print_success_message(browser_window_id)
+        else:
+            # Cold start: connect to browser via CDP with authentication headers and log the user in.
+            with log_duration(logger, "start", "start_playwright"):
+                await self._start_playwright()
+            await self._initialize_cloud_browser_window(
+                cdp_websocket_url=cdp_websocket_url,
+                session_id=session_id,
+                login_url=login_url,
+                cdp_auth_headers=cdp_auth_headers,
+            )
 
     @staticmethod
     def _is_non_retryable_initialization_error(error: Exception) -> bool:
@@ -2556,7 +2661,6 @@ class CloudBrowserEnvironment(_PlaywrightLifecycleMixin, BaseBrowserEnvironment)
             self._browser_window_id = None
             self._context = None
             self._cdp_websocket_url = None
-            self._backend_initialized = False
 
     async def _connect_playwright_browser(self) -> Browser:
         if self._cdp_websocket_url is None:

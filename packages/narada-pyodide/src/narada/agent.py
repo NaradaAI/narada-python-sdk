@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import IO, Any, Generic, Literal, Mapping, TypeVar, overload
+import re
+from functools import partial
+from typing import IO, Any, Generic, Literal, Mapping, TypeVar, cast, overload
 
 from narada_core.actions.critic import merge_critic_workflow_trace, run_critic
 from narada_core.actions.models import (
@@ -14,7 +16,6 @@ from narada_core.actions.models import (
     AgenticSelectorRequest,
     AgenticSelectorResponse,
     AgenticSelectors,
-    AgentResponse,
     AgentUsage,
     AppendGoogleSheetRowRequest,
     AppendGoogleSheetRowResponse,
@@ -48,6 +49,8 @@ from narada_core.actions.models import (
     RecordedClick,
     SavePdfFileRequest,
     SavePdfFileResponse,
+    ServeHtmlRequest,
+    UploadedFileVariable,
     UserApprovalRequest,
     UserApprovalResponse,
     WaitForElementRequest,
@@ -57,8 +60,10 @@ from narada_core.actions.models import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     CriticConfig,
     File,
+    Guardrails,
     McpServer,
     ReasoningEffort,
     RemoteDispatchChatHistoryItem,
@@ -76,6 +81,7 @@ from narada.environment import (
 )
 
 from . import _trace
+from .responses import AgentResponse, OperatorMemoryOutcome
 
 _StructuredOutput = TypeVar("_StructuredOutput", bound=BaseModel)
 
@@ -96,6 +102,8 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: None = None,
@@ -114,6 +122,8 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[dict[str, Any]]: ...
 
@@ -123,6 +133,8 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[_StructuredOutput],
@@ -141,6 +153,8 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse[_StructuredOutput]: ...
 
@@ -149,6 +163,8 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         *,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -167,13 +183,43 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic: CriticConfig | None = None,
+        operator_memory_key: str | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> AgentResponse:
-        """Invokes an agent in the bound Narada environment."""
+        """Invoke an agent in the bound Narada environment.
+
+        Supply a stable `operator_memory_key` for a repeatable Operator or
+        Operator Mini step. Both SDKs share eligible policies in the same
+        organization and environment. Review uses the remaining run timeout.
+        A review failure preserves a successful Operator result.
+        """
+        if operator_memory_key is not None:
+            if (
+                not isinstance(operator_memory_key, str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", operator_memory_key) is None
+            ):
+                raise ValueError(
+                    "`operator_memory_key` must contain 1–128 ASCII letters, digits, "
+                    "hyphens, or underscores."
+                )
+            if self.kind not in (AgentKind.OPERATOR, AgentKind.OPERATOR_MINI):
+                raise ValueError(
+                    "`operator_memory_key` is only supported for Operator and Operator Mini."
+                )
+            if critic is not None:
+                raise ValueError(
+                    "`operator_memory_key` cannot be combined with `critic`."
+                )
         if reasoning is not None and not isinstance(self.kind, AgentKind):
             raise ValueError(
                 "`reasoning` is only supported for built-in `AgentKind` values; "
                 "named Agent Studio agents own reasoning per workflow step"
+            )
+        if speed is not None and not isinstance(self.kind, AgentKind):
+            raise ValueError(
+                "`speed` is only supported for built-in `AgentKind` values; "
+                "named Agent Studio agents own speed per workflow step"
             )
         remote_dispatch_response = await self._dispatch_request(
             prompt=prompt,
@@ -195,6 +241,14 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             reasoning=reasoning,
+            require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
+            speed=speed,
+            guardrails=guardrails,
             timeout=timeout,
         )
         response_content = remote_dispatch_response["response"]
@@ -212,7 +266,11 @@ class Agent(Generic[_StructuredOutput]):
         critic_result: CriticResult | None = None
         if critic is not None:
             critic_result = await run_critic(
-                dispatch_request=self._dispatch_request,
+                dispatch_request=partial(
+                    self._dispatch_request,
+                    guardrails=guardrails,
+                    require_execution_trace=require_execution_trace,
+                ),
                 original_prompt=prompt,
                 response_content=response_content,
                 action_trace_raw=action_trace_raw,
@@ -230,6 +288,9 @@ class Agent(Generic[_StructuredOutput]):
         if workflow_trace is not None and parent_request_id is None:
             _trace.emit_sub_workflow(workflow_trace=workflow_trace)
 
+        raw_memory = cast(Mapping[str, object], remote_dispatch_response).get(
+            "operatorMemory"
+        )
         return AgentResponse(
             request_id=remote_dispatch_response["requestId"],
             status=remote_dispatch_response["status"],
@@ -240,6 +301,12 @@ class Agent(Generic[_StructuredOutput]):
             action_trace=action_trace,
             workflow_trace=workflow_trace,
             critic_result=critic_result,
+            operator_memory=(
+                None
+                if raw_memory is None
+                else OperatorMemoryOutcome.model_validate(raw_memory)
+            ),
+            execution_trace_context=response_content.get("executionTraceContext"),
         )
 
     async def _dispatch_request(
@@ -248,6 +315,8 @@ class Agent(Generic[_StructuredOutput]):
         prompt: str,
         agent: AgentKind | str | None = None,
         reasoning: ReasoningEffort | None = None,
+        speed: AgentSpeed | None = None,
+        guardrails: Guardrails | None = None,
         clear_chat: bool | None = None,
         generate_gif: bool | None = None,
         output_schema: type[BaseModel] | None = None,
@@ -266,6 +335,8 @@ class Agent(Generic[_StructuredOutput]):
         callback_headers: Mapping[str, Any] | None = None,
         on_input_required: InputRequiredCallback | None = None,
         critic_context: dict[str, Any] | None = None,
+        operator_memory_key: str | None = None,
+        require_execution_trace: bool = False,
         timeout: int = 1000,
     ) -> Response:
         dispatch_agent = self.kind if agent is None else agent
@@ -273,6 +344,8 @@ class Agent(Generic[_StructuredOutput]):
             prompt=prompt,
             agent=dispatch_agent,
             reasoning=reasoning,
+            speed=speed,
+            guardrails=guardrails,
             clear_chat=clear_chat,
             generate_gif=generate_gif,
             output_schema=output_schema,
@@ -291,6 +364,12 @@ class Agent(Generic[_StructuredOutput]):
             callback_headers=callback_headers,
             on_input_required=on_input_required,
             critic_context=critic_context,
+            require_execution_trace=require_execution_trace,
+            **(
+                {"operator_memory_key": operator_memory_key}
+                if operator_memory_key is not None
+                else {}
+            ),
             timeout=timeout,
         )
 
@@ -307,21 +386,53 @@ class Agent(Generic[_StructuredOutput]):
         action: AgenticSelectorAction,
         selectors: AgenticSelectors,
         fallback_operator_query: str,
+        fallback_agent: AgentKind = AgentKind.OPERATOR,
+        fallback_speed: Literal["standard", "fast", "ultrafast"] = "standard",
         verification_description: str | None = None,
         verification_delay_ms: int = 500,
         # Larger default timeout because Operator can take a bit to run.
         timeout: int | None = 300,
     ) -> AgenticSelectorResponse:
-        """Performs an action on an element specified by the given selectors, falling back to using
-        the Operator agent if the selectors fail to match a unique element.
+        """Performs an action on an element specified by the given selectors, falling back to the
+        configured Operator agent and speed if the selectors fail to match a unique element.
+
+        Use {"text_content": "Save"} for the innermost text match, or combine it with
+        {"tag_name": "button"} to target the containing button. Role and class_name
+        can constrain text too. ID and path fields are independent fallback strategies.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch;
+        omit text_content when no text constraint is intended.
 
         Returns AgenticSelectorResponse with the value for read actions and the verification status
         when verification_description is provided.
+
+        For select_file actions, file must be an existing file-variable value. Local file uploads
+        are unavailable in the browser runtime.
         """
+        if fallback_agent not in {AgentKind.OPERATOR, AgentKind.OPERATOR_MINI}:
+            raise ValueError("fallback_agent must be OPERATOR or OPERATOR_MINI")
+        if fallback_agent is AgentKind.OPERATOR_MINI and fallback_speed == "ultrafast":
+            raise ValueError("ultrafast speed is not supported by Operator Mini")
+
+        browser_environment = self._browser_environment()
+        normalized_action = action
+        if action["type"] == "select_file":
+            normalized_action = {
+                "type": "select_file",
+                "file": await browser_environment._normalize_input_variables_value_impl(
+                    input_variable_value=action["file"]
+                ),
+            }
+
         request = AgenticSelectorRequest(
-            action=action,
+            action=normalized_action,
             selectors=selectors,
             fallback_operator_query=fallback_operator_query,
+            fallback_agent_type=(
+                "operatorMini"
+                if fallback_agent is AgentKind.OPERATOR_MINI
+                else "operator"
+            ),
+            fallback_speed=fallback_speed,
             verification_description=verification_description,
             verification_delay_ms=verification_delay_ms,
         )
@@ -332,7 +443,7 @@ class Agent(Generic[_StructuredOutput]):
             else None
         )
 
-        result = await self._browser_environment()._run_extension_action(
+        result = await browser_environment._run_extension_action(
             request,
             response_model,
             timeout=timeout,
@@ -423,6 +534,19 @@ class Agent(Generic[_StructuredOutput]):
             GoToUrlRequest(url=url, new_tab=new_tab), timeout=timeout
         )
 
+    async def serve_html(
+        self, *, file: UploadedFileVariable, timeout: int | None = None
+    ) -> None:
+        """Display a self-contained HTML file for Operator to inspect and interact with.
+
+        Pass an uploaded workflow file value. The file opens in a new active Chrome tab.
+        """
+        environment = self._browser_environment()
+        await environment._run_extension_action(
+            ServeHtmlRequest(file=file),
+            timeout=timeout if timeout is not None else 60,
+        )
+
     async def close_tab(self, *, timeout: int | None = None) -> None:
         """Closes the active browser tab."""
         environment = self._browser_environment()
@@ -440,6 +564,9 @@ class Agent(Generic[_StructuredOutput]):
         timeout: int,
     ) -> bool:
         """Waits for an element matching the given selectors to reach the specified state.
+
+        Text selectors work alone or with tag/attribute constraints, as in agentic_selector.
+        Explicit empty or whitespace-only text_content raises ValueError before dispatch.
 
         Returns True if the element was found, False if no selector matched before timeout.
         """

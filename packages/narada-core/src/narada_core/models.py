@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated, Any, Generic, Literal, NotRequired, TypedDict, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    Generic,
+    Literal,
+    NotRequired,
+    Self,
+    TypedDict,
+    TypeVar,
+)
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from narada_core.actions.models import HitlInputMetadata
+from narada_core.actions.models import HitlInputMetadata, UploadedFileVariable
 
 
 class AgentKind(Enum):
@@ -37,6 +46,41 @@ class ReasoningEffort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
+
+
+class AgentSpeed(StrEnum):
+    """Controls the processing tier used for built-in Narada agent responses."""
+
+    STANDARD = "standard"
+    FAST = "fast"
+    ULTRAFAST = "ultrafast"
+
+
+class Guardrails(BaseModel):
+    """URL allowlist or blocklist configuration for an agent invocation."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        revalidate_instances="always",
+    )
+
+    url_allowlist: list[str] = Field(default_factory=list, alias="urlAllowlist")
+    url_blocklist: list[str] = Field(default_factory=list, alias="urlBlocklist")
+
+    @model_validator(mode="after")
+    def _validate_mutually_exclusive(self) -> Self:
+        if self.url_allowlist and self.url_blocklist:
+            raise ValueError(
+                "url_allowlist and url_blocklist cannot both be specified; "
+                "provide at most one."
+            )
+        return self
+
+
+def _guardrails_to_wire(guardrails: Guardrails) -> dict[str, list[str]]:
+    return Guardrails.model_validate(guardrails).model_dump(mode="json", by_alias=True)
 
 
 class UserResourceCredentials(TypedDict, total=False):
@@ -150,6 +194,11 @@ class OperatorActionTraceItem(TypedDict):
 class GoToUrlTrace(TypedDict):
     step_type: Literal["goToUrl"]
     url: str
+    description: str
+
+
+class ServeHtmlTrace(TypedDict):
+    step_type: Literal["serveHtml"]
     description: str
 
 
@@ -421,6 +470,7 @@ class PythonAgentRunTrace(TypedDict):
 
 ApaStepTrace = (
     GoToUrlTrace
+    | ServeHtmlTrace
     | GetUrlTrace
     | PrintTrace
     | AgentTrace
@@ -529,6 +579,9 @@ class InMemoryFileVariable(TypedDict):
     filename: str
     mimeType: str
     base64: str
+
+
+type FileVariable = UploadedFileVariable | InMemoryFileVariable
 
 
 class File(TypedDict):

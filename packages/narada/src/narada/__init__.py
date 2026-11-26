@@ -2,6 +2,7 @@ from narada_core.actions.models import (
     CriticResult,
     HitlInputMetadata,
     PressKeyEventItem,
+    UploadedFileVariable,
 )
 from narada_core.errors import (
     NaradaError,
@@ -14,13 +15,16 @@ from narada_core.errors import (
 )
 from narada_core.models import (
     AgentKind,
+    AgentSpeed,
     BedrockConnectionConfig,
     BedrockCredentials,
     CriticConfig,
     ExternalVectorStore,
     File,
+    FileVariable,
     GoogleDriveAuth,
     GoogleDriveFile,
+    Guardrails,
     InMemoryFileVariable,
     ManagedVectorStore,
     ReasoningEffort,
@@ -42,6 +46,7 @@ from narada.environment import (
     SessionDownloadItem,
 )
 from narada.google_drive import GoogleDriveClient
+from narada.responses import AgentResponse, OperatorMemoryOutcome
 from narada.utils import download_file, render_html
 from narada.version import __version__
 
@@ -50,6 +55,8 @@ __all__ = [
     "HitlInputMetadata",
     "Agent",
     "AgentKind",
+    "AgentResponse",
+    "AgentSpeed",
     "BedrockConnectionConfig",
     "BedrockCredentials",
     "BaseBrowserEnvironment",
@@ -64,9 +71,11 @@ __all__ = [
     "Environment",
     "ExternalVectorStore",
     "File",
+    "FileVariable",
     "GoogleDriveAuth",
     "GoogleDriveClient",
     "GoogleDriveFile",
+    "Guardrails",
     "InMemoryFileVariable",
     "LambdaEnvironment",
     "LOG_FORMAT",
@@ -77,6 +86,7 @@ __all__ = [
     "NaradaInitializationError",
     "NaradaTimeoutError",
     "NaradaUnsupportedBrowserError",
+    "OperatorMemoryOutcome",
     "PressKeyEventItem",
     "ProxyConfig",
     "ReasoningEffort",
@@ -85,5 +95,6 @@ __all__ = [
     "Response",
     "ResponseContent",
     "SessionDownloadItem",
+    "UploadedFileVariable",
     "UserAbortedError",
 ]
