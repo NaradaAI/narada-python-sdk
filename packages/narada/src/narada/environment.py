@@ -998,7 +998,7 @@ class Environment(ABC):
         if require_execution_trace:
             body["requireExecutionTrace"] = True
         if operator_memory_key is not None:
-            body["memoryId"] = operator_memory_key
+            body["operatorMemoryKey"] = operator_memory_key
             body["requireExecutionTrace"] = True
         execution_trace_context = _load_execution_trace_context_from_env()
         if execution_trace_context is not None:
