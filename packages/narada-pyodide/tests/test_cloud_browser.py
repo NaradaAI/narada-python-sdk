@@ -18,6 +18,7 @@ from narada_core.actions.models import (
 )
 from narada_core.models import AgentKind, AgentSpeed, ReasoningEffort
 from packaging.version import InvalidVersion
+from pydantic import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PYODIDE_SRC = PROJECT_ROOT / "packages" / "narada-pyodide" / "src"
@@ -2100,13 +2101,8 @@ async def test_blank_text_selector_is_rejected_before_dispatch(
     [
         ("builtin", None),
         ("gui", {}),
-        (
-            "builtin",
-            {
-                "url_allowlist": ["*.example.com/*"],
-                "url_blocklist": ["blocked.example"],
-            },
-        ),
+        ("builtin", {"url_allowlist": ["*.example.com/*"]}),
+        ("builtin", {"url_blocklist": ["blocked.example"]}),
     ],
 )
 async def test_agent_run_guardrails_serialization(
@@ -2154,3 +2150,23 @@ async def test_agent_run_guardrails_serialization(
 
     await agent.run("next invocation")
     assert "guardrails" not in json.loads(pyfetch.await_args_list[2].kwargs["body"])
+
+
+@pytest.mark.asyncio
+async def test_pyodide_agent_run_rejects_mutated_guardrails_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyfetch = AsyncMock()
+    narada_pkg, _ = _import_pyodide_narada(monkeypatch, pyfetch=pyfetch)
+    env = narada_pkg.RemoteBrowserEnvironment(
+        browser_window_id="window-1", api_key="test-key"
+    )
+    ensure_initialized = AsyncMock()
+    monkeypatch.setattr(env, "_ensure_initialized", ensure_initialized)
+    guardrails = narada_pkg.Guardrails(url_allowlist=["*.example.com/*"])
+    guardrails.url_blocklist.append("blocked.example")
+
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        await narada_pkg.Agent(environment=env).run("task", guardrails=guardrails)
+    ensure_initialized.assert_not_awaited()
+    pyfetch.assert_not_awaited()

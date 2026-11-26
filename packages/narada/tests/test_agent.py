@@ -19,6 +19,7 @@ from narada import (
 )
 from narada.environment import BaseBrowserEnvironment
 from narada_core.actions.models import CloseTabRequest, CloseTabResponse
+from pydantic import ValidationError
 
 
 class _FakeResponse:
@@ -367,6 +368,11 @@ async def test_submission_identity_hook_finishes_before_any_poll(monkeypatch):
             AgentKind.OPERATOR,
             Guardrails(
                 url_allowlist=["https://Example.com/Path?x=1", "*.example.org/*"],
+            ),
+        ),
+        (
+            AgentKind.OPERATOR,
+            Guardrails(
                 url_blocklist=["blocked.example"],
             ),
         ),
@@ -394,6 +400,39 @@ async def test_agent_run_guardrails_wire_format_and_invocation_isolation(
             "urlBlocklist": guardrails.url_blocklist,
         }
     assert "guardrails" not in second
+
+
+def test_guardrails_rejects_both_allowlist_and_blocklist() -> None:
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        Guardrails(
+            url_allowlist=["https://example.com/*"],
+            url_blocklist=["https://example.com/private/*"],
+        )
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        Guardrails.model_validate(
+            {
+                "urlAllowlist": ["https://example.com/*"],
+                "urlBlocklist": ["https://example.com/private/*"],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_run_rejects_mutated_guardrails_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import narada.environment as environment_module
+
+    session = _RemoteDispatchFakeClientSession()
+    monkeypatch.setattr(environment_module.aiohttp, "ClientSession", lambda: session)
+    env = _CountingEnvironment()
+    guardrails = Guardrails(url_allowlist=["https://example.com/*"])
+    guardrails.url_blocklist.append("https://example.com/private/*")
+
+    with pytest.raises(ValidationError, match="cannot both be specified"):
+        await Agent(environment=env).run("task", guardrails=guardrails)
+    assert env.initialize_count == 0
+    assert session.dispatched_bodies == []
 
 
 @pytest.mark.asyncio
